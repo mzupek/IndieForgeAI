@@ -1,0 +1,95 @@
+# Indie Forge AI
+
+Personal **studio brain** for a one-person indie studio: plan scenes and assets, craft pixel silhouettes, define motion mechanically, and hand off to **Aseprite** / **Godot** / **Unity** with Cursor agent kits.
+
+Indie Forge does **not** try to replace Aseprite, Godot, or Unity — or ship final neon art from OpenAI.
+
+## Exemplars
+
+| Project | Engine | Craft path |
+|---------|--------|------------|
+| **Ring'Em Up** | Godot | Pixel: silhouette → motion → pose sheet → Aseprite skin |
+| **Neon Recall** | Unity | Materials / VFX / levels (plan here, build in Unity) |
+
+## What Indie Forge owns
+
+- Project profile: `engine` + `craftPath`
+- Scenes, slots, contracts
+- **Craft Studio** (pixel silhouette / paint / guide photo)
+- **Motion Studio** (rig, key poses, Motion Blueprint JSON — no art)
+- **Animation Studio** (Craft guide + Motion Blueprint skeleton frames → Aseprite)
+- **Production** recipes + copyable Cursor prompts
+- **Studio Kit** export (`docs/`, `.cursor/rules/`, MCP + package recommendations)
+
+## What stays outside
+
+- Costume / final pixel animation → **Aseprite**
+- Materials, bloom, VFX Graph → Unity
+- Sprite2D / scene tree → Godot
+- MCP servers → install in the **game repo** Cursor, not inside this Electron app
+
+## Stack
+
+- Electron + electron-vite
+- React + TypeScript
+- Zustand
+- Local JSON projects
+- OpenAI optional (planning — not inventing swing frames)
+- Sharp for pose export
+
+## Setup
+
+```bash
+npm install
+cp .env.example .env
+# Optional: OPENAI_API_KEY for AI Plan
+npm run dev
+```
+
+## Workflow
+
+1. **New Project** — pick Ring'Em Up (Godot) or Neon Recall (Unity) template, or blank + engine.
+2. **Production** — follow the recipe; export Studio Kit into your engine repo.
+3. **Ring'Em Up** — Assets → Craft Studio (guide) → **Motion Studio** (keys) → **Animation Studio** (export guide + skeleton frames) → **Aseprite** (paint) → Godot nearest import.
+4. **Neon Recall** — Production Cursor prompts → Unity materials / bloom / VFX.
+
+### Motion Studio (pixel path)
+
+Human owns mechanics: joints, foot contacts, bat arc, constraints. AI never invents poses here.
+
+### Animation Studio thesis (base sprite + motion guide)
+
+**No mannequin.** Craft makes the character. Motion Blueprint is the motion guide. Aseprite applies the guide to the base.
+
+```
+Craft
+  → guide photo → silhouette / paint  (= BASE sprite)
+Motion Studio
+  → key the thin skeleton
+Animation Studio
+  → scrub + approve → export:
+        *_01_BASE_SPRITE.png             ← Craft character from guide
+        frames/*_motion_XX.png           ← skeleton motion guide (~11 frames)
+        frames/*_motion_overlay_XX.png   ← onion-skin over the base
+  → Aseprite: reshape BASE to each skeleton pose → engine
+```
+
+| Layer | Owns |
+|-------|------|
+| Craft | Guide → BASE sprite (character) |
+| Director | Motion Blueprint keys |
+| Skeleton frames | Motion guide only |
+| Aseprite | Apply motion guide to BASE; final pixels |
+| Mannequin | Not used |
+
+Schema: `resolveProductionGate`, `poseSheetExportService.ts`, `skeletonFrameSvg.ts`.
+
+## Project data
+
+`~/Library/Application Support/indie-forge-ai/projects/` (macOS)
+
+Opening Batter swing in Motion Studio creates a starter RH batter Motion Blueprint if missing.
+
+### Motion diagnostics
+
+Motion and Animation studios can **Copy diagnostic JSON** or **Export diagnostic file** under the asset’s `generated/.../diagnostics/` folder.
