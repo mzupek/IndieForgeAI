@@ -1,0 +1,42 @@
+{
+  "id": "seed-neon-recall",
+  "name": "Neon Recall",
+  "description": "80s neon memory / match game with glowing tile grids, bloom, and synthwave UI. Final look lives in Unity materials and post-processing — IndieForge plans levels, effects, and Cursor handoff.",
+  "targetPlatform": "Mobile portrait (1080x1920)",
+  "engine": "unity",
+  "craftPath": "engine_materials",
+  "styleGuide": {
+    "artStyle": "80s neon synthwave, glowing rounded frames, bloom-heavy UI plaque over tile grid",
+    "perspective": "ui_only",
+    "colorPalette": "Hot magenta, cyan, lime, deep navy void",
+    "designSpriteWidth": 512,
+    "designSpriteHeight": 512,
+    "defaultSpriteWidth": 256,
+    "defaultSpriteHeight": 256,
+    "defaultBackgroundWidth": 1080,
+    "defaultBackgroundHeight": 1920,
+    "notes": "Do not bake bloom into textures. Use URP bloom volume + emission materials. Tile recipe: base mask → shadow → neon edge → shared bloom."
+  },
+  "scenes": [
+    { "id": "scene-splash", "name": "Splash / Title", "description": "NEON RECALL logo plaque over neon tile grid.", "assetIds": [], "status": "planned" },
+    { "id": "scene-main-menu", "name": "Main Menu", "description": "Menu navigation with neon buttons.", "assetIds": [], "status": "planned" },
+    { "id": "scene-grid-play", "name": "Grid Play", "description": "Primary match grid gameplay.", "assetIds": [], "status": "planned" },
+    { "id": "scene-level-select", "name": "Level Select", "description": "Level picker with progress.", "assetIds": [], "status": "planned" },
+    { "id": "scene-results", "name": "Results", "description": "End-of-level results.", "assetIds": [], "status": "planned" }
+  ],
+  "assets": [
+    { "id": "asset-tile-idle", "projectId": "seed-neon-recall", "sceneIds": ["scene-grid-play", "scene-splash"], "name": "Neon tile idle", "type": "prop", "description": "Rounded neon frame tile — material instance.", "prompt": "", "status": "planned", "medium": "engine_material", "craftStage": "planned", "craftTool": "unity", "engineNotes": "URP material: base mask + emission color property" },
+    { "id": "asset-tile-selected", "projectId": "seed-neon-recall", "sceneIds": ["scene-grid-play"], "name": "Neon tile selected", "type": "prop", "description": "Selected/highlight tile state.", "prompt": "", "status": "planned", "medium": "engine_material", "craftStage": "planned", "craftTool": "unity" },
+    { "id": "asset-tile-matched", "projectId": "seed-neon-recall", "sceneIds": ["scene-grid-play"], "name": "Neon tile matched", "type": "prop", "description": "Matched clear/pulse state.", "prompt": "", "status": "planned", "medium": "engine_material", "craftStage": "planned", "craftTool": "unity" },
+    { "id": "asset-tile-shadow", "projectId": "seed-neon-recall", "sceneIds": ["scene-grid-play"], "name": "Tile contact shadow", "type": "effect", "description": "Soft contact shadow under tile.", "prompt": "", "status": "planned", "medium": "engine_material", "craftStage": "planned", "craftTool": "unity", "engineNotes": "Layer under neon edge; not baked bloom" },
+    { "id": "asset-bloom-profile", "projectId": "seed-neon-recall", "sceneIds": ["scene-splash", "scene-grid-play"], "name": "URP bloom profile", "type": "effect", "description": "Shared bloom/post volume settings.", "prompt": "", "status": "planned", "medium": "doc_only", "craftStage": "planned", "craftTool": "unity", "engineNotes": "Volume profile asset — document thresholds" },
+    { "id": "asset-logo-plaque", "projectId": "seed-neon-recall", "sceneIds": ["scene-splash"], "name": "Title logo plaque", "type": "ui_icon", "description": "NEON RECALL plaque with dual neon border.", "prompt": "", "status": "planned", "medium": "engine_material", "craftStage": "planned", "craftTool": "unity" },
+    { "id": "asset-spark-vfx", "projectId": "seed-neon-recall", "sceneIds": ["scene-grid-play"], "name": "Match spark VFX", "type": "effect", "description": "Additive spark/glow particle stamp.", "prompt": "", "status": "planned", "medium": "vfx_graph", "craftStage": "planned", "craftTool": "unity" },
+    { "id": "asset-menu-btn", "projectId": "seed-neon-recall", "sceneIds": ["scene-main-menu"], "name": "Neon menu button", "type": "ui_icon", "description": "Menu button material/UI.", "prompt": "", "status": "planned", "medium": "engine_material", "craftStage": "planned", "craftTool": "unity" },
+    { "id": "audio-select", "projectId": "seed-neon-recall", "sceneIds": ["scene-grid-play"], "name": "Tile select blip", "type": "sound_effect", "description": "UI select SFX.", "prompt": "", "status": "planned", "medium": "audio", "craftStage": "planned", "craftTool": "audio" },
+    { "id": "audio-match", "projectId": "seed-neon-recall", "sceneIds": ["scene-grid-play"], "name": "Match sting", "type": "sound_effect", "description": "Match success sting.", "prompt": "", "status": "planned", "medium": "audio", "craftStage": "planned", "craftTool": "audio" },
+    { "id": "audio-menu-music", "projectId": "seed-neon-recall", "sceneIds": ["scene-main-menu", "scene-splash"], "name": "Synthwave menu loop", "type": "music", "description": "Menu music.", "prompt": "", "status": "planned", "medium": "audio", "craftStage": "planned", "craftTool": "audio" }
+  ],
+  "createdAt": "2026-07-27T00:00:00.000Z",
+  "updatedAt": "2026-07-27T00:00:00.000Z"
+}

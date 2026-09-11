@@ -1,0 +1,42 @@
+{
+  "id": "seed-ring-em-up",
+  "name": "Ring'Em Up",
+  "description": "A retro arcade baseball umpire simulation where the player judges pitches and makes calls such as strike, ball, walk, hit, out, strikeout, and ejection.",
+  "targetPlatform": "Mobile portrait (1080x1920)",
+  "engine": "godot",
+  "craftPath": "pixel_silhouette",
+  "styleGuide": {
+    "artStyle": "Retro arcade pixel art, clean readable baseball visuals, fun exaggerated animations",
+    "perspective": "side_view",
+    "colorPalette": "Navy, white, grass green, dirt tan, umpire black",
+    "designSpriteWidth": 1024,
+    "designSpriteHeight": 1024,
+    "defaultSpriteWidth": 128,
+    "defaultSpriteHeight": 128,
+    "defaultBackgroundWidth": 1080,
+    "defaultBackgroundHeight": 1920,
+    "notes": "Craft at 1024 design resolution; export/in-engine sprites default to 128 (Godot nearest). Scale down at export if a scene needs smaller."
+  },
+  "scenes": [
+    { "id": "scene-main-menu", "name": "Main Menu", "description": "Title screen and menu navigation.", "assetIds": [], "status": "planned" },
+    { "id": "scene-at-bat", "name": "At Bat", "description": "Primary gameplay view with pitcher, batter, catcher, and strike zone.", "assetIds": [], "status": "planned" },
+    { "id": "scene-strike-call", "name": "Strike Call", "description": "Umpire strike call overlay animation.", "assetIds": [], "status": "planned" },
+    { "id": "scene-ball-call", "name": "Ball Call", "description": "Umpire ball call overlay animation.", "assetIds": [], "status": "planned" },
+    { "id": "scene-hit", "name": "Hit", "description": "Hit result and ball in play.", "assetIds": [], "status": "planned" },
+    { "id": "scene-out", "name": "Out", "description": "Out call and fielding result.", "assetIds": [], "status": "planned" },
+    { "id": "scene-scoreboard", "name": "Scoreboard", "description": "In-game scoreboard UI.", "assetIds": [], "status": "planned" }
+  ],
+  "assets": [
+    { "id": "asset-umpire-idle", "projectId": "seed-ring-em-up", "sceneIds": ["scene-at-bat"], "name": "Umpire idle", "type": "sprite", "description": "Home plate umpire crouched idle.", "prompt": "", "status": "planned", "medium": "pixel_sprite", "craftStage": "planned", "craftTool": "craft_studio", "engineNotes": "Godot Sprite2D, nearest filter, bottom_center pivot" },
+    { "id": "asset-batter-idle", "projectId": "seed-ring-em-up", "sceneIds": ["scene-at-bat"], "name": "Batter idle", "type": "sprite", "description": "Batter in box ready stance.", "prompt": "", "status": "planned", "medium": "pixel_sprite", "craftStage": "planned", "craftTool": "craft_studio", "engineNotes": "Godot Sprite2D" },
+    { "id": "asset-pitcher-windup", "projectId": "seed-ring-em-up", "sceneIds": ["scene-at-bat"], "name": "Pitcher windup", "type": "animation", "description": "Pitcher windup and delivery.", "prompt": "", "status": "planned", "medium": "sprite_sheet", "craftStage": "planned", "craftTool": "craft_studio", "engineNotes": "Godot AnimatedSprite2D / SpriteFrames" },
+    { "id": "asset-batter-swing", "projectId": "seed-ring-em-up", "sceneIds": ["scene-at-bat", "scene-hit"], "name": "Batter swing", "type": "animation", "description": "Batter swing animation. Author mechanics in Motion Studio (Idle→Load→Stride→Contact→Follow-through), then Preview Pose / AI Paint in Animation Studio.", "prompt": "", "status": "planned", "medium": "sprite_sheet", "craftStage": "planned", "craftTool": "craft_studio", "engineNotes": "Motion Blueprint source of truth; pixels replaceable" },
+    { "id": "asset-umpire-strike", "projectId": "seed-ring-em-up", "sceneIds": ["scene-strike-call"], "name": "Umpire strike call", "type": "animation", "description": "Strike call punch-out.", "prompt": "", "status": "planned", "medium": "sprite_sheet", "craftStage": "planned", "craftTool": "craft_studio" },
+    { "id": "asset-baseball-spin", "projectId": "seed-ring-em-up", "sceneIds": ["scene-at-bat", "scene-hit"], "name": "Baseball spin", "type": "animation", "description": "Ball rotation frames for pitch and hit.", "prompt": "", "status": "planned", "medium": "sprite_sheet", "craftStage": "planned", "craftTool": "craft_studio", "engineNotes": "Centered pivot; discrete angle frames" },
+    { "id": "asset-field-bg", "projectId": "seed-ring-em-up", "sceneIds": ["scene-at-bat"], "name": "Field background", "type": "background", "description": "Main field view.", "prompt": "", "status": "planned", "medium": "pixel_sprite", "craftStage": "planned", "craftTool": "aseprite" },
+    { "id": "audio-strike", "projectId": "seed-ring-em-up", "sceneIds": ["scene-strike-call"], "name": "Umpire Strike!", "type": "voice_line", "description": "Strike call VO.", "prompt": "", "status": "planned", "medium": "audio", "craftStage": "planned", "craftTool": "audio" },
+    { "id": "audio-bat-crack", "projectId": "seed-ring-em-up", "sceneIds": ["scene-hit"], "name": "Bat crack", "type": "sound_effect", "description": "Bat contact.", "prompt": "", "status": "planned", "medium": "audio", "craftStage": "planned", "craftTool": "audio" }
+  ],
+  "createdAt": "2026-07-01T00:00:00.000Z",
+  "updatedAt": "2026-07-27T00:00:00.000Z"
+}
