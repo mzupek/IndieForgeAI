@@ -13,6 +13,7 @@ import {
   getProjectFilePath,
   getProjectsRoot
 } from './filePaths'
+import { ensureStudioGames } from './pipelineMigration'
 
 async function ensureProjectsRoot(): Promise<void> {
   await mkdir(getProjectsRoot(), { recursive: true })
@@ -60,8 +61,11 @@ export async function listProjects(): Promise<ProjectSummary[]> {
 export async function loadProject(projectId: string): Promise<IndieForgeProject> {
   const filePath = getProjectFilePath(projectId)
   const raw = await readFile(filePath, 'utf-8')
-  const project = JSON.parse(raw) as IndieForgeProject
-  return normalizeProject(project)
+  let project = JSON.parse(raw) as IndieForgeProject
+  project = normalizeProject(project)
+  // Auto-migrate: ensure studio games exist
+  project = await ensureStudioGames(project)
+  return project
 }
 
 export async function saveProject(project: IndieForgeProject): Promise<IndieForgeProject> {
