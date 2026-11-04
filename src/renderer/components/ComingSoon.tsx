@@ -50,10 +50,6 @@ export function ComingSoon({ section, phase }: { section: string; phase: string 
   )
 }
 
-export function PosesPlaceholder() {
-  return <ComingSoon section="Poses" phase="Phase 2" />
-}
-
 export function ClipsPlaceholder() {
   return <ComingSoon section="Clips" phase="Phase 3" />
 }

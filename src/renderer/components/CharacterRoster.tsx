@@ -1,15 +1,27 @@
 import { useEffect, useState, useRef } from 'react'
-import { useOutletContext } from 'react-router-dom'
+import { useOutletContext, useNavigate } from 'react-router-dom'
 import { useProjectStore } from '../state/indieForgeStore'
 import { useLocalFilePreview } from '../hooks/useLocalFilePreview'
-import type { Character } from '@shared/types/assetPipeline'
+import type { Character, Pose } from '@shared/types/assetPipeline'
+import type { PoseMetadata } from '@shared/poseValidation'
+import { PoseSlotStrip } from './PoseSlotStrip'
 
 const POSE_SLOTS = ['ready', 'success', 'hurt', 'win', 'defeat'] as const
 
-function CharacterCard({ character, onEdit, onDelete }: {
+function CharacterCard({
+  character,
+  poses,
+  poseMetadata,
+  onEdit,
+  onDelete,
+  onManagePoses
+}: {
   character: Character
+  poses: Pose[]
+  poseMetadata?: Record<string, PoseMetadata>
   onEdit: () => void
   onDelete: () => void
+  onManagePoses: () => void
 }) {
   const thumbnail = useLocalFilePreview(character.thumbnail)
 
@@ -82,35 +94,23 @@ function CharacterCard({ character, onEdit, onDelete }: {
 
       <div style={{ marginBottom: '0.75rem' }}>
         <p style={{ fontSize: '0.85rem', color: 'var(--muted)', marginBottom: '0.5rem' }}>
-          Five-Pose Set (Phase 2):
+          Five-Pose Set:
         </p>
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
-          {POSE_SLOTS.map((slot) => (
-            <div
-              key={slot}
-              style={{
-                width: '48px',
-                height: '48px',
-                border: '1px dashed var(--border)',
-                borderRadius: '4px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: '0.7rem',
-                color: 'var(--muted)',
-                textAlign: 'center',
-                lineHeight: '1.1'
-              }}
-              title={slot}
-            >
-              {slot.slice(0, 3)}
-            </div>
-          ))}
-        </div>
+        <PoseSlotStrip
+          character={character}
+          poses={poses}
+          poseMetadata={poseMetadata}
+          size="small"
+          showBadge={true}
+          onSlotClick={onManagePoses}
+        />
       </div>
 
       <div style={{ display: 'flex', gap: '0.5rem' }}>
-        <button type="button" className="secondary" onClick={onEdit} style={{ flex: 1 }}>
+        <button type="button" onClick={onManagePoses} style={{ flex: 1 }}>
+          Manage Poses
+        </button>
+        <button type="button" className="secondary" onClick={onEdit}>
           Edit
         </button>
         <button
@@ -360,10 +360,35 @@ function CharacterEditDialog({
 }
 
 export function CharacterRoster() {
+  const navigate = useNavigate()
   const { projectId, gameId } = useOutletContext<{ projectId: string; gameId: string }>()
   const { activeProject, setActiveProject } = useProjectStore()
   const [editingCharacter, setEditingCharacter] = useState<Character | undefined>()
   const [showCreateDialog, setShowCreateDialog] = useState(false)
+  const [poseMetadataCache, setPoseMetadataCache] = useState<Record<string, Record<string, PoseMetadata>>>({})
+
+  useEffect(() => {
+    // Load pose metadata for all characters
+    const loadMetadata = async () => {
+      if (!activeProject?.assetPipeline) return
+      
+      const characters = activeProject.assetPipeline.characters.filter((c) => c.gameId === gameId)
+      const cache: Record<string, Record<string, PoseMetadata>> = {}
+      
+      for (const char of characters) {
+        try {
+          const metadata = await window.indieForge.pipeline.getPoseMetadata(projectId!, char.id)
+          cache[char.id] = metadata
+        } catch (err) {
+          console.error(`Failed to load metadata for ${char.id}:`, err)
+        }
+      }
+      
+      setPoseMetadataCache(cache)
+    }
+    
+    loadMetadata()
+  }, [activeProject, projectId, gameId])
 
   if (!activeProject || !gameId) {
     return <p style={{ color: 'var(--muted)' }}>Loading...</p>
@@ -371,6 +396,7 @@ export function CharacterRoster() {
 
   const game = activeProject.assetPipeline?.games.find((g) => g.id === gameId)
   const characters = activeProject.assetPipeline?.characters.filter((c) => c.gameId === gameId) ?? []
+  const poses = activeProject.assetPipeline?.poses ?? []
 
   if (!game) {
     return <p style={{ color: 'var(--error)' }}>Game not found</p>
@@ -420,13 +446,16 @@ export function CharacterRoster() {
             </p>
           </div>
         ) : (
-          <div style={{ display: 'grid', gap: '1rem', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))' }}>
+          <div style={{ display: 'grid', gap: '1rem', gridTemplateColumns: 'repeat(auto-fill, minmax(400px, 1fr))' }}>
             {characters.map((character) => (
               <CharacterCard
                 key={character.id}
                 character={character}
+                poses={poses}
+                poseMetadata={poseMetadataCache[character.id]}
                 onEdit={() => setEditingCharacter(character)}
                 onDelete={() => handleDelete(character)}
+                onManagePoses={() => navigate(`/studio/poses/${gameId}?character=${character.id}`)}
               />
             ))}
           </div>

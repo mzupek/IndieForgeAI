@@ -60,6 +60,12 @@ import {
   setCharacterReference
 } from '../storage/characterService'
 import {
+  importPose,
+  removePose,
+  updatePose,
+  getPoseMetadataMap
+} from '../storage/poseService'
+import {
   applyDesignerAssetPrompt,
   applyDesignerStyleGuide,
   clearDesignerChat,
@@ -580,6 +586,46 @@ export function registerIpcHandlers(): void {
     IPC_CHANNELS.PIPELINE_CHARACTER_SET_REFERENCE,
     async (_e, projectId: string, characterId: string, sourcePath: string) =>
       setCharacterReference(projectId, characterId, sourcePath)
+  )
+
+  // Pose handlers
+  ipcMain.handle(
+    IPC_CHANNELS.PIPELINE_POSE_IMPORT,
+    async (
+      _e,
+      projectId: string,
+      characterId: string,
+      slot: string,
+      sourcePath: string,
+      options?: any
+    ) => importPose(projectId, characterId, slot as any, sourcePath, options)
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.PIPELINE_POSE_REMOVE,
+    async (_e, projectId: string, poseId: string) => {
+      await removePose(projectId, poseId)
+      return { ok: true as const }
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.PIPELINE_POSE_UPDATE,
+    async (_e, projectId: string, poseId: string, patch: any) =>
+      updatePose(projectId, poseId, patch)
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.PIPELINE_POSE_GET_METADATA,
+    async (_e, projectId: string, characterId: string) => {
+      const metadataMap = await getPoseMetadataMap(projectId, characterId)
+      // Convert Map to object for IPC
+      const obj: Record<string, any> = {}
+      metadataMap.forEach((value, key) => {
+        obj[key] = value
+      })
+      return obj
+    }
   )
 }
 

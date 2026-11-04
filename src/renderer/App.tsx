@@ -4,8 +4,8 @@ import { ForgeBackdrop } from './components/ForgeBackdrop'
 import { AppBrandHeader } from './components/AppBrandHeader'
 import { StudioHome } from './components/StudioHome'
 import { CharacterRoster } from './components/CharacterRoster'
+import { PosesView } from './components/PosesView'
 import {
-  PosesPlaceholder,
   ClipsPlaceholder,
   ScenePresetsPlaceholder,
   LibraryPlaceholder,
@@ -18,7 +18,7 @@ function StudioLayout({ children }: { children: React.ReactNode }) {
 
   const nav = [
     { path: '/studio/characters', label: 'Characters', phase: 1 },
-    { path: '/studio/poses', label: 'Poses', phase: 2 },
+    { path: '/studio/poses', label: 'Poses', phase: 2, live: true },
     { path: '/studio/clips', label: 'Clips', phase: 3 },
     { path: '/studio/presets', label: 'Scene & Camera Presets', phase: 4 },
     { path: '/studio/library', label: 'Library', phase: 5 },
@@ -41,7 +41,7 @@ function StudioLayout({ children }: { children: React.ReactNode }) {
               }}
             >
               <span>{item.label}</span>
-              {item.phase > 1 && (
+              {item.phase > 1 && !('live' in item && item.live) && (
                 <span
                   style={{
                     fontSize: '0.7rem',
@@ -94,7 +94,8 @@ function AppRoutes() {
           <Route index element={<Navigate to="/studio/characters" replace />} />
           <Route path="characters" element={<Navigate to="/studio/characters/game-neon-recall" replace />} />
           <Route path="characters/:gameId" element={<CharacterRoster />} />
-          <Route path="poses" element={<PosesPlaceholder />} />
+          <Route path="poses" element={<Navigate to="/studio/poses/game-neon-recall" replace />} />
+          <Route path="poses/:gameId" element={<PosesView />} />
           <Route path="clips" element={<ClipsPlaceholder />} />
           <Route path="presets" element={<ScenePresetsPlaceholder />} />
           <Route path="library" element={<LibraryPlaceholder />} />
