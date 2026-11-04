@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useOutletContext } from 'react-router-dom'
 import { useProjectStore } from '../state/indieForgeStore'
 import { useLocalFilePreview } from '../hooks/useLocalFilePreview'
 import type { Character } from '@shared/types/assetPipeline'
@@ -360,16 +360,10 @@ function CharacterEditDialog({
 }
 
 export function CharacterRoster() {
-  const { projectId, gameId } = useParams()
-  const { activeProject, openProject, setActiveProject } = useProjectStore()
+  const { projectId, gameId } = useOutletContext<{ projectId: string; gameId: string }>()
+  const { activeProject, setActiveProject } = useProjectStore()
   const [editingCharacter, setEditingCharacter] = useState<Character | undefined>()
   const [showCreateDialog, setShowCreateDialog] = useState(false)
-
-  useEffect(() => {
-    if (projectId && (!activeProject || activeProject.id !== projectId)) {
-      openProject(projectId)
-    }
-  }, [projectId, activeProject, openProject])
 
   if (!activeProject || !gameId) {
     return <p style={{ color: 'var(--muted)' }}>Loading...</p>
@@ -407,12 +401,9 @@ export function CharacterRoster() {
     <div>
       <div className="page-header">
         <div>
-          <p className="scene-composer-breadcrumb">
-            <Link to={`/projects/${projectId}/pipeline`}>Pipeline</Link> / {game.name}
-          </p>
-          <h2>Character Roster</h2>
+          <h2>Characters</h2>
           <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>
-            {game.engine} • {characters.length} character{characters.length !== 1 ? 's' : ''}
+            {game.name} • {game.engine} • {characters.length} character{characters.length !== 1 ? 's' : ''}
           </p>
         </div>
         <button type="button" onClick={() => setShowCreateDialog(true)}>
