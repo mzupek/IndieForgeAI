@@ -284,6 +284,78 @@ export interface IndieForgeProject {
   assets: GameAsset[]
   createdAt: string
   updatedAt: string
+  /** Phase 0: New asset pipeline data (when migrated) */
+  assetPipeline?: {
+    schemaVersion: 1
+    games: Array<{
+      id: string
+      name: string
+      engine: 'unity' | 'godot'
+      exportRoot: string
+      createdAt: string
+      updatedAt: string
+    }>
+    characters: Array<{
+      id: string
+      gameId: string
+      name: string
+      role: string
+      styleNotes?: string
+      referenceImage?: string
+      referenceSheet?: {
+        palette?: string
+        outlineStyle?: string
+        facing?: string
+        canvasSize?: { width: number; height: number }
+      }
+      tags: string[]
+      thumbnail?: string
+      createdAt: string
+      updatedAt: string
+    }>
+    poses: Array<{
+      id: string
+      characterId: string
+      slot: 'ready' | 'success' | 'hurt' | 'win' | 'defeat'
+      file: string
+      status: 'draft' | 'polished' | 'approved'
+      source?: 'import' | 'ai'
+      createdAt: string
+      updatedAt: string
+    }>
+    clips: Array<{
+      id: string
+      characterId?: string
+      moment: 'intro' | 'hit' | 'finisher' | 'defeat' | 'story_beat'
+      file: string
+      durationSec: number
+      tags: string[]
+      thumbnail?: string
+      createdAt: string
+      updatedAt: string
+    }>
+    scenePresets: Array<{
+      id: string
+      type: 'versus' | 'zoom_punch' | 'shake' | 'flash' | 'freeze'
+      params: Record<string, unknown>
+      tags: string[]
+      thumbnail?: string
+      createdAt: string
+      updatedAt: string
+    }>
+    exportProfiles: Array<{
+      id: string
+      gameId: string
+      rootPath: string
+      namingRules: {
+        characterFormat?: string
+        poseFormat?: string
+        clipFormat?: string
+      }
+      createdAt: string
+      updatedAt: string
+    }>
+  }
 }
 
 export interface ProjectSummary {

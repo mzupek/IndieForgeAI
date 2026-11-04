@@ -8,35 +8,16 @@ import type {
   CreateProjectInput,
   ExportSpriteSize,
   IndieForgeProject,
-  MotionBlueprint,
-  MotionDiagnosticRun,
-  MotionPhaseName,
   ProjectStyleGuide,
   StyleReferenceRole,
   VisualGenerationOverrides
 } from '@shared/types/project'
 import {
-  createAnimationFromAsset,
   createAsset,
   deleteAsset,
   getAsset,
   saveAssetInProject,
-  saveCraftLayer,
-  setCraftGuide,
-  clearCraftGuide,
-  clearCraftDrawingLayers,
-  exportCraftForAseprite,
-  updateAsset,
-  ensureMotionBlueprint,
-  ensureCharacterPuppet,
-  sampleCharacterPuppetTimeline,
-  saveMotionBlueprint,
-  savePoseGuidePng,
-  linkAppearanceFromAsset,
-  appendMotionDiagnosticRun,
-  getMotionDiagnosticBundle,
-  exportMotionDiagnosticJson,
-  type CraftLayerKind
+  updateAsset
 } from '../storage/assetStore'
 import {
   addSceneReference,
@@ -59,36 +40,10 @@ import {
   updateProject
 } from '../storage/projectStore'
 import { isOpenAIConfigured, setOpenAIKey } from '../storage/configStore'
-import { getCraftDir, getProjectsRoot, getVisualAssetDir } from '../storage/filePaths'
+import { getProjectsRoot, getVisualAssetDir } from '../storage/filePaths'
 import { getPreviewMimeType } from '../storage/previewMime'
 import { planProject } from '../openai/openaiPlanningService'
 import { resetOpenAIClient } from '../openai/openaiClient'
-import { generateAnimationFrame, generateAnimationStrip, paintMotionPose, renderMotionPose, getAnimationSession } from '../openai/animationService'
-import { draftPuppetCutouts, rasterizePuppetTimeline } from '../motion/puppetCutoutService'
-import {
-  approveCharacterBible,
-  generateCharacterBible,
-  rejectCharacterBible
-} from '../motion/characterBibleService'
-import {
-  approveAnimationBrief,
-  approveMannequinKit,
-  generateMannequinKit,
-  markMotionProof,
-  redrawMannequinPart,
-  replacePuppetPartImage
-} from '../motion/mannequinKitService'
-import {
-  exportPoseSheetForAseprite,
-  revealPoseSheetExportDir
-} from '../motion/poseSheetExportService'
-import {
-  approvePuppetPartKit,
-  claimPartRegion,
-  generatePuppetPartKit,
-  revealPuppetPartsDir
-} from '../motion/puppetPartKitService'
-import type { PuppetPartId } from '@shared/types/project'
 import { proposeSceneBlueprint } from '../openai/sceneBlueprintService'
 import { generateSlotAsset } from '../openai/generateSlotAsset'
 import {
@@ -256,262 +211,6 @@ export function registerIpcHandlers(): void {
     }
   )
 
-  ipcMain.handle(
-    IPC_CHANNELS.AI_GENERATE_ANIMATION_FRAME,
-    async (
-      _e,
-      projectId: string,
-      assetId: string,
-      clipId: string,
-      frameIndex: number,
-      prompt?: string,
-      referenceIds?: string[],
-      mode?: 'create' | 'refine',
-      inspirationIds?: string[],
-      totalFrames?: number
-    ) =>
-      generateAnimationFrame(
-        projectId,
-        assetId,
-        clipId,
-        frameIndex,
-        prompt,
-        referenceIds,
-        mode ?? 'create',
-        inspirationIds,
-        totalFrames
-      )
-  )
-
-  ipcMain.handle(
-    IPC_CHANNELS.AI_GENERATE_ANIMATION_STRIP,
-    async (
-      _e,
-      projectId: string,
-      assetId: string,
-      clipId: string,
-      frameCount: number,
-      options?: {
-        motionBeats?: string
-        keepFrame0?: boolean
-        referenceIds?: string[]
-      }
-    ) => generateAnimationStrip(projectId, assetId, clipId, frameCount, options ?? {})
-  )
-
-  ipcMain.handle(
-    IPC_CHANNELS.AI_PAINT_MOTION_POSE,
-    async (
-      _e,
-      projectId: string,
-      assetId: string,
-      options: {
-        blueprintId: string
-        phaseName: string
-        frameIndex?: number
-        referenceIds?: string[]
-        notes?: string
-      }
-    ) => paintMotionPose(projectId, assetId, options)
-  )
-
-  ipcMain.handle(
-    IPC_CHANNELS.AI_RENDER_MOTION_POSE,
-    async (
-      _e,
-      projectId: string,
-      assetId: string,
-      options: {
-        blueprintId: string
-        phaseName: string
-        frameIndex?: number
-        referenceIds?: string[]
-        notes?: string
-      }
-    ) => renderMotionPose(projectId, assetId, options)
-  )
-
-  ipcMain.handle(
-    IPC_CHANNELS.MOTION_GET_ANIMATION_SESSION,
-    async (_e, projectId: string, assetId: string, blueprintId: string) =>
-      getAnimationSession(projectId, assetId, blueprintId)
-  )
-
-  ipcMain.handle(
-    IPC_CHANNELS.MOTION_ENSURE_PUPPET,
-    async (
-      _e,
-      projectId: string,
-      assetId: string,
-      options?: { blueprintId?: string; forceNew?: boolean }
-    ) => ensureCharacterPuppet(projectId, assetId, options)
-  )
-
-  ipcMain.handle(
-    IPC_CHANNELS.MOTION_SAMPLE_PUPPET_TIMELINE,
-    async (_e, projectId: string, assetId: string, options?: { blueprintId?: string }) =>
-      sampleCharacterPuppetTimeline(projectId, assetId, options)
-  )
-
-  ipcMain.handle(
-    IPC_CHANNELS.MOTION_DRAFT_PUPPET_CUTOUTS,
-    async (_e, projectId: string, assetId: string, options?: { blueprintId?: string }) =>
-      draftPuppetCutouts(projectId, assetId, options)
-  )
-
-  ipcMain.handle(
-    IPC_CHANNELS.MOTION_APPROVE_ANIMATION_BRIEF,
-    async (
-      _e,
-      projectId: string,
-      assetId: string,
-      patch?: { styleNote?: string; cameraNote?: string }
-    ) => approveAnimationBrief(projectId, assetId, patch)
-  )
-
-  ipcMain.handle(
-    IPC_CHANNELS.MOTION_GENERATE_MANNEQUIN_KIT,
-    async (_e, projectId: string, assetId: string, options?: { blueprintId?: string }) =>
-      generateMannequinKit(projectId, assetId, options)
-  )
-
-  ipcMain.handle(
-    IPC_CHANNELS.MOTION_APPROVE_MANNEQUIN_KIT,
-    async (_e, projectId: string, assetId: string) => approveMannequinKit(projectId, assetId)
-  )
-
-  ipcMain.handle(
-    IPC_CHANNELS.MOTION_REDRAW_MANNEQUIN_PART,
-    async (_e, projectId: string, assetId: string, partId: PuppetPartId) =>
-      redrawMannequinPart(projectId, assetId, partId)
-  )
-
-  ipcMain.handle(
-    IPC_CHANNELS.MOTION_REPLACE_PUPPET_PART,
-    async (_e, projectId: string, assetId: string, partId: PuppetPartId, sourcePath: string) =>
-      replacePuppetPartImage(projectId, assetId, partId, sourcePath)
-  )
-
-  ipcMain.handle(
-    IPC_CHANNELS.MOTION_MARK_MOTION_PROOF,
-    async (_e, projectId: string, assetId: string) => markMotionProof(projectId, assetId)
-  )
-
-  ipcMain.handle(
-    IPC_CHANNELS.MOTION_EXPORT_POSE_SHEET,
-    async (
-      _e,
-      projectId: string,
-      assetId: string,
-      options?: { blueprintId?: string; openFolder?: boolean }
-    ) => exportPoseSheetForAseprite(projectId, assetId, options)
-  )
-
-  ipcMain.handle(
-    IPC_CHANNELS.MOTION_REVEAL_POSE_SHEET,
-    async (_e, projectId: string, assetId: string) => revealPoseSheetExportDir(projectId, assetId)
-  )
-
-  ipcMain.handle(
-    IPC_CHANNELS.MOTION_GENERATE_CHARACTER_BIBLE,
-    async (_e, projectId: string, assetId: string, options?: { blueprintId?: string }) =>
-      generateCharacterBible(projectId, assetId, options)
-  )
-
-  ipcMain.handle(
-    IPC_CHANNELS.MOTION_APPROVE_CHARACTER_BIBLE,
-    async (_e, projectId: string, assetId: string) => approveCharacterBible(projectId, assetId)
-  )
-
-  ipcMain.handle(
-    IPC_CHANNELS.MOTION_REJECT_CHARACTER_BIBLE,
-    async (_e, projectId: string, assetId: string) => rejectCharacterBible(projectId, assetId)
-  )
-
-  ipcMain.handle(
-    IPC_CHANNELS.MOTION_GENERATE_PUPPET_PART_KIT,
-    async (_e, projectId: string, assetId: string) => generatePuppetPartKit(projectId, assetId)
-  )
-
-  ipcMain.handle(
-    IPC_CHANNELS.MOTION_APPROVE_PUPPET_PART_KIT,
-    async (_e, projectId: string, assetId: string) => approvePuppetPartKit(projectId, assetId)
-  )
-
-  ipcMain.handle(
-    IPC_CHANNELS.MOTION_CLAIM_PART_REGION,
-    async (
-      _e,
-      projectId: string,
-      assetId: string,
-      partId: PuppetPartId,
-      rect: { x: number; y: number; width: number; height: number }
-    ) => claimPartRegion(projectId, assetId, partId, rect)
-  )
-
-  ipcMain.handle(
-    IPC_CHANNELS.MOTION_REVEAL_PUPPET_PARTS,
-    async (_e, projectId: string, assetId: string) => revealPuppetPartsDir(projectId, assetId)
-  )
-
-  ipcMain.handle(
-    IPC_CHANNELS.MOTION_RASTERIZE_PUPPET_TIMELINE,
-    async (_e, projectId: string, assetId: string, options?: { blueprintId?: string }) =>
-      rasterizePuppetTimeline(projectId, assetId, options)
-  )
-
-  ipcMain.handle(
-    IPC_CHANNELS.MOTION_ENSURE_BLUEPRINT,
-    async (_e, projectId: string, assetId: string, options?: { blueprintId?: string; forceNew?: boolean }) =>
-      ensureMotionBlueprint(projectId, assetId, options)
-  )
-
-  ipcMain.handle(
-    IPC_CHANNELS.MOTION_SAVE_BLUEPRINT,
-    async (
-      _e,
-      projectId: string,
-      assetId: string,
-      blueprint: MotionBlueprint,
-      options?: { pushHistory?: boolean; historyLabel?: string }
-    ) => saveMotionBlueprint(projectId, assetId, blueprint, options)
-  )
-
-  ipcMain.handle(
-    IPC_CHANNELS.MOTION_SAVE_POSE_GUIDE,
-    async (
-      _e,
-      projectId: string,
-      assetId: string,
-      blueprintId: string,
-      phaseName: MotionPhaseName,
-      pngDataUrl: string
-    ) => savePoseGuidePng(projectId, assetId, blueprintId, phaseName, pngDataUrl)
-  )
-
-  ipcMain.handle(
-    IPC_CHANNELS.ASSETS_LINK_APPEARANCE,
-    async (_e, projectId: string, targetAssetId: string, sourceAssetId: string) =>
-      linkAppearanceFromAsset(projectId, targetAssetId, sourceAssetId)
-  )
-
-  ipcMain.handle(
-    IPC_CHANNELS.MOTION_GET_DIAGNOSTIC,
-    async (_e, projectId: string, assetId: string, options?: { blueprintId?: string }) =>
-      getMotionDiagnosticBundle(projectId, assetId, options)
-  )
-
-  ipcMain.handle(
-    IPC_CHANNELS.MOTION_EXPORT_DIAGNOSTIC,
-    async (_e, projectId: string, assetId: string, options?: { blueprintId?: string }) =>
-      exportMotionDiagnosticJson(projectId, assetId, options)
-  )
-
-  ipcMain.handle(
-    IPC_CHANNELS.MOTION_APPEND_DIAGNOSTIC,
-    async (_e, projectId: string, assetId: string, run: MotionDiagnosticRun) =>
-      appendMotionDiagnosticRun(projectId, assetId, run)
-  )
 
   ipcMain.handle(
     IPC_CHANNELS.AI_GENERATE_BACKGROUND,
@@ -627,67 +326,6 @@ export function registerIpcHandlers(): void {
     }
   )
 
-  ipcMain.handle(
-    IPC_CHANNELS.ASSETS_CREATE_ANIMATION_FROM,
-    async (
-      _e,
-      projectId: string,
-      sourceAssetId: string,
-      options?: { name?: string; animationPreset?: string }
-    ) => createAnimationFromAsset(projectId, sourceAssetId, options)
-  )
-
-  ipcMain.handle(
-    IPC_CHANNELS.ASSETS_SAVE_CRAFT_LAYER,
-    async (
-      _e,
-      projectId: string,
-      assetId: string,
-      kind: CraftLayerKind,
-      pngDataUrl: string,
-      options?: { frameIndex?: number }
-    ) => saveCraftLayer(projectId, assetId, kind, pngDataUrl, options)
-  )
-
-  ipcMain.handle(
-    IPC_CHANNELS.ASSETS_REVEAL_CRAFT_DIR,
-    async (_e, projectId: string, assetId: string) => {
-      const dir = getCraftDir(projectId, assetId)
-      await mkdir(dir, { recursive: true })
-      await shell.openPath(dir)
-      return { path: dir }
-    }
-  )
-
-  ipcMain.handle(
-    IPC_CHANNELS.ASSETS_SET_CRAFT_GUIDE,
-    async (_e, projectId: string, assetId: string, filePath: string) =>
-      setCraftGuide(projectId, assetId, filePath)
-  )
-
-  ipcMain.handle(
-    IPC_CHANNELS.ASSETS_CLEAR_CRAFT_GUIDE,
-    async (_e, projectId: string, assetId: string) => clearCraftGuide(projectId, assetId)
-  )
-
-  ipcMain.handle(
-    IPC_CHANNELS.ASSETS_CLEAR_CRAFT_DRAWING,
-    async (_e, projectId: string, assetId: string) => clearCraftDrawingLayers(projectId, assetId)
-  )
-
-  ipcMain.handle(
-    IPC_CHANNELS.ASSETS_EXPORT_CRAFT_ASEPRITE,
-    async (_e, projectId: string, assetId: string) => {
-      const result = await exportCraftForAseprite(projectId, assetId)
-      await shell.openPath(result.dir)
-      return result
-    }
-  )
-
-  ipcMain.handle(
-    IPC_CHANNELS.EXPORT_STUDIO_KIT,
-    async (_e, projectId: string, exportDir: string) => exportStudioKit(projectId, exportDir)
-  )
 
   ipcMain.handle(
     IPC_CHANNELS.IMAGE_NORMALIZE,
@@ -713,14 +351,6 @@ export function registerIpcHandlers(): void {
     }
   )
 
-  ipcMain.handle(
-    IPC_CHANNELS.IMAGE_PACK_SPRITE_SHEET,
-    async (_e, framePaths: string[], frameWidth: number, frameHeight: number) => {
-      const { packSpriteSheet } = await import('../image/spriteSheetPacker')
-      const outPath = join(framePaths[0] ? join(framePaths[0], '..') : '.', 'spritesheet.png')
-      return packSpriteSheet(framePaths, frameWidth, frameHeight, outPath)
-    }
-  )
 
   ipcMain.handle(
     IPC_CHANNELS.IMAGE_EXPORT_ATLAS,

@@ -10,15 +10,13 @@ import { SceneOrganizer } from './components/SceneOrganizer'
 import { SceneComposer } from './components/SceneComposer'
 import { AssetLibrary } from './components/AssetLibrary'
 import { AssetGenerator } from './components/AssetGenerator'
-import { AnimationStudio } from './components/AnimationStudio'
 import { BackgroundStudio } from './components/BackgroundStudio'
 import { AudioAssetPanel } from './components/AudioAssetPanel'
 import { ExportPanel } from './components/ExportPanel'
 import { StyleReferencesPanel } from './components/StyleReferencesPanel'
 import { DesignerStudio } from './components/DesignerStudio'
-import { CraftStudio } from './components/CraftStudio'
-import { MotionStudio } from './components/MotionStudio'
 import { ProductionStudio } from './components/ProductionStudio'
+import { AssetPipelineHome } from './components/AssetPipelineHome'
 import { useProjectStore, useUIStore } from './state/indieForgeStore'
 
 function ProjectLayout({ children }: { children: React.ReactNode }) {
@@ -26,6 +24,7 @@ function ProjectLayout({ children }: { children: React.ReactNode }) {
   const location = useLocation()
 
   const nav = [
+    { path: `/projects/${projectId}/pipeline`, label: 'Pipeline' },
     { path: `/projects/${projectId}/production`, label: 'Production' },
     { path: `/projects/${projectId}/designer`, label: 'Designer' },
     { path: `/projects/${projectId}/style`, label: 'Style Refs' },
@@ -51,10 +50,7 @@ function ProjectLayout({ children }: { children: React.ReactNode }) {
                 location.pathname.startsWith(item.path) ||
                 (item.path.endsWith('/scenes') && location.pathname.includes('/scenes/')) ||
                 (item.path.endsWith('/assets') &&
-                  (location.pathname.includes('/animation/') ||
-                    location.pathname.includes('/generate/') ||
-                    location.pathname.includes('/craft/') ||
-                    location.pathname.includes('/motion/') ||
+                  (location.pathname.includes('/generate/') ||
                     location.pathname.includes('/background/')))
                   ? 'active'
                   : ''
@@ -90,6 +86,14 @@ function AppRoutes() {
       <Routes>
         <Route path="/" element={<ProjectDashboard />} />
         <Route path="/projects/new" element={<NewProjectWizard />} />
+        <Route
+          path="/projects/:projectId/pipeline"
+          element={
+            <ProjectLayout>
+              <AssetPipelineHome />
+            </ProjectLayout>
+          }
+        />
         <Route
           path="/projects/:projectId/production"
           element={
@@ -147,34 +151,10 @@ function AppRoutes() {
           }
         />
         <Route
-          path="/projects/:projectId/craft/:assetId"
-          element={
-            <ProjectLayout>
-              <CraftStudio />
-            </ProjectLayout>
-          }
-        />
-        <Route
-          path="/projects/:projectId/motion/:assetId"
-          element={
-            <ProjectLayout>
-              <MotionStudio />
-            </ProjectLayout>
-          }
-        />
-        <Route
           path="/projects/:projectId/generate/:assetId"
           element={
             <ProjectLayout>
               <AssetGenerator />
-            </ProjectLayout>
-          }
-        />
-        <Route
-          path="/projects/:projectId/animation/:assetId"
-          element={
-            <ProjectLayout>
-              <AnimationStudio />
             </ProjectLayout>
           }
         />

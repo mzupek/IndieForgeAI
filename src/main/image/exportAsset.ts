@@ -1,12 +1,10 @@
 import { copyFile, mkdir } from 'fs/promises'
-import { basename, join } from 'path'
+import { join } from 'path'
 import type { ExportSpriteSize } from '@shared/types/project'
 import { resolveExportSpriteSize } from '@shared/styleGuide'
 import { loadProject } from '../storage/projectStore'
 import { getAsset } from '../storage/assetStore'
 import { normalizeSprite } from './normalizeSprite'
-import { packSpriteSheet } from './spriteSheetPacker'
-import { exportAtlasJson } from './atlasExporter'
 
 function safeName(name: string): string {
   return name.replace(/\s+/g, '_').replace(/[^\w.-]/g, '')
@@ -132,71 +130,21 @@ export async function exportProjectVisualAssets(
   return { copiedPaths }
 }
 
+/**
+ * Removed: exportAnimationAtlas (animation frame packing removed in Phase 0)
+ * Animation clips and sprite sheets are out of scope for the asset pipeline refactor.
+ */
 export async function exportAnimationAtlas(
-  projectId: string,
-  assetId: string,
-  exportDir: string,
-  mode: 'design' | 'game' | 'both',
-  exportSizeOverride?: ExportSpriteSize
+  _projectId: string,
+  _assetId: string,
+  _exportDir: string,
+  _mode: 'design' | 'game' | 'both',
+  _exportSizeOverride?: ExportSpriteSize
 ): Promise<{
   designSheetPath?: string
   gameSheetPath?: string
   atlasJsonPath?: string
   pngPaths: string[]
 }> {
-  const { project, asset } = await getAsset(projectId, assetId)
-  const clip = asset.animationClips?.[0]
-  if (!clip || clip.frames.length === 0) {
-    throw new Error('No animation frames to export')
-  }
-
-  const { width: exportW, height: exportH } = resolveExportSpriteSize(
-    project.styleGuide,
-    exportSizeOverride
-  )
-  const framePaths = clip.frames.map((f) => f.imagePath)
-  const pngPaths: string[] = []
-  let designSheetPath: string | undefined
-  let gameSheetPath: string | undefined
-  let atlasJsonPath: string | undefined
-
-  await mkdir(exportDir, { recursive: true })
-  const base = safeName(asset.name)
-
-  if (mode === 'design' || mode === 'both') {
-    const designDir = join(exportDir, 'design')
-    await mkdir(designDir, { recursive: true })
-    designSheetPath = join(designDir, `${base}_sheet.png`)
-    await packSpriteSheet(framePaths, clip.frameWidth, clip.frameHeight, designSheetPath)
-    pngPaths.push(designSheetPath)
-  }
-
-  if (mode === 'game' || mode === 'both') {
-    const gameDir = join(exportDir, 'game_ready')
-    await mkdir(gameDir, { recursive: true })
-    const scaledFrames: string[] = []
-    for (const frame of clip.frames) {
-      const scaled = await exportAssetGameReady(
-        frame.imagePath,
-        gameDir,
-        `${base}_frame_${frame.frameIndex}`,
-        exportW,
-        exportH
-      )
-      scaledFrames.push(scaled)
-    }
-    gameSheetPath = join(gameDir, `${base}_sheet_${exportW}x${exportH}.png`)
-    const { frames: frameRects } = await packSpriteSheet(
-      scaledFrames,
-      exportW,
-      exportH,
-      gameSheetPath
-    )
-    const gameClip = { ...clip, frameWidth: exportW, frameHeight: exportH }
-    atlasJsonPath = join(gameDir, `${base}_atlas_${exportW}x${exportH}.json`)
-    await exportAtlasJson(gameClip, basename(gameSheetPath), frameRects, atlasJsonPath)
-    pngPaths.push(gameSheetPath, ...scaledFrames)
-  }
-
-  return { designSheetPath, gameSheetPath, atlasJsonPath, pngPaths }
+  throw new Error('Animation atlas export removed in Phase 0 refactor')
 }
