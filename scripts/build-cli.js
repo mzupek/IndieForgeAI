@@ -23,7 +23,10 @@ async function build() {
       external: [
         'electron',
         'sharp',
-        'commander'
+        'commander',
+        'ffmpeg-static',
+        'ffprobe-static',
+        'fluent-ffmpeg'
       ],
       sourcemap: false,
       minify: false,

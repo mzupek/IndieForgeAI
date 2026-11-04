@@ -5,10 +5,11 @@
  */
 
 import { execSync } from 'child_process'
-import { mkdir, rm, writeFile } from 'fs/promises'
+import { mkdir, rm, writeFile, readFile, access } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { randomUUID } from 'crypto'
+import ffmpegStatic from 'ffmpeg-static'
 
 function assert(condition: boolean, message: string): void {
   if (!condition) {
@@ -210,6 +211,134 @@ async function testValidateCommand() {
   }
 }
 
+async function testClipImportWithGeneratedVideo() {
+  console.log('Testing: clip import with ffmpeg-generated test video (intro)')
+  const testDir = await setupTestDataDir()
+  
+  try {
+    // Generate a test video using ffmpeg-static with *_intro.mp4 filename
+    const testVideoPath = join(testDir, 'test_hero_intro.mp4')
+    console.log(`  Generating test video: ${testVideoPath}`)
+    
+    if (!ffmpegStatic) {
+      throw new Error('ffmpeg-static not found')
+    }
+    
+    execSync(
+      `"${ffmpegStatic}" -f lavfi -i testsrc=duration=1.5:size=320x240:rate=30 -pix_fmt yuv420p "${testVideoPath}"`,
+      { stdio: 'pipe' }
+    )
+    
+    // Verify the video was created
+    await access(testVideoPath)
+    console.log('  ✓ Test video generated (1.5s duration)')
+    
+    // Import the clip with moment auto-detection (filename has 'intro')
+    const importResult = runForgeCommand(
+      `clip import "${testVideoPath}" --game test-game-1 --json`,
+      testDir
+    )
+    
+    if (importResult.exitCode !== 0) {
+      console.error('  Import failed with output:', importResult.stdout)
+    }
+    assertEqual(importResult.exitCode, 0, 'Import should exit with code 0')
+    
+    const importOutput = JSON.parse(importResult.stdout)
+    assert(importOutput.imported, 'Should have imported array')
+    assertEqual(importOutput.imported.length, 1, 'Should have imported 1 clip')
+    assertEqual(importOutput.errors?.length || 0, 0, 'Should have no errors')
+    
+    const clip = importOutput.imported[0]
+    assert(clip.id, 'Clip should have an ID')
+    assertEqual(clip.moment, 'intro', 'Should auto-detect intro moment from filename')
+    
+    // Assert duration is approximately 1.5s (within 0.1s tolerance)
+    assert(
+      clip.durationSec >= 1.4 && clip.durationSec <= 1.6,
+      `Duration should be ~1.5s, got ${clip.durationSec}s`
+    )
+    console.log(`  ✓ Duration detected: ${clip.durationSec.toFixed(2)}s (expected ~1.5s)`)
+    
+    assert(clip.file, 'Clip should have a file path')
+    assert(clip.thumbnail, 'Clip should have a thumbnail path')
+    
+    console.log(`  ✓ Clip imported: ${clip.id}, moment=${clip.moment}`)
+    
+    // Verify thumbnail file exists
+    const studioData = JSON.parse(await readFile(join(testDir, 'studio.json'), 'utf-8'))
+    const savedClip = studioData.assetPipeline.clips.find((c: any) => c.id === clip.id)
+    assert(savedClip, 'Clip should be in studio.json')
+    
+    // Thumbnail path in studio.json is absolute
+    await access(savedClip.thumbnail)
+    console.log('  ✓ Thumbnail file exists')
+    
+    // List clips and verify
+    const listResult = runForgeCommand('clip list --game test-game-1 --json', testDir)
+    assertEqual(listResult.exitCode, 0, 'List should exit with code 0')
+    
+    const clips = JSON.parse(listResult.stdout)
+    assertEqual(clips.length, 1, 'Should list 1 clip')
+    assertEqual(clips[0].id, clip.id, 'Listed clip should match imported clip')
+    assertEqual(clips[0].moment, 'intro', 'Listed clip should have intro moment')
+    
+    console.log('✓ Clip import with generated video test passed')
+  } finally {
+    await cleanupTestDataDir(testDir)
+  }
+}
+
+async function testClipImportOnFreshDataDir() {
+  console.log('Testing: clip import on fresh empty data dir (should seed default games)')
+  
+  const freshTestDir = join(tmpdir(), `forge-fresh-test-${randomUUID()}`)
+  // Don't create the directory - let the CLI handle it
+  
+  try {
+    // Generate test video in a temp location
+    const tempVideoDir = join(tmpdir(), `forge-temp-video-${randomUUID()}`)
+    await mkdir(tempVideoDir, { recursive: true })
+    const testVideoPath = join(tempVideoDir, 'hero_intro.mp4')
+    
+    if (!ffmpegStatic) {
+      throw new Error('ffmpeg-static not found')
+    }
+    
+    execSync(
+      `"${ffmpegStatic}" -f lavfi -i testsrc=duration=0.8:size=320x240:rate=30 -pix_fmt yuv420p "${testVideoPath}"`,
+      { stdio: 'pipe' }
+    )
+    
+    // Import clip to non-existent data dir (should create it and seed default games)
+    const importResult = runForgeCommand(
+      `clip import "${testVideoPath}" --game game-neon-recall --json`,
+      freshTestDir
+    )
+    
+    assertEqual(importResult.exitCode, 0, 'Import should exit with code 0')
+    
+    const importOutput = JSON.parse(importResult.stdout)
+    assert(importOutput.imported, 'Should have imported array')
+    assertEqual(importOutput.imported.length, 1, 'Should import 1 clip')
+    assertEqual(importOutput.imported[0].moment, 'intro', 'Should auto-detect intro from filename')
+    
+    // Verify default games were seeded
+    const gamesResult = runForgeCommand('games list --json', freshTestDir)
+    const games = JSON.parse(gamesResult.stdout)
+    
+    assert(games.length >= 2, 'Should have at least 2 default games')
+    assert(games.find((g: any) => g.id === 'game-neon-recall'), 'Should have game-neon-recall')
+    assert(games.find((g: any) => g.id === 'game-ring-em-up'), 'Should have game-ring-em-up')
+    
+    console.log('✓ Fresh data dir with default games test passed')
+    
+    await rm(tempVideoDir, { recursive: true, force: true })
+  } finally {
+    await rm(freshTestDir, { recursive: true, force: true })
+  }
+}
+
 async function testHelpCommand() {
   console.log('Testing: forge --help')
   
@@ -224,6 +353,7 @@ async function testHelpCommand() {
     assert(result.includes('games'), 'Should list games command')
     assert(result.includes('character'), 'Should list character command')
     assert(result.includes('pose'), 'Should list pose command')
+    assert(result.includes('clip'), 'Should list clip command')
     assert(result.includes('validate'), 'Should list validate command')
     
     console.log('✓ Help command test passed')
@@ -242,6 +372,8 @@ export async function runIntegrationTests() {
     await testStatusCommand()
     await testCharacterCommands()
     await testValidateCommand()
+    await testClipImportWithGeneratedVideo()
+    await testClipImportOnFreshDataDir()
     
     console.log('\n✓ All integration tests passed!')
     return true

@@ -25,7 +25,7 @@ function getStudioFilePath(dataDirOverride?: string): string {
 }
 
 /**
- * Initialize empty studio data
+ * Initialize empty studio data structure
  */
 function createEmptyStudioData(): StudioData {
   const now = new Date().toISOString()
@@ -43,6 +43,31 @@ function createEmptyStudioData(): StudioData {
     createdAt: now,
     updatedAt: now
   }
+}
+
+/**
+ * Seed default games for a brand new studio
+ */
+function seedDefaultGames(studio: StudioData): void {
+  const now = new Date().toISOString()
+  studio.assetPipeline.games = [
+    {
+      id: 'game-neon-recall',
+      name: 'Neon Recall',
+      engine: 'unity',
+      exportRoot: './exports/neon-recall',
+      createdAt: now,
+      updatedAt: now
+    },
+    {
+      id: 'game-ring-em-up',
+      name: "Ring'Em Up",
+      engine: 'godot',
+      exportRoot: './exports/ring-em-up',
+      createdAt: now,
+      updatedAt: now
+    }
+  ]
 }
 
 /**
@@ -106,14 +131,23 @@ export async function loadStudio(dataDirOverride?: string): Promise<StudioData> 
   const filePath = getStudioFilePath(dataDirOverride)
   const lockPath = `${filePath}.lock`
   
+  // Ensure data directory exists before trying to acquire lock
+  await mkdir(getDataDir(dataDirOverride), { recursive: true })
+  
   return withLock(lockPath, async () => {
     try {
       const data = await readFile(filePath, 'utf-8')
       return JSON.parse(data) as StudioData
     } catch (err: any) {
       if (err.code === 'ENOENT') {
-        // Studio file doesn't exist - migrate from projects
+        // Studio file doesn't exist - migrate from projects or create new
         const studio = await migrateFromProjects(dataDirOverride)
+        
+        // If no games were migrated, seed default games
+        if (studio.assetPipeline.games.length === 0) {
+          seedDefaultGames(studio)
+        }
+        
         await saveStudioInternal(studio, dataDirOverride)
         return studio
       }

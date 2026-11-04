@@ -66,6 +66,11 @@ import {
   getPoseMetadataMap
 } from '../storage/poseService'
 import {
+  importClip,
+  removeClip,
+  updateClip
+} from '../storage/clipService'
+import {
   applyDesignerAssetPrompt,
   applyDesignerStyleGuide,
   clearDesignerChat,
@@ -626,6 +631,27 @@ export function registerIpcHandlers(): void {
       })
       return obj
     }
+  )
+
+  // Clip handlers
+  ipcMain.handle(
+    IPC_CHANNELS.PIPELINE_CLIP_IMPORT,
+    async (_e, sourcePath: string, moment: string, options: any) =>
+      importClip(sourcePath, moment as any, options)
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.PIPELINE_CLIP_REMOVE,
+    async (_e, clipId: string) => {
+      await removeClip(clipId)
+      return { ok: true as const }
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.PIPELINE_CLIP_UPDATE,
+    async (_e, clipId: string, patch: any) =>
+      updateClip(clipId, patch)
   )
 }
 
