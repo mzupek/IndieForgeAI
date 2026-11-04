@@ -3,13 +3,19 @@
   "version": "0.1.0",
   "description": "AI-powered indie game asset pipeline desktop app",
   "main": "./out/main/index.js",
+  "bin": {
+    "forge": "./out/cli/forge.js"
+  },
   "scripts": {
     "dev": "electron-vite dev",
-    "build": "electron-vite build && cp -r seed out/seed",
+    "build": "electron-vite build && cp -r seed out/seed && npm run build:cli",
+    "build:cli": "node scripts/build-cli.js",
+    "forge": "node out/cli/forge.js",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "commander": "^12.1.0",
     "openai": "^4.77.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -24,6 +30,7 @@
     "@vitejs/plugin-react": "^4.3.4",
     "electron": "^33.2.0",
     "electron-vite": "^2.3.0",
+    "esbuild": "^0.28.2",
     "typescript": "^5.7.2",
     "vite": "^5.4.11"
   }
