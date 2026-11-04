@@ -37,6 +37,24 @@
     { "id": "audio-strike", "projectId": "seed-ring-em-up", "sceneIds": ["scene-strike-call"], "name": "Umpire Strike!", "type": "voice_line", "description": "Strike call VO.", "prompt": "", "status": "planned", "medium": "audio", "craftStage": "planned", "craftTool": "audio" },
     { "id": "audio-bat-crack", "projectId": "seed-ring-em-up", "sceneIds": ["scene-hit"], "name": "Bat crack", "type": "sound_effect", "description": "Bat contact.", "prompt": "", "status": "planned", "medium": "audio", "craftStage": "planned", "craftTool": "audio" }
   ],
+  "assetPipeline": {
+    "schemaVersion": 1,
+    "games": [
+      {
+        "id": "game-ring-em-up",
+        "name": "Ring'Em Up",
+        "engine": "godot",
+        "exportRoot": "./exports/ring-em-up",
+        "createdAt": "2026-07-01T00:00:00.000Z",
+        "updatedAt": "2026-07-27T00:00:00.000Z"
+      }
+    ],
+    "characters": [],
+    "poses": [],
+    "clips": [],
+    "scenePresets": [],
+    "exportProfiles": []
+  },
   "createdAt": "2026-07-01T00:00:00.000Z",
   "updatedAt": "2026-07-27T00:00:00.000Z"
 }

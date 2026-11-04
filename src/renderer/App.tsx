@@ -17,6 +17,7 @@ import { StyleReferencesPanel } from './components/StyleReferencesPanel'
 import { DesignerStudio } from './components/DesignerStudio'
 import { ProductionStudio } from './components/ProductionStudio'
 import { AssetPipelineHome } from './components/AssetPipelineHome'
+import { CharacterRoster } from './components/CharacterRoster'
 import { useProjectStore, useUIStore } from './state/indieForgeStore'
 
 function ProjectLayout({ children }: { children: React.ReactNode }) {
@@ -91,6 +92,14 @@ function AppRoutes() {
           element={
             <ProjectLayout>
               <AssetPipelineHome />
+            </ProjectLayout>
+          }
+        />
+        <Route
+          path="/projects/:projectId/pipeline/games/:gameId/roster"
+          element={
+            <ProjectLayout>
+              <CharacterRoster />
             </ProjectLayout>
           }
         />

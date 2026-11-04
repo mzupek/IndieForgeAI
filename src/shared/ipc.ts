@@ -52,5 +52,9 @@ export const IPC_CHANNELS = {
   AI_ASSET_DESIGNER_CHAT: 'ai:assetDesignerChat',
   AI_ASSET_DESIGNER_CLEAR: 'ai:assetDesignerClear',
   CONFIG_GET_OPENAI_KEY: 'config:getOpenAIKey',
-  CONFIG_SET_OPENAI_KEY: 'config:setOpenAIKey'
+  CONFIG_SET_OPENAI_KEY: 'config:setOpenAIKey',
+  PIPELINE_CHARACTER_CREATE: 'pipeline:characterCreate',
+  PIPELINE_CHARACTER_UPDATE: 'pipeline:characterUpdate',
+  PIPELINE_CHARACTER_DELETE: 'pipeline:characterDelete',
+  PIPELINE_CHARACTER_SET_REFERENCE: 'pipeline:characterSetReference'
 } as const
