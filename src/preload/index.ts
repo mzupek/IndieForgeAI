@@ -137,7 +137,13 @@ const api: IndieForgeAPI = {
     updatePose: (projectId, poseId, patch) =>
       ipcRenderer.invoke(IPC_CHANNELS.PIPELINE_POSE_UPDATE, projectId, poseId, patch),
     getPoseMetadata: (projectId, characterId) =>
-      ipcRenderer.invoke(IPC_CHANNELS.PIPELINE_POSE_GET_METADATA, projectId, characterId)
+      ipcRenderer.invoke(IPC_CHANNELS.PIPELINE_POSE_GET_METADATA, projectId, characterId),
+    importClip: (sourcePath, moment, options) =>
+      ipcRenderer.invoke(IPC_CHANNELS.PIPELINE_CLIP_IMPORT, sourcePath, moment, options),
+    removeClip: (clipId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.PIPELINE_CLIP_REMOVE, clipId),
+    updateClip: (clipId, patch) =>
+      ipcRenderer.invoke(IPC_CHANNELS.PIPELINE_CLIP_UPDATE, clipId, patch)
   }
 }
 

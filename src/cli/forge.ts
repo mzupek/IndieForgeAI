@@ -7,6 +7,7 @@ import { Command } from 'commander'
 import * as games from './commands/games'
 import * as character from './commands/character'
 import * as pose from './commands/pose'
+import * as clips from './commands/clips'
 import * as validate from './commands/validate'
 import * as status from './commands/status'
 
@@ -111,6 +112,58 @@ poseCmd
   .argument('<pose-id>', 'Pose ID')
   .action(async (poseId, options) => {
     await pose.remove(poseId, { ...program.opts(), ...options })
+  })
+
+// Clip commands
+const clipCmd = program.command('clip').description('Manage clips')
+
+clipCmd
+  .command('import')
+  .description('Import clip(s) - auto-maps moment by filename')
+  .argument('<files...>', 'Video files (mp4/webm)')
+  .requiredOption('--game <id>', 'Game ID')
+  .option('--moment <moment>', 'Clip moment (intro|hit|finisher|defeat|story_beat)')
+  .option('--character <id>', 'Character ID')
+  .option('--tags <tags>', 'Comma-separated tags')
+  .action(async (files, options) => {
+    await clips.importClips(files, { ...program.opts(), ...options })
+  })
+
+clipCmd
+  .command('list')
+  .description('List clips')
+  .option('--game <id>', 'Filter by game')
+  .option('--character <id>', 'Filter by character')
+  .option('--moment <moment>', 'Filter by moment')
+  .action(async (options) => {
+    await clips.list({ ...program.opts(), ...options })
+  })
+
+clipCmd
+  .command('show')
+  .description('Show clip details')
+  .argument('<clip-id>', 'Clip ID')
+  .action(async (clipId, options) => {
+    await clips.show(clipId, { ...program.opts(), ...options })
+  })
+
+clipCmd
+  .command('update')
+  .description('Update a clip')
+  .argument('<clip-id>', 'Clip ID')
+  .option('--moment <moment>', 'Clip moment')
+  .option('--character <id>', 'Character ID (or empty to unset)')
+  .option('--tags <tags>', 'Comma-separated tags')
+  .action(async (clipId, options) => {
+    await clips.update(clipId, { ...program.opts(), ...options })
+  })
+
+clipCmd
+  .command('remove')
+  .description('Remove a clip')
+  .argument('<clip-id>', 'Clip ID')
+  .action(async (clipId, options) => {
+    await clips.remove(clipId, { ...program.opts(), ...options })
   })
 
 // Validate command
