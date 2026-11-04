@@ -129,7 +129,15 @@ const api: IndieForgeAPI = {
     deleteCharacter: (projectId, characterId) =>
       ipcRenderer.invoke(IPC_CHANNELS.PIPELINE_CHARACTER_DELETE, projectId, characterId),
     setCharacterReference: (projectId, characterId, sourcePath) =>
-      ipcRenderer.invoke(IPC_CHANNELS.PIPELINE_CHARACTER_SET_REFERENCE, projectId, characterId, sourcePath)
+      ipcRenderer.invoke(IPC_CHANNELS.PIPELINE_CHARACTER_SET_REFERENCE, projectId, characterId, sourcePath),
+    importPose: (projectId, characterId, slot, sourcePath, options) =>
+      ipcRenderer.invoke(IPC_CHANNELS.PIPELINE_POSE_IMPORT, projectId, characterId, slot, sourcePath, options),
+    removePose: (projectId, poseId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.PIPELINE_POSE_REMOVE, projectId, poseId),
+    updatePose: (projectId, poseId, patch) =>
+      ipcRenderer.invoke(IPC_CHANNELS.PIPELINE_POSE_UPDATE, projectId, poseId, patch),
+    getPoseMetadata: (projectId, characterId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.PIPELINE_POSE_GET_METADATA, projectId, characterId)
   }
 }
 

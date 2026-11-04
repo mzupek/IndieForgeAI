@@ -56,5 +56,9 @@ export const IPC_CHANNELS = {
   PIPELINE_CHARACTER_CREATE: 'pipeline:characterCreate',
   PIPELINE_CHARACTER_UPDATE: 'pipeline:characterUpdate',
   PIPELINE_CHARACTER_DELETE: 'pipeline:characterDelete',
-  PIPELINE_CHARACTER_SET_REFERENCE: 'pipeline:characterSetReference'
+  PIPELINE_CHARACTER_SET_REFERENCE: 'pipeline:characterSetReference',
+  PIPELINE_POSE_IMPORT: 'pipeline:poseImport',
+  PIPELINE_POSE_REMOVE: 'pipeline:poseRemove',
+  PIPELINE_POSE_UPDATE: 'pipeline:poseUpdate',
+  PIPELINE_POSE_GET_METADATA: 'pipeline:poseGetMetadata'
 } as const
