@@ -154,6 +154,33 @@ export function PosesView() {
     }
   }
 
+  const handleApprovePose = async (poseId: string) => {
+    try {
+      await window.indieForge.pipeline.updatePose(projectId!, poseId, { status: 'approved' })
+      const updated = await window.indieForge.projects.open(projectId!)
+      setActiveProject(updated)
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to approve pose')
+    }
+  }
+
+  const handleApproveAll = async () => {
+    if (!character) return
+    if (!confirm(`Approve all ${poses.length} poses for ${character.name}?`)) return
+    
+    try {
+      for (const pose of poses) {
+        if (pose.status !== 'approved') {
+          await window.indieForge.pipeline.updatePose(projectId!, pose.id, { status: 'approved' })
+        }
+      }
+      const updated = await window.indieForge.projects.open(projectId!)
+      setActiveProject(updated)
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to approve poses')
+    }
+  }
+
   return (
     <div>
       <div className="page-header">
@@ -201,10 +228,17 @@ export function PosesView() {
               </label>
             </div>
 
-            {character && (
+                {character && (
               <>
                 <div style={{ marginBottom: '2rem' }}>
-                  <h3 style={{ marginBottom: '1rem' }}>{character.name} - Five-Pose Set</h3>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                    <h3 style={{ margin: 0 }}>{character.name} - Five-Pose Set</h3>
+                    {poses.some(p => p.status !== 'approved') && (
+                      <button type="button" onClick={handleApproveAll} style={{ fontSize: '0.9rem' }}>
+                        Approve All Poses
+                      </button>
+                    )}
+                  </div>
                   <PoseSlotStrip
                     character={character}
                     poses={poses}
@@ -225,11 +259,28 @@ export function PosesView() {
                   }}>
                     <p style={{ margin: '0 0 0.75rem 0', color: 'var(--forge-gold)', fontWeight: 'bold' }}>
                       Selected: {selectedSlot} pose
+                      {poses.find(p => p.slot === selectedSlot) && (
+                        <span style={{ marginLeft: '1rem', fontSize: '0.85rem', fontWeight: 'normal', color: 'var(--muted)' }}>
+                          Status: {poses.find(p => p.slot === selectedSlot)?.status}
+                        </span>
+                      )}
                     </p>
-                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                       <button type="button" onClick={handleImportSingle} disabled={importing}>
                         {importing ? 'Importing...' : 'Import / Replace'}
                       </button>
+                      {poses.find(p => p.slot === selectedSlot && p.status !== 'approved') && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const pose = poses.find(p => p.slot === selectedSlot)
+                            if (pose) handleApprovePose(pose.id)
+                          }}
+                          style={{ background: 'var(--success)', borderColor: 'var(--success)' }}
+                        >
+                          Approve
+                        </button>
+                      )}
                       <button type="button" className="secondary" onClick={() => setSelectedSlot(null)}>
                         Cancel
                       </button>
