@@ -54,6 +54,12 @@ import {
   updateStyleReference
 } from '../openai/styleReferenceService'
 import {
+  createCharacter,
+  updateCharacter,
+  deleteCharacter,
+  setCharacterReference
+} from '../storage/characterService'
+import {
   applyDesignerAssetPrompt,
   applyDesignerStyleGuide,
   clearDesignerChat,
@@ -543,6 +549,38 @@ export function registerIpcHandlers(): void {
     resetOpenAIClient()
     return { ok: true as const }
   })
+
+  // Character CRUD handlers
+  ipcMain.handle(
+    IPC_CHANNELS.PIPELINE_CHARACTER_CREATE,
+    async (_e, projectId: string, input: {
+      gameId: string
+      name: string
+      role: string
+      styleNotes?: string
+      tags?: string[]
+    }) => createCharacter(projectId, input)
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.PIPELINE_CHARACTER_UPDATE,
+    async (_e, projectId: string, characterId: string, patch: any) =>
+      updateCharacter(projectId, characterId, patch)
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.PIPELINE_CHARACTER_DELETE,
+    async (_e, projectId: string, characterId: string) => {
+      await deleteCharacter(projectId, characterId)
+      return { ok: true as const }
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.PIPELINE_CHARACTER_SET_REFERENCE,
+    async (_e, projectId: string, characterId: string, sourcePath: string) =>
+      setCharacterReference(projectId, characterId, sourcePath)
+  )
 }
 
 export async function ensureAppDataDirs(): Promise<void> {

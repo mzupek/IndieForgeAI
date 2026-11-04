@@ -120,6 +120,16 @@ const api: IndieForgeAPI = {
   config: {
     getOpenAIKey: () => ipcRenderer.invoke(IPC_CHANNELS.CONFIG_GET_OPENAI_KEY),
     setOpenAIKey: (apiKey) => ipcRenderer.invoke(IPC_CHANNELS.CONFIG_SET_OPENAI_KEY, apiKey)
+  },
+  pipeline: {
+    createCharacter: (projectId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.PIPELINE_CHARACTER_CREATE, projectId, input),
+    updateCharacter: (projectId, characterId, patch) =>
+      ipcRenderer.invoke(IPC_CHANNELS.PIPELINE_CHARACTER_UPDATE, projectId, characterId, patch),
+    deleteCharacter: (projectId, characterId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.PIPELINE_CHARACTER_DELETE, projectId, characterId),
+    setCharacterReference: (projectId, characterId, sourcePath) =>
+      ipcRenderer.invoke(IPC_CHANNELS.PIPELINE_CHARACTER_SET_REFERENCE, projectId, characterId, sourcePath)
   }
 }
 

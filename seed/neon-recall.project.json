@@ -37,6 +37,24 @@
     { "id": "audio-match", "projectId": "seed-neon-recall", "sceneIds": ["scene-grid-play"], "name": "Match sting", "type": "sound_effect", "description": "Match success sting.", "prompt": "", "status": "planned", "medium": "audio", "craftStage": "planned", "craftTool": "audio" },
     { "id": "audio-menu-music", "projectId": "seed-neon-recall", "sceneIds": ["scene-main-menu", "scene-splash"], "name": "Synthwave menu loop", "type": "music", "description": "Menu music.", "prompt": "", "status": "planned", "medium": "audio", "craftStage": "planned", "craftTool": "audio" }
   ],
+  "assetPipeline": {
+    "schemaVersion": 1,
+    "games": [
+      {
+        "id": "game-neon-recall",
+        "name": "Neon Recall",
+        "engine": "unity",
+        "exportRoot": "./exports/neon-recall",
+        "createdAt": "2026-07-27T00:00:00.000Z",
+        "updatedAt": "2026-07-27T00:00:00.000Z"
+      }
+    ],
+    "characters": [],
+    "poses": [],
+    "clips": [],
+    "scenePresets": [],
+    "exportProfiles": []
+  },
   "createdAt": "2026-07-27T00:00:00.000Z",
   "updatedAt": "2026-07-27T00:00:00.000Z"
 }
