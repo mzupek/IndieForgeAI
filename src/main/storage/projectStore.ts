@@ -14,6 +14,7 @@ import {
   getProjectsRoot
 } from './filePaths'
 import { ensureStudioGames } from './pipelineMigration'
+import { getAssetPipeline, updateAssetPipeline } from '@core/storage/studioStorage'
 
 async function ensureProjectsRoot(): Promise<void> {
   await mkdir(getProjectsRoot(), { recursive: true })
@@ -63,8 +64,8 @@ export async function loadProject(projectId: string): Promise<IndieForgeProject>
   const raw = await readFile(filePath, 'utf-8')
   let project = JSON.parse(raw) as IndieForgeProject
   project = normalizeProject(project)
-  // Auto-migrate: ensure studio games exist
-  project = await ensureStudioGames(project)
+  // Load asset pipeline from studio storage (single source of truth)
+  project.assetPipeline = await getAssetPipeline()
   return project
 }
 
@@ -79,7 +80,17 @@ export async function saveProject(project: IndieForgeProject): Promise<IndieForg
 
   project.updatedAt = new Date().toISOString()
   const normalized = normalizeProject(project)
-  await writeFile(getProjectFilePath(project.id), JSON.stringify(normalized, null, 2), 'utf-8')
+  
+  // Save asset pipeline to studio storage (single source of truth)
+  if (normalized.assetPipeline) {
+    await updateAssetPipeline(normalized.assetPipeline)
+  }
+  
+  // Save project without asset pipeline (it's in studio.json now)
+  const projectForFile = { ...normalized }
+  delete (projectForFile as any).assetPipeline
+  
+  await writeFile(getProjectFilePath(project.id), JSON.stringify(projectForFile, null, 2), 'utf-8')
   return normalized
 }
 

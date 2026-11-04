@@ -3,8 +3,8 @@ import { copyFile, mkdir } from 'fs/promises'
 import { extname } from 'path'
 import sharp from 'sharp'
 import type { Character } from '@shared/types/assetPipeline'
-import { loadProject as coreLoadProject, listProjects as coreListProjects, saveProject as coreSaveProject } from '@core/storage/projectStorage'
-import { getProjectDir } from '@core/storage/dataDir'
+import { getAssetPipeline, updateAssetPipeline } from '@core/storage/studioStorage'
+import { getDataDir } from '@core/storage/dataDir'
 import { output, outputError } from '../utils/output'
 import { join } from 'path'
 
@@ -19,27 +19,20 @@ interface Options {
   reference?: string
 }
 
-async function findProjectByGame(gameId: string, dataDir?: string) {
-  const projects = await coreListProjects(dataDir)
+async function verifyGameExists(gameId: string, dataDir?: string) {
+  const pipeline = await getAssetPipeline(dataDir)
   
-  for (const project of projects) {
-    if (project.assetPipeline?.games.some(g => g.id === gameId)) {
-      return project
-    }
+  if (!pipeline.games.some(g => g.id === gameId)) {
+    throw new Error(`Game not found: ${gameId}`)
   }
-  
-  throw new Error(`Game not found: ${gameId}`)
 }
 
 export async function list(options: Options): Promise<void> {
   try {
-    const project = await findProjectByGame(options.game, options.dataDir)
+    await verifyGameExists(options.game, options.dataDir)
+    const pipeline = await getAssetPipeline(options.dataDir)
     
-    if (!project.assetPipeline) {
-      throw new Error('Project has no asset pipeline data')
-    }
-    
-    const characters = project.assetPipeline.characters.filter(c => c.gameId === options.game)
+    const characters = pipeline.characters.filter(c => c.gameId === options.game)
     
     if (options.json) {
       output(characters, options)
@@ -66,13 +59,10 @@ export async function list(options: Options): Promise<void> {
 
 export async function show(characterId: string, options: Options): Promise<void> {
   try {
-    const project = await findProjectByGame(options.game, options.dataDir)
+    await verifyGameExists(options.game, options.dataDir)
+    const pipeline = await getAssetPipeline(options.dataDir)
     
-    if (!project.assetPipeline) {
-      throw new Error('Project has no asset pipeline data')
-    }
-    
-    const character = project.assetPipeline.characters.find(c => c.id === characterId)
+    const character = pipeline.characters.find(c => c.id === characterId)
     
     if (!character) {
       throw new Error(`Character not found: ${characterId}`)
@@ -105,11 +95,8 @@ export async function create(options: Options): Promise<void> {
       throw new Error('--name and --role are required')
     }
     
-    const project = await findProjectByGame(options.game, options.dataDir)
-    
-    if (!project.assetPipeline) {
-      throw new Error('Project has no asset pipeline data')
-    }
+    await verifyGameExists(options.game, options.dataDir)
+    const pipeline = await getAssetPipeline(options.dataDir)
     
     const now = new Date().toISOString()
     const characterId = randomUUID()
@@ -128,10 +115,11 @@ export async function create(options: Options): Promise<void> {
     // Handle reference image if provided
     if (options.reference) {
       const ext = extname(options.reference)
-      const refPath = join(getProjectDir(project.id, options.dataDir), 'characters', `${characterId}_ref${ext}`)
-      const thumbPath = join(getProjectDir(project.id, options.dataDir), 'characters', `${characterId}_thumb.png`)
+      const charactersDir = join(getDataDir(options.dataDir), 'characters')
+      const refPath = join(charactersDir, `${characterId}_ref${ext}`)
+      const thumbPath = join(charactersDir, `${characterId}_thumb.png`)
       
-      await mkdir(join(getProjectDir(project.id, options.dataDir), 'characters'), { recursive: true })
+      await mkdir(charactersDir, { recursive: true })
       await copyFile(options.reference, refPath)
       await sharp(options.reference)
         .resize(256, 256, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
@@ -142,8 +130,8 @@ export async function create(options: Options): Promise<void> {
       character.thumbnail = thumbPath
     }
     
-    project.assetPipeline.characters.push(character)
-    await coreSaveProject(project, options.dataDir)
+    pipeline.characters.push(character)
+    await updateAssetPipeline(pipeline, options.dataDir)
     
     if (options.json) {
       output(character, options)
@@ -158,19 +146,16 @@ export async function create(options: Options): Promise<void> {
 
 export async function update(characterId: string, options: Options): Promise<void> {
   try {
-    const project = await findProjectByGame(options.game, options.dataDir)
+    await verifyGameExists(options.game, options.dataDir)
+    const pipeline = await getAssetPipeline(options.dataDir)
     
-    if (!project.assetPipeline) {
-      throw new Error('Project has no asset pipeline data')
-    }
-    
-    const index = project.assetPipeline.characters.findIndex(c => c.id === characterId)
+    const index = pipeline.characters.findIndex(c => c.id === characterId)
     
     if (index === -1) {
       throw new Error(`Character not found: ${characterId}`)
     }
     
-    const character = project.assetPipeline.characters[index]
+    const character = pipeline.characters[index]
     
     if (options.name) character.name = options.name
     if (options.role) character.role = options.role
@@ -182,10 +167,11 @@ export async function update(characterId: string, options: Options): Promise<voi
     // Handle reference image if provided
     if (options.reference) {
       const ext = extname(options.reference)
-      const refPath = join(getProjectDir(project.id, options.dataDir), 'characters', `${characterId}_ref${ext}`)
-      const thumbPath = join(getProjectDir(project.id, options.dataDir), 'characters', `${characterId}_thumb.png`)
+      const charactersDir = join(getDataDir(options.dataDir), 'characters')
+      const refPath = join(charactersDir, `${characterId}_ref${ext}`)
+      const thumbPath = join(charactersDir, `${characterId}_thumb.png`)
       
-      await mkdir(join(getProjectDir(project.id, options.dataDir), 'characters'), { recursive: true })
+      await mkdir(charactersDir, { recursive: true })
       await copyFile(options.reference, refPath)
       await sharp(options.reference)
         .resize(256, 256, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
@@ -197,9 +183,9 @@ export async function update(characterId: string, options: Options): Promise<voi
     }
     
     character.updatedAt = new Date().toISOString()
-    project.assetPipeline.characters[index] = character
+    pipeline.characters[index] = character
     
-    await coreSaveProject(project, options.dataDir)
+    await updateAssetPipeline(pipeline, options.dataDir)
     
     if (options.json) {
       output(character, options)
@@ -214,24 +200,21 @@ export async function update(characterId: string, options: Options): Promise<voi
 
 export async function deleteCharacter(characterId: string, options: Options): Promise<void> {
   try {
-    const project = await findProjectByGame(options.game, options.dataDir)
+    await verifyGameExists(options.game, options.dataDir)
+    const pipeline = await getAssetPipeline(options.dataDir)
     
-    if (!project.assetPipeline) {
-      throw new Error('Project has no asset pipeline data')
-    }
-    
-    const character = project.assetPipeline.characters.find(c => c.id === characterId)
+    const character = pipeline.characters.find(c => c.id === characterId)
     
     if (!character) {
       throw new Error(`Character not found: ${characterId}`)
     }
     
-    project.assetPipeline.characters = project.assetPipeline.characters.filter(c => c.id !== characterId)
+    pipeline.characters = pipeline.characters.filter(c => c.id !== characterId)
     
     // Also remove associated poses
-    project.assetPipeline.poses = project.assetPipeline.poses.filter(p => p.characterId !== characterId)
+    pipeline.poses = pipeline.poses.filter(p => p.characterId !== characterId)
     
-    await coreSaveProject(project, options.dataDir)
+    await updateAssetPipeline(pipeline, options.dataDir)
     
     if (options.json) {
       output({ deleted: true, characterId }, options)

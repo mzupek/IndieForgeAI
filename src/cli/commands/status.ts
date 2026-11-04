@@ -1,4 +1,5 @@
-import { listProjects as coreListProjects } from '@core/storage/projectStorage'
+import { getAssetPipeline } from '@core/storage/studioStorage'
+import { listProjects as listLegacyProjects } from '@core/storage/projectStorage'
 import { output, outputError } from '../utils/output'
 
 interface Options {
@@ -8,51 +9,46 @@ interface Options {
 
 export async function run(options: Options): Promise<void> {
   try {
-    const projects = await coreListProjects(options.dataDir)
+    const pipeline = await getAssetPipeline(options.dataDir)
+    const legacyProjects = await listLegacyProjects(options.dataDir)
     
     const status = {
-      projects: projects.length,
-      games: 0,
-      characters: 0,
-      poses: 0,
-      completeCharacters: 0,
-      details: projects.map(project => {
-        const games = project.assetPipeline?.games ?? []
-        const characters = project.assetPipeline?.characters ?? []
-        const poses = project.assetPipeline?.poses ?? []
+      legacyProjects: legacyProjects.length,
+      games: pipeline.games.length,
+      characters: pipeline.characters.length,
+      poses: pipeline.poses.length,
+      clips: pipeline.clips.length,
+      gameDetails: pipeline.games.map(game => {
+        const gameCharacters = pipeline.characters.filter(c => c.gameId === game.id)
+        const gamePoses = pipeline.poses.filter(p => 
+          gameCharacters.some(c => c.id === p.characterId)
+        )
         
         return {
-          projectId: project.id,
-          projectName: project.name,
-          games: games.length,
-          characters: characters.length,
-          poses: poses.length
+          gameId: game.id,
+          gameName: game.name,
+          engine: game.engine,
+          characters: gameCharacters.length,
+          poses: gamePoses.length
         }
       })
-    }
-    
-    // Calculate totals
-    for (const detail of status.details) {
-      status.games += detail.games
-      status.characters += detail.characters
-      status.poses += detail.poses
     }
     
     if (options.json) {
       output(status, options)
     } else {
-      console.log('\nIndie Forge Status:\n')
-      console.log(`  Projects: ${status.projects}`)
+      console.log('\nIndie Forge Studio Status:\n')
       console.log(`  Games: ${status.games}`)
       console.log(`  Characters: ${status.characters}`)
       console.log(`  Poses: ${status.poses}`)
+      console.log(`  Legacy Projects: ${status.legacyProjects}`)
       console.log()
       
-      if (status.details.length > 0) {
-        console.log('Projects:\n')
-        for (const detail of status.details) {
-          console.log(`  ${detail.projectName} (${detail.projectId})`)
-          console.log(`    Games: ${detail.games}`)
+      if (status.gameDetails.length > 0) {
+        console.log('Games:\n')
+        for (const detail of status.gameDetails) {
+          console.log(`  ${detail.gameName} (${detail.gameId})`)
+          console.log(`    Engine: ${detail.engine}`)
           console.log(`    Characters: ${detail.characters}`)
           console.log(`    Poses: ${detail.poses}`)
           console.log()

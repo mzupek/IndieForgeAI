@@ -4,8 +4,8 @@ import { extname, basename } from 'path'
 import sharp from 'sharp'
 import type { Pose, PoseSlot } from '@shared/types/assetPipeline'
 import { mapFilenameToSlot } from '@shared/poseValidation'
-import { loadProject as coreLoadProject, listProjects as coreListProjects, saveProject as coreSaveProject } from '@core/storage/projectStorage'
-import { getProjectDir } from '@core/storage/dataDir'
+import { getAssetPipeline, updateAssetPipeline } from '@core/storage/studioStorage'
+import { getDataDir } from '@core/storage/dataDir'
 import { output, outputError } from '../utils/output'
 import { join } from 'path'
 
@@ -15,16 +15,12 @@ interface Options {
   slot?: PoseSlot
 }
 
-async function findProjectByCharacter(characterId: string, dataDir?: string) {
-  const projects = await coreListProjects(dataDir)
+async function verifyCharacterExists(characterId: string, dataDir?: string) {
+  const pipeline = await getAssetPipeline(dataDir)
   
-  for (const project of projects) {
-    if (project.assetPipeline?.characters.some(c => c.id === characterId)) {
-      return project
-    }
+  if (!pipeline.characters.some(c => c.id === characterId)) {
+    throw new Error(`Character not found: ${characterId}`)
   }
-  
-  throw new Error(`Character not found: ${characterId}`)
 }
 
 export async function importPoses(
@@ -33,13 +29,10 @@ export async function importPoses(
   options: Options
 ): Promise<void> {
   try {
-    const project = await findProjectByCharacter(characterId, options.dataDir)
+    await verifyCharacterExists(characterId, options.dataDir)
+    const pipeline = await getAssetPipeline(options.dataDir)
     
-    if (!project.assetPipeline) {
-      throw new Error('Project has no asset pipeline data')
-    }
-    
-    const character = project.assetPipeline.characters.find(c => c.id === characterId)
+    const character = pipeline.characters.find(c => c.id === characterId)
     if (!character) {
       throw new Error(`Character not found: ${characterId}`)
     }
@@ -65,18 +58,19 @@ export async function importPoses(
         }
         
         // Check if pose already exists for this slot
-        const existingIndex = project.assetPipeline.poses.findIndex(
+        const existingIndex = pipeline.poses.findIndex(
           p => p.characterId === characterId && p.slot === slot
         )
         
         const now = new Date().toISOString()
-        const poseId = existingIndex >= 0 ? project.assetPipeline.poses[existingIndex].id : randomUUID()
+        const poseId = existingIndex >= 0 ? pipeline.poses[existingIndex].id : randomUUID()
         const ext = extname(filePath)
         
-        const posePath = join(getProjectDir(project.id, options.dataDir), 'poses', `${poseId}_pose${ext}`)
-        const thumbPath = join(getProjectDir(project.id, options.dataDir), 'poses', `${poseId}_thumb.png`)
+        const posesDir = join(getDataDir(options.dataDir), 'poses')
+        const posePath = join(posesDir, `${poseId}_pose${ext}`)
+        const thumbPath = join(posesDir, `${poseId}_thumb.png`)
         
-        await mkdir(join(getProjectDir(project.id, options.dataDir), 'poses'), { recursive: true })
+        await mkdir(posesDir, { recursive: true })
         await copyFile(filePath, posePath)
         await sharp(filePath)
           .resize(256, 256, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
@@ -90,14 +84,14 @@ export async function importPoses(
           file: posePath,
           status: 'draft', // CLI always imports as draft - only UI can approve
           source: 'import',
-          createdAt: existingIndex >= 0 ? project.assetPipeline.poses[existingIndex].createdAt : now,
+          createdAt: existingIndex >= 0 ? pipeline.poses[existingIndex].createdAt : now,
           updatedAt: now
         }
         
         if (existingIndex >= 0) {
-          project.assetPipeline.poses[existingIndex] = pose
+          pipeline.poses[existingIndex] = pose
         } else {
-          project.assetPipeline.poses.push(pose)
+          pipeline.poses.push(pose)
         }
         
         imported.push(pose)
@@ -107,7 +101,7 @@ export async function importPoses(
     }
     
     if (imported.length > 0) {
-      await coreSaveProject(project, options.dataDir)
+      await updateAssetPipeline(pipeline, options.dataDir)
     }
     
     if (options.json) {
@@ -141,13 +135,10 @@ export async function importPoses(
 
 export async function list(characterId: string, options: Options): Promise<void> {
   try {
-    const project = await findProjectByCharacter(characterId, options.dataDir)
+    await verifyCharacterExists(characterId, options.dataDir)
+    const pipeline = await getAssetPipeline(options.dataDir)
     
-    if (!project.assetPipeline) {
-      throw new Error('Project has no asset pipeline data')
-    }
-    
-    const poses = project.assetPipeline.poses.filter(p => p.characterId === characterId)
+    const poses = pipeline.poses.filter(p => p.characterId === characterId)
     
     if (options.json) {
       output(poses, options)
@@ -174,31 +165,21 @@ export async function list(characterId: string, options: Options): Promise<void>
 
 export async function remove(poseId: string, options: Options): Promise<void> {
   try {
-    const projects = await coreListProjects(options.dataDir)
+    const pipeline = await getAssetPipeline(options.dataDir)
     
-    let found = false
-    for (const project of projects) {
-      if (project.assetPipeline) {
-        const poseIndex = project.assetPipeline.poses.findIndex(p => p.id === poseId)
-        if (poseIndex >= 0) {
-          const pose = project.assetPipeline.poses[poseIndex]
-          project.assetPipeline.poses.splice(poseIndex, 1)
-          await coreSaveProject(project, options.dataDir)
-          
-          if (options.json) {
-            output({ deleted: true, poseId }, options)
-          } else {
-            console.log(`\nRemoved pose: ${pose.slot} (${poseId})`)
-          }
-          
-          found = true
-          break
-        }
-      }
+    const poseIndex = pipeline.poses.findIndex(p => p.id === poseId)
+    if (poseIndex < 0) {
+      throw new Error(`Pose not found: ${poseId}`)
     }
     
-    if (!found) {
-      throw new Error(`Pose not found: ${poseId}`)
+    const pose = pipeline.poses[poseIndex]
+    pipeline.poses.splice(poseIndex, 1)
+    await updateAssetPipeline(pipeline, options.dataDir)
+    
+    if (options.json) {
+      output({ deleted: true, poseId }, options)
+    } else {
+      console.log(`\nRemoved pose: ${pose.slot} (${poseId})`)
     }
   } catch (err) {
     outputError(err, options)

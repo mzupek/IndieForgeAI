@@ -1,7 +1,7 @@
 import type { Character } from '@shared/types/assetPipeline'
 import { checkPoseCompleteness, POSE_SLOTS, type PoseMetadata } from '@shared/poseValidation'
 import { validatePoseImage } from '../../main/storage/poseService'
-import { loadProject as coreLoadProject, listProjects as coreListProjects } from '@core/storage/projectStorage'
+import { getAssetPipeline } from '@core/storage/studioStorage'
 import { output, outputError } from '../utils/output'
 
 interface Options {
@@ -19,58 +19,33 @@ interface ValidationResult {
 
 export async function run(characterId: string | undefined, options: Options): Promise<void> {
   try {
-    const projects = await coreListProjects(options.dataDir)
+    const pipeline = await getAssetPipeline(options.dataDir)
     const results: ValidationResult[] = []
-    let charactersToValidate: Array<{ character: Character; projectId: string }> = []
+    let charactersToValidate: Character[] = []
     
     // Determine which characters to validate
     if (characterId) {
       // Validate specific character
-      for (const project of projects) {
-        if (project.assetPipeline) {
-          const char = project.assetPipeline.characters.find(c => c.id === characterId)
-          if (char) {
-            charactersToValidate.push({ character: char, projectId: project.id })
-            break
-          }
-        }
-      }
-      
-      if (charactersToValidate.length === 0) {
+      const char = pipeline.characters.find(c => c.id === characterId)
+      if (!char) {
         throw new Error(`Character not found: ${characterId}`)
       }
+      charactersToValidate.push(char)
     } else if (options.game) {
       // Validate all characters in a game
-      for (const project of projects) {
-        if (project.assetPipeline) {
-          const chars = project.assetPipeline.characters.filter(c => c.gameId === options.game)
-          for (const char of chars) {
-            charactersToValidate.push({ character: char, projectId: project.id })
-          }
-        }
-      }
-      
-      if (charactersToValidate.length === 0) {
+      const chars = pipeline.characters.filter(c => c.gameId === options.game)
+      if (chars.length === 0) {
         throw new Error(`No characters found for game: ${options.game}`)
       }
+      charactersToValidate = chars
     } else {
-      // Validate all characters across all projects
-      for (const project of projects) {
-        if (project.assetPipeline) {
-          for (const char of project.assetPipeline.characters) {
-            charactersToValidate.push({ character: char, projectId: project.id })
-          }
-        }
-      }
+      // Validate all characters
+      charactersToValidate = pipeline.characters
     }
     
     // Validate each character
-    for (const { character, projectId } of charactersToValidate) {
-      const project = await coreLoadProject(projectId, options.dataDir)
-      
-      if (!project.assetPipeline) continue
-      
-      const poses = project.assetPipeline.poses.filter(p => p.characterId === character.id)
+    for (const character of charactersToValidate) {
+      const poses = pipeline.poses.filter(p => p.characterId === character.id)
       
       // Build metadata map
       const metadataMap = new Map<string, PoseMetadata>()

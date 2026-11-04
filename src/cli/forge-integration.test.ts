@@ -135,7 +135,7 @@ async function testStatusCommand() {
     assertEqual(result.exitCode, 0, 'Should exit with code 0')
     
     const status = JSON.parse(result.stdout)
-    assertEqual(status.projects, 1, 'Should have 1 project')
+    assertEqual(status.legacyProjects, 1, 'Should have 1 legacy project')
     assertEqual(status.games, 2, 'Should have 2 games')
     assertEqual(status.characters, 0, 'Should have 0 characters')
     assertEqual(status.poses, 0, 'Should have 0 poses')
