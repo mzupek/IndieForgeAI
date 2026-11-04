@@ -443,3 +443,244 @@ Default data directory locations:
 - **Windows:** `%APPDATA%/indie-forge-ai`
 
 Override with `--data-dir` or `FORGE_DATA_DIR` environment variable.
+
+---
+
+## Clip Commands
+
+### `forge clip import <files...>`
+
+Import video clip(s) with automatic moment detection from filenames.
+
+**Usage:**
+```bash
+# Auto-detect moment from filename
+forge clip import hero_intro.mp4 boss_finisher.webm --game game-neon-recall [--json]
+
+# Explicit moment
+forge clip import clip.mp4 --game game-neon-recall --moment hit [--json]
+
+# With character and tags
+forge clip import clip.mp4 \
+  --game game-neon-recall \
+  --moment finisher \
+  --character char-uuid \
+  --tags "dramatic,slow-mo" \
+  [--json]
+```
+
+**Options:**
+- `--game <id>` (required) - Game ID
+- `--moment <moment>` - Explicit moment (intro|hit|finisher|defeat|story_beat)
+- `--character <id>` - Character ID
+- `--tags <tags>` - Comma-separated tags
+
+**Moment Auto-Mapping:**
+Filenames are automatically mapped to moments:
+- `hero_intro.mp4` → `intro`
+- `boss-hit.webm` → `hit`
+- `gate_drone_finisher.mp4` → `finisher`
+- `character_defeat.mp4` → `defeat`
+- `npc-story_beat.webm` → `story_beat`
+
+Matching is case-insensitive and supports underscores, hyphens, or dots as separators.
+
+**Duration Detection:**
+- Automatically detects video duration using ffmpeg
+- Warns if duration < 0.5s (too short)
+- Warns if duration > 2.0s (too long)
+- Recommended range: 0.5s - 2.0s
+
+**JSON Output:**
+```json
+{
+  "imported": [
+    {
+      "id": "clip-uuid",
+      "characterId": "char-uuid",
+      "moment": "intro",
+      "file": "/path/to/clip.mp4",
+      "durationSec": 1.5,
+      "tags": ["dramatic"],
+      "thumbnail": "/path/to/thumb.png",
+      "createdAt": "2024-01-01T00:00:00Z",
+      "updatedAt": "2024-01-01T00:00:00Z"
+    }
+  ],
+  "errors": [],
+  "warnings": [
+    "clip.mp4: Clip is 2.50s (recommended: 0.5s - 2s)"
+  ]
+}
+```
+
+---
+
+### `forge clip list`
+
+List clips with optional filtering.
+
+**Usage:**
+```bash
+# List all clips
+forge clip list [--json]
+
+# Filter by game
+forge clip list --game game-neon-recall [--json]
+
+# Filter by character
+forge clip list --character char-uuid [--json]
+
+# Filter by moment
+forge clip list --moment intro [--json]
+
+# Combine filters
+forge clip list --game game-neon-recall --moment finisher --character char-uuid [--json]
+```
+
+**Options:**
+- `--game <id>` - Filter by game
+- `--character <id>` - Filter by character
+- `--moment <moment>` - Filter by moment
+
+**JSON Output:**
+```json
+[
+  {
+    "id": "clip-uuid",
+    "characterId": "char-uuid",
+    "moment": "intro",
+    "file": "/path/to/clip.mp4",
+    "durationSec": 1.5,
+    "tags": ["dramatic"],
+    "thumbnail": "/path/to/thumb.png",
+    "createdAt": "2024-01-01T00:00:00Z",
+    "updatedAt": "2024-01-01T00:00:00Z"
+  }
+]
+```
+
+---
+
+### `forge clip show <clip-id>`
+
+Show detailed information about a specific clip.
+
+**Usage:**
+```bash
+forge clip show clip-uuid [--json]
+```
+
+**JSON Output:**
+```json
+{
+  "id": "clip-uuid",
+  "characterId": "char-uuid",
+  "moment": "intro",
+  "file": "/path/to/clip.mp4",
+  "durationSec": 1.5,
+  "tags": ["dramatic", "slow-mo"],
+  "thumbnail": "/path/to/thumb.png",
+  "createdAt": "2024-01-01T00:00:00Z",
+  "updatedAt": "2024-01-01T00:00:00Z"
+}
+```
+
+---
+
+### `forge clip update <clip-id>`
+
+Update clip metadata.
+
+**Usage:**
+```bash
+# Change moment
+forge clip update clip-uuid --moment finisher [--json]
+
+# Change character
+forge clip update clip-uuid --character char-uuid [--json]
+
+# Update tags
+forge clip update clip-uuid --tags "action,dramatic" [--json]
+
+# Remove character association
+forge clip update clip-uuid --character "" [--json]
+```
+
+**Options:**
+- `--moment <moment>` - New moment
+- `--character <id>` - New character ID (or empty string to unset)
+- `--tags <tags>` - Comma-separated tags
+
+**JSON Output:** Same as `show` command.
+
+---
+
+### `forge clip remove <clip-id>`
+
+Remove a clip.
+
+**Usage:**
+```bash
+forge clip remove clip-uuid [--json]
+```
+
+**JSON Output:**
+```json
+{
+  "deleted": true,
+  "clipId": "clip-uuid"
+}
+```
+
+---
+
+## Clip Workflow Example
+
+```bash
+# 1. Import clips with auto-detection
+forge clip import \
+  hero_intro.mp4 \
+  hero_finisher.mp4 \
+  boss_hit.webm \
+  --game game-neon-recall \
+  --json
+
+# 2. List clips for a game
+forge clip list --game game-neon-recall --json
+
+# 3. Update clip metadata
+forge clip update <clip-id> \
+  --character <char-id> \
+  --tags "cinematic,fast" \
+  --json
+
+# 4. Validate all clips are within duration range
+forge clip list --json | jq '.[] | select(.durationSec < 0.5 or .durationSec > 2.0)'
+
+# 5. Remove a clip
+forge clip remove <clip-id> --json
+```
+
+---
+
+## Clip Moment Types
+
+- **intro**: Character introduction or entrance
+- **hit**: Character being hit or taking damage
+- **finisher**: Special move or finishing attack
+- **defeat**: Character defeated or knocked out
+- **story_beat**: Narrative moment or cutscene
+
+---
+
+## Data Directory
+
+Clips are stored in the studio data directory under `clips/`:
+- Video files: `{clip-id}_clip.{ext}`
+- Thumbnails: `{clip-id}_thumb.png`
+
+Default locations:
+- **Linux:** `~/.config/indie-forge-ai/clips`
+- **macOS:** `~/Library/Application Support/indie-forge-ai/clips`
+- **Windows:** `%APPDATA%/indie-forge-ai/clips`

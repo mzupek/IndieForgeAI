@@ -14,6 +14,7 @@ export function ClipsView() {
   const [selectedMoment, setSelectedMoment] = useState<ClipMoment | null>(null)
   const [selectedCharacter, setSelectedCharacter] = useState<string>('')
   const [dragActive, setDragActive] = useState(false)
+  const [playingClip, setPlayingClip] = useState<Clip | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   if (!activeProject || !gameId) {
@@ -48,6 +49,39 @@ export function ClipsView() {
       for (const file of Array.from(files)) {
         if (!file.type.includes('video')) continue
         
+        await window.indieForge.pipeline.importClip(file.path, selectedMoment, {
+          gameId,
+          characterId: selectedCharacter || undefined,
+          tags: []
+        })
+      }
+      
+      const updated = await window.indieForge.projects.open(projectId!)
+      setActiveProject(updated)
+      setSelectedMoment(null)
+      setSelectedCharacter('')
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to import clips')
+    } finally {
+      setImporting(false)
+    }
+  }
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault()
+    setDragActive(false)
+    
+    if (!selectedMoment) {
+      alert('Please select a moment before dropping files')
+      return
+    }
+    
+    const files = Array.from(e.dataTransfer.files).filter(f => f.type.includes('video'))
+    if (files.length === 0) return
+    
+    setImporting(true)
+    try {
+      for (const file of files) {
         await window.indieForge.pipeline.importClip(file.path, selectedMoment, {
           gameId,
           characterId: selectedCharacter || undefined,
@@ -138,14 +172,22 @@ export function ClipsView() {
           </div>
         </div>
 
-        <div style={{
-          marginBottom: '2rem',
-          padding: '1.5rem',
-          border: dragActive ? '2px dashed var(--forge-gold)' : '2px dashed var(--border)',
-          borderRadius: '4px',
-          background: dragActive ? 'rgba(255, 200, 0, 0.05)' : 'var(--bg-secondary)',
-          textAlign: 'center'
-        }}>
+        <div 
+          style={{
+            marginBottom: '2rem',
+            padding: '1.5rem',
+            border: dragActive ? '2px dashed var(--forge-gold)' : '2px dashed var(--border)',
+            borderRadius: '4px',
+            background: dragActive ? 'rgba(255, 200, 0, 0.05)' : 'var(--bg-secondary)',
+            textAlign: 'center'
+          }}
+          onDragOver={(e) => {
+            e.preventDefault()
+            setDragActive(true)
+          }}
+          onDragLeave={() => setDragActive(false)}
+          onDrop={handleDrop}
+        >
           <h4 style={{ margin: '0 0 1rem 0' }}>Import Clips</h4>
           
           <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', marginBottom: '1rem', flexWrap: 'wrap' }}>
@@ -219,10 +261,84 @@ export function ClipsView() {
                 clip={clip}
                 character={clip.characterId ? characters.find(c => c.id === clip.characterId) : undefined}
                 onRemove={() => handleRemoveClip(clip.id)}
+                onPlay={() => setPlayingClip(clip)}
               />
             ))}
           </div>
         )}
+      </div>
+
+      {playingClip && (
+        <VideoPlayerModal
+          clip={playingClip}
+          character={playingClip.characterId ? characters.find(c => c.id === playingClip.characterId) : undefined}
+          onClose={() => setPlayingClip(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+function VideoPlayerModal({
+  clip,
+  character,
+  onClose
+}: {
+  clip: Clip
+  character?: Character
+  onClose: () => void
+}) {
+  const videoPath = useLocalFilePreview(clip.file)
+
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        background: 'rgba(0, 0, 0, 0.9)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 1000
+      }}
+      onClick={onClose}
+    >
+      <div
+        style={{
+          background: 'var(--bg)',
+          padding: '2rem',
+          borderRadius: '8px',
+          maxWidth: '800px',
+          maxHeight: '90vh',
+          overflow: 'auto'
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+          <h3 style={{ margin: 0 }}>{getMomentDisplayName(clip.moment)}</h3>
+          <button type="button" onClick={onClose} style={{ padding: '0.5rem 1rem' }}>
+            Close
+          </button>
+        </div>
+
+        {videoPath && (
+          <video
+            src={videoPath}
+            controls
+            autoPlay
+            loop
+            style={{ width: '100%', maxHeight: '600px', borderRadius: '4px', background: '#000' }}
+          />
+        )}
+
+        <div style={{ marginTop: '1rem' }}>
+          <p style={{ margin: '0.5rem 0' }}>Duration: {formatDuration(clip.durationSec)}</p>
+          {character && <p style={{ margin: '0.5rem 0' }}>Character: {character.name}</p>}
+          {clip.tags.length > 0 && <p style={{ margin: '0.5rem 0' }}>Tags: {clip.tags.join(', ')}</p>}
+        </div>
       </div>
     </div>
   )
@@ -231,14 +347,30 @@ export function ClipsView() {
 function ClipCard({
   clip,
   character,
-  onRemove
+  onRemove,
+  onPlay
 }: {
   clip: Clip
   character?: Character
   onRemove: () => void
+  onPlay: () => void
 }) {
+  const [isHovering, setIsHovering] = useState(false)
   const thumbnail = useLocalFilePreview(clip.thumbnail)
+  const videoPath = useLocalFilePreview(clip.file)
   const issues = validateClipDuration(clip.durationSec)
+  const videoRef = useRef<HTMLVideoElement>(null)
+
+  useEffect(() => {
+    if (videoRef.current) {
+      if (isHovering) {
+        videoRef.current.play().catch(() => {})
+      } else {
+        videoRef.current.pause()
+        videoRef.current.currentTime = 0
+      }
+    }
+  }, [isHovering])
 
   return (
     <div style={{
@@ -247,18 +379,33 @@ function ClipCard({
       padding: '1rem',
       background: 'var(--bg-secondary)'
     }}>
-      <div style={{
-        width: '100%',
-        height: '150px',
-        background: 'var(--bg)',
-        borderRadius: '4px',
-        marginBottom: '0.75rem',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        overflow: 'hidden'
-      }}>
-        {thumbnail ? (
+      <div 
+        style={{
+          width: '100%',
+          height: '150px',
+          background: 'var(--bg)',
+          borderRadius: '4px',
+          marginBottom: '0.75rem',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          overflow: 'hidden',
+          position: 'relative',
+          cursor: 'pointer'
+        }}
+        onMouseEnter={() => setIsHovering(true)}
+        onMouseLeave={() => setIsHovering(false)}
+        onClick={onPlay}
+      >
+        {isHovering && videoPath ? (
+          <video
+            ref={videoRef}
+            src={videoPath}
+            muted
+            loop
+            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+          />
+        ) : thumbnail ? (
           <img
             src={thumbnail}
             alt={`${clip.moment} clip`}
@@ -267,6 +414,18 @@ function ClipCard({
         ) : (
           <span style={{ color: 'var(--muted)' }}>📹</span>
         )}
+        <div style={{
+          position: 'absolute',
+          bottom: '8px',
+          right: '8px',
+          background: 'rgba(0, 0, 0, 0.7)',
+          padding: '4px 8px',
+          borderRadius: '4px',
+          fontSize: '0.75rem',
+          color: '#fff'
+        }}>
+          Click to play
+        </div>
       </div>
 
       <div style={{ marginBottom: '0.5rem' }}>
