@@ -4,13 +4,17 @@ import { basename, extname, join } from 'path'
 import { promisify } from 'util'
 import ffmpeg from 'fluent-ffmpeg'
 import ffmpegPath from 'ffmpeg-static'
+import ffprobePath from 'ffprobe-static'
 import type { Clip, ClipMoment } from '@shared/types/assetPipeline'
 import { getAssetPipeline, updateAssetPipeline } from '@core/storage/studioStorage'
 import { getDataDir } from '@core/storage/dataDir'
 
-// Set ffmpeg path
+// Set ffmpeg and ffprobe paths
 if (ffmpegPath) {
   ffmpeg.setFfmpegPath(ffmpegPath)
+}
+if (ffprobePath && ffprobePath.path) {
+  ffmpeg.setFfprobePath(ffprobePath.path)
 }
 
 function getClipsDir(dataDirOverride?: string): string {

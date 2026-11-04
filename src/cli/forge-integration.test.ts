@@ -212,12 +212,12 @@ async function testValidateCommand() {
 }
 
 async function testClipImportWithGeneratedVideo() {
-  console.log('Testing: clip import with ffmpeg-generated test video')
+  console.log('Testing: clip import with ffmpeg-generated test video (intro)')
   const testDir = await setupTestDataDir()
   
   try {
-    // Generate a test video using ffmpeg-static
-    const testVideoPath = join(testDir, 'test_finisher.mp4')
+    // Generate a test video using ffmpeg-static with *_intro.mp4 filename
+    const testVideoPath = join(testDir, 'test_hero_intro.mp4')
     console.log(`  Generating test video: ${testVideoPath}`)
     
     if (!ffmpegStatic) {
@@ -225,15 +225,15 @@ async function testClipImportWithGeneratedVideo() {
     }
     
     execSync(
-      `"${ffmpegStatic}" -f lavfi -i testsrc=duration=1.2:size=320x240:rate=30 -pix_fmt yuv420p "${testVideoPath}"`,
+      `"${ffmpegStatic}" -f lavfi -i testsrc=duration=1.5:size=320x240:rate=30 -pix_fmt yuv420p "${testVideoPath}"`,
       { stdio: 'pipe' }
     )
     
     // Verify the video was created
     await access(testVideoPath)
-    console.log('  ✓ Test video generated')
+    console.log('  ✓ Test video generated (1.5s duration)')
     
-    // Import the clip with moment auto-detection (filename has 'finisher')
+    // Import the clip with moment auto-detection (filename has 'intro')
     const importResult = runForgeCommand(
       `clip import "${testVideoPath}" --game test-game-1 --json`,
       testDir
@@ -247,24 +247,32 @@ async function testClipImportWithGeneratedVideo() {
     const importOutput = JSON.parse(importResult.stdout)
     assert(importOutput.imported, 'Should have imported array')
     assertEqual(importOutput.imported.length, 1, 'Should have imported 1 clip')
+    assertEqual(importOutput.errors?.length || 0, 0, 'Should have no errors')
     
     const clip = importOutput.imported[0]
     assert(clip.id, 'Clip should have an ID')
-    assertEqual(clip.moment, 'finisher', 'Should auto-detect finisher moment from filename')
-    assert(clip.durationSec > 1.0 && clip.durationSec < 1.5, 'Duration should be ~1.2s')
+    assertEqual(clip.moment, 'intro', 'Should auto-detect intro moment from filename')
+    
+    // Assert duration is approximately 1.5s (within 0.1s tolerance)
+    assert(
+      clip.durationSec >= 1.4 && clip.durationSec <= 1.6,
+      `Duration should be ~1.5s, got ${clip.durationSec}s`
+    )
+    console.log(`  ✓ Duration detected: ${clip.durationSec.toFixed(2)}s (expected ~1.5s)`)
+    
     assert(clip.file, 'Clip should have a file path')
     assert(clip.thumbnail, 'Clip should have a thumbnail path')
     
-    console.log(`  ✓ Clip imported: ${clip.id}, moment=${clip.moment}, duration=${clip.durationSec.toFixed(2)}s`)
+    console.log(`  ✓ Clip imported: ${clip.id}, moment=${clip.moment}`)
     
-    // Verify thumbnail was generated
+    // Verify thumbnail file exists
     const studioData = JSON.parse(await readFile(join(testDir, 'studio.json'), 'utf-8'))
     const savedClip = studioData.assetPipeline.clips.find((c: any) => c.id === clip.id)
     assert(savedClip, 'Clip should be in studio.json')
     
-    // Thumbnail path in studio.json is absolute, not relative
+    // Thumbnail path in studio.json is absolute
     await access(savedClip.thumbnail)
-    console.log('  ✓ Thumbnail generated')
+    console.log('  ✓ Thumbnail file exists')
     
     // List clips and verify
     const listResult = runForgeCommand('clip list --game test-game-1 --json', testDir)
@@ -273,6 +281,7 @@ async function testClipImportWithGeneratedVideo() {
     const clips = JSON.parse(listResult.stdout)
     assertEqual(clips.length, 1, 'Should list 1 clip')
     assertEqual(clips[0].id, clip.id, 'Listed clip should match imported clip')
+    assertEqual(clips[0].moment, 'intro', 'Listed clip should have intro moment')
     
     console.log('✓ Clip import with generated video test passed')
   } finally {

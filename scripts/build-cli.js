@@ -25,6 +25,7 @@ async function build() {
         'sharp',
         'commander',
         'ffmpeg-static',
+        'ffprobe-static',
         'fluent-ffmpeg'
       ],
       sourcemap: false,
