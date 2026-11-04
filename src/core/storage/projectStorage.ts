@@ -7,7 +7,6 @@ import { join } from 'path'
 import type { IndieForgeProject } from '@shared/types/project'
 import { getProjectFilePath, getProjectsDir, getProjectDir } from './dataDir'
 import { withLock, atomicWriteFile } from './fileLock'
-import { migrateProject } from '../../main/storage/pipelineMigration'
 
 /**
  * Load a project by ID
@@ -23,8 +22,20 @@ export async function loadProject(
     const data = await readFile(filePath, 'utf-8')
     const project = JSON.parse(data) as IndieForgeProject
     
-    // Apply migrations
-    return migrateProject(project)
+    // Basic normalization - ensure assetPipeline exists
+    if (!project.assetPipeline) {
+      project.assetPipeline = {
+        schemaVersion: 1,
+        games: [],
+        characters: [],
+        poses: [],
+        clips: [],
+        scenePresets: [],
+        exportProfiles: []
+      }
+    }
+    
+    return project
   })
 }
 

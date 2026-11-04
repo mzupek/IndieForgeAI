@@ -8,9 +8,9 @@
   },
   "scripts": {
     "dev": "electron-vite dev",
-    "build": "electron-vite build && cp -r seed out/seed",
-    "build:cli": "tsc src/cli/**/*.ts src/core/**/*.ts --outDir out --module commonjs --target es2020 --moduleResolution node --esModuleInterop --skipLibCheck --resolveJsonModule",
-    "forge": "npm run build:cli && node out/cli/forge.js",
+    "build": "electron-vite build && cp -r seed out/seed && npm run build:cli",
+    "build:cli": "node scripts/build-cli.js",
+    "forge": "node out/cli/forge.js",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit"
   },
@@ -30,6 +30,7 @@
     "@vitejs/plugin-react": "^4.3.4",
     "electron": "^33.2.0",
     "electron-vite": "^2.3.0",
+    "esbuild": "^0.28.2",
     "typescript": "^5.7.2",
     "vite": "^5.4.11"
   }

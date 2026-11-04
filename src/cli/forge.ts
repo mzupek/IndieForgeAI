@@ -1,5 +1,3 @@
-#!/usr/bin/env node
-
 /**
  * Forge CLI - Command-line interface for Indie Forge AI
  * For use by Game Engineer agents and Asset Creator agents
