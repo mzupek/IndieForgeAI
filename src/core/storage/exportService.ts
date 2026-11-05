@@ -8,7 +8,8 @@ import type {
   ExportDryRun,
   ExportManifestCharacter,
   ExportManifestClip,
-  ExportManifestPreset
+  ExportManifestPreset,
+  ExportManifestStoryboard
 } from '@shared/types/exportManifest'
 import { EXPORT_MANIFEST_SCHEMA_VERSION } from '@shared/types/exportManifest'
 import { getAssetPipeline, saveStudio } from './studioStorage'
@@ -252,6 +253,68 @@ async function generateManifest(
     tags: preset.tags
   }))
   
+  // Build storyboards for export (v2)
+  const storyboards = pipeline.storyboards?.filter(sb => sb.gameId === gameId) ?? []
+  const manifestStoryboards = storyboards.map(sb => {
+    const shots = pipeline.storyboardShots?.filter(shot => sb.shotIds.includes(shot.id)) ?? []
+    
+    return {
+      id: sb.id,
+      name: sb.name,
+      description: sb.description,
+      shots: shots.map(shot => {
+        const layers = shot.layers.map(layer => {
+          const resolved: any = {
+            id: layer.id,
+            zOrder: layer.zOrder,
+            x: layer.x,
+            y: layer.y,
+            scale: layer.scale,
+            rotation: layer.rotation,
+            flipX: layer.flipX,
+            opacity: layer.opacity
+          }
+          
+          if (layer.characterId) resolved.characterId = layer.characterId
+          if (layer.poseId) {
+            resolved.poseId = layer.poseId
+            const pose = pipeline.poses.find(p => p.id === layer.poseId)
+            if (pose && pose.status === 'approved') {
+              const character = pipeline.characters.find(c => c.id === pose.characterId)
+              if (character) {
+                resolved.poseFile = `poses/${character.id}_${pose.slot}.png`
+              }
+            }
+          }
+          if (layer.clipId) {
+            resolved.clipId = layer.clipId
+            const clip = pipeline.clips.find(c => c.id === layer.clipId)
+            if (clip) {
+              resolved.clipFile = `clips/${basename(clip.file)}`
+            }
+          }
+          if (layer.imagePath) resolved.imagePath = layer.imagePath
+          
+          return resolved
+        })
+        
+        return {
+          id: shot.id,
+          name: shot.name,
+          durationSec: shot.durationSec,
+          aspectRatio: shot.aspectRatio,
+          backgroundImage: shot.backgroundImage,
+          backgroundClipId: shot.backgroundClipId,
+          layers,
+          cameraTrack: shot.cameraTrack,
+          effectsTrack: shot.effectsTrack,
+          notes: shot.notes,
+          thumbnail: shot.thumbnail
+        }
+      })
+    }
+  })
+  
   return {
     schemaVersion: EXPORT_MANIFEST_SCHEMA_VERSION,
     exportedAt: new Date().toISOString(),
@@ -262,7 +325,8 @@ async function generateManifest(
     },
     characters: manifestCharacters,
     clips: manifestClips,
-    presets: manifestPresets
+    presets: manifestPresets,
+    storyboards: manifestStoryboards.length > 0 ? manifestStoryboards : undefined
   }
 }
 
