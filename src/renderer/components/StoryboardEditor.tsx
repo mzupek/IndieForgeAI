@@ -10,17 +10,26 @@ import type {
   Clip,
   CameraKeyframe,
   EffectMarker,
-  ScenePreset
+  ScenePreset,
+  ScenePresetType
 } from '@shared/types/assetPipeline'
 
 type EditorMode = 'layout' | 'camera'
-type DragMode = 'move' | 'scale' | 'rotate' | 'framingRect' | 'timelineMarker' | null
+type DragMode = 'move' | 'scale' | 'rotate' | 'framingRect' | 'cameraMarker' | 'effectMarker' | null
 
 interface LoadedImage {
   element: HTMLImageElement
   url: string
   width: number
   height: number
+}
+
+function lerp(a: number, b: number, t: number): number {
+  return a + (b - a) * t
+}
+
+function easeInOutCubic(t: number): number {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
 }
 
 export function StoryboardEditor() {
@@ -35,11 +44,12 @@ export function StoryboardEditor() {
   const [playbackTime, setPlaybackTime] = useState(0)
   
   const [dragMode, setDragMode] = useState<DragMode>(null)
-  const [dragStart, setDragStart] = useState<{ x: number; y: number; layerX?: number; layerY?: number; layerScale?: number; layerRotation?: number } | null>(null)
-  const [dragTimelineMarker, setDragTimelineMarker] = useState<{ type: 'camera' | 'effect'; index: number } | null>(null)
+  const [dragStart, setDragStart] = useState<any>(null)
+  const [draggedMarker, setDraggedMarker] = useState<{ type: 'camera' | 'effect'; index: number } | null>(null)
   
   const [loadedImages, setLoadedImages] = useState<Map<string, LoadedImage>>(new Map())
   const [showAddCharacter, setShowAddCharacter] = useState(false)
+  const [showAddEffect, setShowAddEffect] = useState(false)
   const [editingNotes, setEditingNotes] = useState(false)
   const [notesText, setNotesText] = useState('')
   
@@ -71,7 +81,7 @@ export function StoryboardEditor() {
     }
   }, [selectedShot, editingNotes])
 
-  // Load images for poses and clips
+  // Load images
   useEffect(() => {
     if (!selectedShot) return
 
@@ -114,6 +124,48 @@ export function StoryboardEditor() {
     loadAllImages()
   }, [selectedShot, poses, clips])
 
+  // Get interpolated camera state
+  const getInterpolatedCamera = useCallback((time: number): { target: {x: number, y: number}, zoom: number, framingRect?: any } | null => {
+    if (!selectedShot || selectedShot.cameraTrack.length === 0) return null
+    
+    const sorted = [...selectedShot.cameraTrack].sort((a, b) => a.t - b.t)
+    
+    if (time <= sorted[0].t) return sorted[0] as any
+    if (time >= sorted[sorted.length - 1].t) return sorted[sorted.length - 1] as any
+    
+    let before: CameraKeyframe | null = null
+    let after: CameraKeyframe | null = null
+    
+    for (let i = 0; i < sorted.length - 1; i++) {
+      if (time >= sorted[i].t && time <= sorted[i + 1].t) {
+        before = sorted[i]
+        after = sorted[i + 1]
+        break
+      }
+    }
+    
+    if (!before || !after) return sorted[0] as any
+    
+    const t = (time - before.t) / (after.t - before.t)
+    const easedT = easeInOutCubic(t)
+    
+    const beforeTarget = typeof before.target === 'string'
+      ? selectedShot.layers.find(l => l.id === before!.target) || { x: 0.5, y: 0.5 }
+      : before.target
+    const afterTarget = typeof after.target === 'string'
+      ? selectedShot.layers.find(l => l.id === after!.target) || { x: 0.5, y: 0.5 }
+      : after.target
+    
+    return {
+      target: {
+        x: lerp(beforeTarget.x, afterTarget.x, easedT),
+        y: lerp(beforeTarget.y, afterTarget.y, easedT)
+      },
+      zoom: lerp(before.zoom, after.zoom, easedT),
+      framingRect: before.framingRect || after.framingRect
+    }
+  }, [selectedShot])
+
   // Render canvas
   useEffect(() => {
     if (!canvasRef.current || !selectedShot) return
@@ -122,32 +174,22 @@ export function StoryboardEditor() {
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
-    // Clear
     ctx.fillStyle = '#1a1a1a'
     ctx.fillRect(0, 0, canvas.width, canvas.height)
 
-    // Apply camera transform in camera mode
-    let cameraTransform = { offsetX: 0, offsetY: 0, scale: 1 }
-    if (mode === 'camera' && selectedShot.cameraTrack.length > 0) {
-      const kf = getCurrentCameraKeyframe()
-      if (kf) {
-        const target = typeof kf.target === 'string' 
-          ? selectedShot.layers.find(l => l.id === kf.target)
-          : null
-        const targetX = target ? target.x : (typeof kf.target === 'object' ? kf.target.x : 0.5)
-        const targetY = target ? target.y : (typeof kf.target === 'object' ? kf.target.y : 0.5)
+    // Apply camera transform
+    ctx.save()
+    if (mode === 'camera' || playbackState === 'playing') {
+      const cam = getInterpolatedCamera(playbackTime)
+      if (cam) {
+        const targetX = cam.target.x * canvas.width
+        const targetY = cam.target.y * canvas.height
         
-        cameraTransform = {
-          offsetX: (0.5 - targetX) * canvas.width * kf.zoom,
-          offsetY: (0.5 - targetY) * canvas.height * kf.zoom,
-          scale: kf.zoom
-        }
+        ctx.translate(canvas.width / 2, canvas.height / 2)
+        ctx.scale(cam.zoom, cam.zoom)
+        ctx.translate(-targetX, -targetY)
       }
     }
-
-    ctx.save()
-    ctx.translate(cameraTransform.offsetX, cameraTransform.offsetY)
-    ctx.scale(cameraTransform.scale, cameraTransform.scale)
 
     // Draw layers
     const sortedLayers = [...selectedShot.layers].sort((a, b) => a.zOrder - b.zOrder)
@@ -175,19 +217,20 @@ export function StoryboardEditor() {
       
       ctx.restore()
 
-      // Selection handles
-      if (layer.id === selectedLayerId && mode === 'layout') {
+      // Selection handles (in screen space, after camera transform)
+      if (layer.id === selectedLayerId && mode === 'layout' && playbackState === 'stopped') {
         const size = (img ? 200 : 100) * layer.scale
         const x = stageX
         const y = stageY
         
         ctx.strokeStyle = '#FFC800'
-        ctx.lineWidth = 2
+        ctx.lineWidth = 2 / (getInterpolatedCamera(playbackTime)?.zoom || 1)
         ctx.strokeRect(x - size / 2, y - size / 2, size, size)
         
-        // Corner handles for scaling
-        const handleSize = 10
+        const handleSize = 10 / (getInterpolatedCamera(playbackTime)?.zoom || 1)
         ctx.fillStyle = '#FFC800'
+        
+        // Corner handles (scale)
         ctx.fillRect(x - size / 2 - handleSize / 2, y - size / 2 - handleSize / 2, handleSize, handleSize)
         ctx.fillRect(x + size / 2 - handleSize / 2, y - size / 2 - handleSize / 2, handleSize, handleSize)
         ctx.fillRect(x - size / 2 - handleSize / 2, y + size / 2 - handleSize / 2, handleSize, handleSize)
@@ -195,36 +238,30 @@ export function StoryboardEditor() {
         
         // Rotation handle
         ctx.beginPath()
-        ctx.arc(x, y - size / 2 - 20, 8, 0, Math.PI * 2)
+        ctx.arc(x, y - size / 2 - 20, 6 / (getInterpolatedCamera(playbackTime)?.zoom || 1), 0, Math.PI * 2)
         ctx.fill()
       }
     }
 
     ctx.restore()
 
-    // Draw framing rect in camera mode
-    if (mode === 'camera' && selectedShot.cameraTrack.length > 0) {
-      const kf = getCurrentCameraKeyframe()
-      if (kf?.framingRect) {
+    // Draw framing rect overlay in camera mode
+    if (mode === 'camera' && playbackState === 'stopped') {
+      const cam = getInterpolatedCamera(playbackTime)
+      if (cam?.framingRect) {
         ctx.strokeStyle = '#00AAFF'
         ctx.lineWidth = 3
         ctx.setLineDash([5, 5])
         ctx.strokeRect(
-          kf.framingRect.x * canvas.width,
-          kf.framingRect.y * canvas.height,
-          kf.framingRect.width * canvas.width,
-          kf.framingRect.height * canvas.height
+          cam.framingRect.x * canvas.width,
+          cam.framingRect.y * canvas.height,
+          cam.framingRect.width * canvas.width,
+          cam.framingRect.height * canvas.height
         )
         ctx.setLineDash([])
       }
     }
-  }, [selectedShot, selectedLayerId, mode, playbackTime, loadedImages, dragStart])
-
-  const getCurrentCameraKeyframe = (): CameraKeyframe | null => {
-    if (!selectedShot || selectedShot.cameraTrack.length === 0) return null
-    const sorted = [...selectedShot.cameraTrack].sort((a, b) => a.t - b.t)
-    return sorted.filter(k => k.t <= playbackTime).pop() || sorted[0]
-  }
+  }, [selectedShot, selectedLayerId, mode, playbackTime, loadedImages, dragStart, getInterpolatedCamera])
 
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (!canvasRef.current || !selectedShot) return
@@ -235,29 +272,58 @@ export function StoryboardEditor() {
     const x = (e.clientX - rect.left) / rect.width
     const y = (e.clientY - rect.top) / rect.height
 
-    if (mode === 'layout') {
-      // Check if clicking a handle or layer
-      const sortedLayers = [...selectedShot.layers].sort((a, b) => b.zOrder - a.zOrder)
+    if (mode === 'layout' && selectedLayer) {
+      const img = loadedImages.get(selectedLayerId!)
+      const size = ((img ? 200 : 100) * selectedLayer.scale) / canvas.width
+      const handleSize = 20 / canvas.width
       
-      for (const layer of sortedLayers) {
-        const size = ((loadedImages.has(layer.id) ? 200 : 100) * layer.scale) / canvas.width
-        const dx = Math.abs(x - layer.x)
-        const dy = Math.abs(y - layer.y)
-        
-        if (dx <= size / 2 && dy <= size / 2) {
-          setSelectedLayerId(layer.id)
-          setDragMode('move')
-          setDragStart({ 
-            x, 
-            y, 
-            layerX: layer.x, 
-            layerY: layer.y, 
-            layerScale: layer.scale, 
-            layerRotation: layer.rotation 
-          })
+      const lx = selectedLayer.x
+      const ly = selectedLayer.y
+      
+      // Check rotation handle
+      const rotHandleY = ly - size / 2 - 20 / canvas.width
+      if (Math.hypot(x - lx, y - rotHandleY) < handleSize / 2) {
+        setDragMode('rotate')
+        setDragStart({ x, y, layerX: lx, layerY: ly, layerRotation: selectedLayer.rotation })
+        return
+      }
+      
+      // Check corner handles (scale)
+      const corners = [
+        { x: lx - size / 2, y: ly - size / 2 },
+        { x: lx + size / 2, y: ly - size / 2 },
+        { x: lx - size / 2, y: ly + size / 2 },
+        { x: lx + size / 2, y: ly + size / 2 }
+      ]
+      
+      for (const corner of corners) {
+        if (Math.abs(x - corner.x) < handleSize / 2 && Math.abs(y - corner.y) < handleSize / 2) {
+          setDragMode('scale')
+          setDragStart({ x, y, layerX: lx, layerY: ly, layerScale: selectedLayer.scale })
           return
         }
       }
+      
+      // Check body (move)
+      if (Math.abs(x - lx) <= size / 2 && Math.abs(y - ly) <= size / 2) {
+        setDragMode('move')
+        setDragStart({ x, y, layerX: lx, layerY: ly })
+        return
+      }
+    }
+    
+    if (mode === 'layout') {
+      // Select layer
+      const sortedLayers = [...selectedShot.layers].sort((a, b) => b.zOrder - a.zOrder)
+      for (const layer of sortedLayers) {
+        const img = loadedImages.get(layer.id)
+        const size = ((img ? 200 : 100) * layer.scale) / canvas.width
+        if (Math.abs(x - layer.x) <= size / 2 && Math.abs(y - layer.y) <= size / 2) {
+          setSelectedLayerId(layer.id)
+          return
+        }
+      }
+      setSelectedLayerId(null)
     } else if (mode === 'camera') {
       // Start drawing framing rect
       setDragMode('framingRect')
@@ -278,21 +344,32 @@ export function StoryboardEditor() {
       const dy = y - dragStart.y
       
       const updates = {
-        x: Math.max(0, Math.min(1, dragStart.layerX! + dx)),
-        y: Math.max(0, Math.min(1, dragStart.layerY! + dy))
+        x: Math.max(0, Math.min(1, dragStart.layerX + dx)),
+        y: Math.max(0, Math.min(1, dragStart.layerY + dy))
       }
       
       await window.indieForge.pipeline.updateLayer(projectId!, selectedShotId!, selectedLayerId!, updates)
       const updated = await window.indieForge.projects.open(projectId!)
       setActiveProject(updated)
-    } else if (dragMode === 'framingRect') {
-      // Update framing rect preview
-      const width = Math.abs(x - dragStart.x)
-      const height = Math.abs(y - dragStart.y)
-      const rectX = Math.min(x, dragStart.x)
-      const rectY = Math.min(y, dragStart.y)
+      setDragStart({ ...dragStart, layerX: updates.x, layerY: updates.y })
+    } else if (dragMode === 'scale' && selectedLayer) {
+      const dist = Math.hypot(x - dragStart.layerX, y - dragStart.layerY)
+      const startDist = Math.hypot(dragStart.x - dragStart.layerX, dragStart.y - dragStart.layerY)
+      const scaleFactor = startDist > 0 ? dist / startDist : 1
       
-      // Would update preview, for now just visual feedback
+      const newScale = Math.max(0.1, Math.min(5, dragStart.layerScale * scaleFactor))
+      
+      await window.indieForge.pipeline.updateLayer(projectId!, selectedShotId!, selectedLayerId!, { scale: newScale })
+      const updated = await window.indieForge.projects.open(projectId!)
+      setActiveProject(updated)
+    } else if (dragMode === 'rotate' && selectedLayer) {
+      const angle = Math.atan2(y - dragStart.layerY, x - dragStart.layerX) * (180 / Math.PI)
+      const startAngle = Math.atan2(dragStart.y - dragStart.layerY, dragStart.x - dragStart.layerX) * (180 / Math.PI)
+      const rotation = (dragStart.layerRotation + (angle - startAngle)) % 360
+      
+      await window.indieForge.pipeline.updateLayer(projectId!, selectedShotId!, selectedLayerId!, { rotation })
+      const updated = await window.indieForge.projects.open(projectId!)
+      setActiveProject(updated)
     }
   }
 
@@ -308,22 +385,128 @@ export function StoryboardEditor() {
       const rectX = Math.min(x, dragStart.x)
       const rectY = Math.min(y, dragStart.y)
       
-      // Add camera keyframe with framing rect
-      const keyframe: CameraKeyframe = {
-        t: playbackTime,
-        target: { x: rectX + width / 2, y: rectY + height / 2 },
-        zoom: 1.0,
-        framingRect: { x: rectX, y: rectY, width, height }
+      if (width > 0.05 && height > 0.05) {
+        const keyframe: CameraKeyframe = {
+          t: playbackTime,
+          target: { x: rectX + width / 2, y: rectY + height / 2 },
+          zoom: 1.0 / Math.max(width, height),
+          framingRect: { x: rectX, y: rectY, width, height }
+        }
+        
+        await window.indieForge.pipeline.addCameraKeyframe(projectId!, selectedShotId!, keyframe)
+        const updated = await window.indieForge.projects.open(projectId!)
+        setActiveProject(updated)
       }
-      
-      await window.indieForge.pipeline.addCameraKeyframe(projectId!, selectedShotId!, keyframe)
-      const updated = await window.indieForge.projects.open(projectId!)
-      setActiveProject(updated)
     }
 
     setDragMode(null)
     setDragStart(null)
     e.currentTarget.releasePointerCapture(e.pointerId)
+  }
+
+  const handleTimelinePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!selectedShot) return
+    
+    const rect = e.currentTarget.getBoundingClientRect()
+    const x = (e.clientX - rect.left) / rect.width
+    const clickTime = x * selectedShot.durationSec
+    
+    // Check camera markers
+    for (let i = 0; i < selectedShot.cameraTrack.length; i++) {
+      const kf = selectedShot.cameraTrack[i]
+      const markerX = kf.t / selectedShot.durationSec
+      if (Math.abs(x - markerX) < 0.02) {
+        setDraggedMarker({ type: 'camera', index: i })
+        e.currentTarget.setPointerCapture(e.pointerId)
+        return
+      }
+    }
+    
+    // Check effect markers
+    for (let i = 0; i < selectedShot.effectsTrack.length; i++) {
+      const ef = selectedShot.effectsTrack[i]
+      const markerX = ef.t / selectedShot.durationSec
+      if (Math.abs(x - markerX) < 0.02) {
+        setDraggedMarker({ type: 'effect', index: i })
+        e.currentTarget.setPointerCapture(e.pointerId)
+        return
+      }
+    }
+    
+    // Seek playhead
+    setPlaybackTime(clickTime)
+  }
+
+  const handleTimelinePointerMove = async (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!draggedMarker || !selectedShot) return
+    
+    const rect = e.currentTarget.getBoundingClientRect()
+    const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+    const newTime = x * selectedShot.durationSec
+    
+    if (draggedMarker.type === 'camera') {
+      const updated = [...selectedShot.cameraTrack]
+      updated[draggedMarker.index] = { ...updated[draggedMarker.index], t: newTime }
+      
+      await window.indieForge.pipeline.updateShot(projectId!, selectedShotId!, { cameraTrack: updated })
+      const proj = await window.indieForge.projects.open(projectId!)
+      setActiveProject(proj)
+    } else {
+      const updated = [...selectedShot.effectsTrack]
+      updated[draggedMarker.index] = { ...updated[draggedMarker.index], t: newTime }
+      
+      await window.indieForge.pipeline.updateShot(projectId!, selectedShotId!, { effectsTrack: updated })
+      const proj = await window.indieForge.projects.open(projectId!)
+      setActiveProject(proj)
+    }
+  }
+
+  const handleTimelinePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    setDraggedMarker(null)
+    e.currentTarget.releasePointerCapture(e.pointerId)
+  }
+
+  const handleAddCameraKeyframe = async () => {
+    if (!selectedShot) return
+    
+    const keyframe: CameraKeyframe = {
+      t: playbackTime,
+      target: { x: 0.5, y: 0.5 },
+      zoom: 1.0
+    }
+    
+    await window.indieForge.pipeline.addCameraKeyframe(projectId!, selectedShotId!, keyframe)
+    const updated = await window.indieForge.projects.open(projectId!)
+    setActiveProject(updated)
+  }
+
+  const handleAddEffect = async (presetId?: string, inlineType?: ScenePresetType) => {
+    if (!selectedShot) return
+    
+    const effect: EffectMarker = {
+      t: playbackTime,
+      ...(presetId ? { presetId } : { inlineType, inlineParams: {} })
+    }
+    
+    await window.indieForge.pipeline.addEffectMarker(projectId!, selectedShotId!, effect)
+    const updated = await window.indieForge.projects.open(projectId!)
+    setActiveProject(updated)
+    setShowAddEffect(false)
+  }
+
+  const handleDeleteMarker = async (type: 'camera' | 'effect', index: number) => {
+    if (!selectedShot || !confirm('Delete this marker?')) return
+    
+    if (type === 'camera') {
+      const time = selectedShot.cameraTrack[index].t
+      await window.indieForge.pipeline.removeCameraKeyframe(projectId!, selectedShotId!, time)
+    } else {
+      const time = selectedShot.effectsTrack[index].t
+      await window.indieForge.pipeline.removeEffectMarker(projectId!, selectedShotId!, time)
+    }
+    
+    const updated = await window.indieForge.projects.open(projectId!)
+    setActiveProject(updated)
   }
 
   const handleAddCharacter = async (characterId: string) => {
@@ -542,20 +725,28 @@ export function StoryboardEditor() {
 
             {/* Timeline */}
             <div style={{ marginTop: '1rem', padding: '1rem', background: 'var(--bg-secondary)', borderRadius: '8px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', alignItems: 'center' }}>
                 <span style={{ fontSize: '0.9rem', fontWeight: 'bold' }}>Timeline</span>
-                <span style={{ fontSize: '0.85rem', color: 'var(--muted)' }}>
-                  {playbackTime.toFixed(2)}s / {selectedShot.durationSec}s
-                </span>
+                <div style={{ display: 'flex', gap: '0.5rem', fontSize: '0.85rem' }}>
+                  {mode === 'camera' && (
+                    <button type="button" onClick={handleAddCameraKeyframe} style={{ fontSize: '0.8rem', padding: '0.25rem 0.5rem' }}>
+                      + Camera @ {playbackTime.toFixed(1)}s
+                    </button>
+                  )}
+                  <button type="button" onClick={() => setShowAddEffect(true)} style={{ fontSize: '0.8rem', padding: '0.25rem 0.5rem' }}>
+                    + Effect
+                  </button>
+                  <span style={{ color: 'var(--muted)' }}>
+                    {playbackTime.toFixed(2)}s / {selectedShot.durationSec}s
+                  </span>
+                </div>
               </div>
               
               <div 
                 style={{ position: 'relative', height: '60px', background: 'var(--bg)', borderRadius: '4px', cursor: 'pointer' }}
-                onClick={(e) => {
-                  const rect = e.currentTarget.getBoundingClientRect()
-                  const clickX = (e.clientX - rect.left) / rect.width
-                  setPlaybackTime(clickX * selectedShot.durationSec)
-                }}
+                onPointerDown={handleTimelinePointerDown}
+                onPointerMove={handleTimelinePointerMove}
+                onPointerUp={handleTimelinePointerUp}
               >
                 {/* Playhead */}
                 <div
@@ -575,19 +766,24 @@ export function StoryboardEditor() {
                 {selectedShot.cameraTrack.map((kf, idx) => (
                   <div
                     key={idx}
+                    onContextMenu={(e) => {
+                      e.preventDefault()
+                      handleDeleteMarker('camera', idx)
+                    }}
                     style={{
                       position: 'absolute',
                       left: `${(kf.t / selectedShot.durationSec) * 100}%`,
                       top: '10px',
-                      width: '12px',
-                      height: '12px',
+                      width: '14px',
+                      height: '14px',
                       background: '#00AAFF',
                       borderRadius: '50%',
                       transform: 'translateX(-50%)',
-                      cursor: 'pointer',
-                      border: '2px solid #fff'
+                      cursor: 'grab',
+                      border: '2px solid #fff',
+                      boxShadow: '0 2px 4px rgba(0,0,0,0.3)'
                     }}
-                    title={`Camera @ ${kf.t}s`}
+                    title={`Camera @ ${kf.t.toFixed(1)}s (right-click to delete)`}
                   />
                 ))}
                 
@@ -595,22 +791,63 @@ export function StoryboardEditor() {
                 {selectedShot.effectsTrack.map((ef, idx) => (
                   <div
                     key={idx}
+                    onContextMenu={(e) => {
+                      e.preventDefault()
+                      handleDeleteMarker('effect', idx)
+                    }}
                     style={{
                       position: 'absolute',
                       left: `${(ef.t / selectedShot.durationSec) * 100}%`,
                       bottom: '10px',
-                      width: '12px',
-                      height: '12px',
+                      width: '14px',
+                      height: '14px',
                       background: '#FF6B6B',
                       borderRadius: '50%',
                       transform: 'translateX(-50%)',
-                      cursor: 'pointer',
-                      border: '2px solid #fff'
+                      cursor: 'grab',
+                      border: '2px solid #fff',
+                      boxShadow: '0 2px 4px rgba(0,0,0,0.3)'
                     }}
-                    title={`Effect @ ${ef.t}s`}
+                    title={`Effect @ ${ef.t.toFixed(1)}s (right-click to delete)`}
                   />
                 ))}
               </div>
+              
+              {showAddEffect && (
+                <div style={{ marginTop: '0.5rem', padding: '0.75rem', background: 'var(--bg)', borderRadius: '4px', border: '2px solid var(--forge-gold)' }}>
+                  <div style={{ fontWeight: 'bold', marginBottom: '0.5rem', fontSize: '0.9rem' }}>Add Effect at {playbackTime.toFixed(1)}s</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem', marginBottom: '0.5rem' }}>
+                    {(['shake', 'flash', 'freeze', 'zoom_punch'] as ScenePresetType[]).map(type => (
+                      <button
+                        key={type}
+                        type="button"
+                        onClick={() => handleAddEffect(undefined, type)}
+                        style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem' }}
+                      >
+                        {type}
+                      </button>
+                    ))}
+                  </div>
+                  {presets.length > 0 && (
+                    <>
+                      <div style={{ fontSize: '0.85rem', marginBottom: '0.25rem' }}>Or use preset:</div>
+                      {presets.slice(0, 3).map(preset => (
+                        <button
+                          key={preset.id}
+                          type="button"
+                          onClick={() => handleAddEffect(preset.id)}
+                          style={{ width: '100%', marginBottom: '0.25rem', fontSize: '0.8rem', textAlign: 'left' }}
+                        >
+                          {preset.type}
+                        </button>
+                      ))}
+                    </>
+                  )}
+                  <button type="button" onClick={() => setShowAddEffect(false)} style={{ width: '100%', marginTop: '0.5rem', fontSize: '0.85rem' }}>
+                    Cancel
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Notes */}
@@ -701,7 +938,6 @@ export function StoryboardEditor() {
             .map(layer => {
               const character = layer.characterId ? characters.find(c => c.id === layer.characterId) : null
               const pose = layer.poseId ? poses.find(p => p.id === layer.poseId) : null
-              const clip = layer.clipId ? clips.find(c => c.id === layer.clipId) : null
               
               return (
                 <div
@@ -719,7 +955,7 @@ export function StoryboardEditor() {
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
                     <span style={{ fontWeight: 'bold' }}>z{layer.zOrder}</span>
-                    <span style={{ opacity: 0.7 }}>{(layer.opacity * 100).toFixed(0)}%</span>
+                    <span style={{ opacity: 0.7 }}>{layer.scale.toFixed(2)}x • {layer.rotation.toFixed(0)}°</span>
                   </div>
                   {character && <div style={{ fontSize: '0.9rem', fontWeight: 'bold' }}>{character.name}</div>}
                   {pose && <div style={{ fontSize: '0.8rem', opacity: 0.8 }}>{pose.slot}</div>}
