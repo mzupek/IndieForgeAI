@@ -487,6 +487,7 @@ export interface IndieForgeAPI {
     chooseAudio: () => Promise<{ filePath: string | null }>
     chooseExportDirectory: () => Promise<{ dirPath: string | null }>
     readPreviewDataUrl: (filePath: string) => Promise<{ dataUrl: string }>
+    getLocalUrl: (filePath: string) => Promise<{ localUrl: string }>
   }
   export: {
     projectManifest: (projectId: string, exportDir: string) => Promise<{ manifestPath: string }>

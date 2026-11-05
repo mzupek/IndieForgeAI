@@ -440,6 +440,14 @@ export function registerIpcHandlers(): void {
     return { dataUrl: `data:${mime};base64,${data.toString('base64')}` }
   })
 
+  ipcMain.handle(IPC_CHANNELS.FILES_GET_LOCAL_URL, async (_e, filePath: string) => {
+    if (!filePath || !existsSync(filePath)) {
+      throw new Error(`File not found: ${filePath}`)
+    }
+    const encodedPath = encodeURIComponent(filePath)
+    return { localUrl: `forge-file://${encodedPath}` }
+  })
+
   ipcMain.handle(IPC_CHANNELS.EXPORT_PROJECT_MANIFEST, async (_e, projectId: string, exportDir: string) => {
     const project = await loadProject(projectId)
     await mkdir(exportDir, { recursive: true })

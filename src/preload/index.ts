@@ -105,7 +105,12 @@ const api: IndieForgeAPI = {
     chooseImage: () => ipcRenderer.invoke(IPC_CHANNELS.FILES_CHOOSE_IMAGE),
     chooseAudio: () => ipcRenderer.invoke(IPC_CHANNELS.FILES_CHOOSE_AUDIO),
     chooseExportDirectory: () => ipcRenderer.invoke(IPC_CHANNELS.FILES_CHOOSE_EXPORT_DIR),
-    readPreviewDataUrl: (filePath) => ipcRenderer.invoke(IPC_CHANNELS.FILES_READ_PREVIEW_DATA_URL, filePath)
+    readPreviewDataUrl: (filePath) => ipcRenderer.invoke(IPC_CHANNELS.FILES_READ_PREVIEW_DATA_URL, filePath),
+    getLocalUrl: (filePath) => ipcRenderer.invoke(IPC_CHANNELS.FILES_GET_LOCAL_URL, filePath)
+  },
+  config: {
+    getOpenAIKey: () => ipcRenderer.invoke(IPC_CHANNELS.CONFIG_GET_OPENAI_KEY),
+    setOpenAIKey: (apiKey) => ipcRenderer.invoke(IPC_CHANNELS.CONFIG_SET_OPENAI_KEY, apiKey)
   },
   export: {
     projectManifest: (projectId, exportDir) =>
@@ -117,13 +122,7 @@ const api: IndieForgeAPI = {
     copyAudio: (projectId, exportDir) =>
       ipcRenderer.invoke(IPC_CHANNELS.EXPORT_COPY_AUDIO, projectId, exportDir),
     visualAssets: (projectId, exportDir, mode, exportSize) =>
-      ipcRenderer.invoke(IPC_CHANNELS.EXPORT_VISUAL_ASSETS, projectId, exportDir, mode, exportSize)
-  },
-  config: {
-    getOpenAIKey: () => ipcRenderer.invoke(IPC_CHANNELS.CONFIG_GET_OPENAI_KEY),
-    setOpenAIKey: (apiKey) => ipcRenderer.invoke(IPC_CHANNELS.CONFIG_SET_OPENAI_KEY, apiKey)
-  },
-  export: {
+      ipcRenderer.invoke(IPC_CHANNELS.EXPORT_VISUAL_ASSETS, projectId, exportDir, mode, exportSize),
     validate: (gameId) =>
       ipcRenderer.invoke(IPC_CHANNELS.EXPORT_VALIDATE, gameId),
     dryRun: (gameId, targetDir) =>
