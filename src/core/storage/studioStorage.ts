@@ -159,6 +159,8 @@ export async function loadStudio(dataDirOverride?: string): Promise<StudioData> 
       // Migrate: ensure scenes field exists (Phase C)
       if (!studio.assetPipeline.scenes) {
         studio.assetPipeline.scenes = []
+        // Persist the migration
+        await saveStudioInternal(studio, dataDirOverride)
       }
       
       return studio

@@ -159,6 +159,31 @@ export function PresetsView() {
   )
 }
 
+function getParamsSummary(preset: ScenePreset): string {
+  const params = preset.params
+  switch (preset.type) {
+    case 'shake':
+      return `intensity ${params.intensity || 10} · ${params.durationMs || 300}ms`
+    case 'flash':
+      return `${params.color || 'white'} · ${params.durationMs || 200}ms`
+    case 'freeze':
+      return `${params.durationMs || 500}ms`
+    case 'zoom_punch':
+      return `zoom ${params.scale || 1.15}x · ${params.durationMs || 300}ms`
+    case 'versus':
+      return `${params.characterAId ? 'vs setup' : 'no chars'} · zoom ${params.zoom || 1.0}x`
+    default:
+      return ''
+  }
+}
+
+function getDisplayName(preset: ScenePreset): string {
+  if (preset.tags.length > 0) {
+    return `${getPresetTypeDisplayName(preset.type)} - ${preset.tags[0]}`
+  }
+  return getPresetTypeDisplayName(preset.type)
+}
+
 function PresetListItem({
   preset,
   isSelected,
@@ -184,17 +209,26 @@ function PresetListItem({
       onClick={onClick}
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '0.5rem' }}>
-        <span style={{ 
-          display: 'inline-block',
-          padding: '2px 8px',
-          background: 'var(--forge-gold)',
-          color: '#000',
-          borderRadius: '4px',
-          fontSize: '0.75rem',
-          fontWeight: 600
-        }}>
-          {getPresetTypeDisplayName(preset.type)}
-        </span>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontWeight: 'bold', marginBottom: '0.25rem' }}>
+            {getDisplayName(preset)}
+          </div>
+          <span style={{ 
+            display: 'inline-block',
+            padding: '2px 8px',
+            background: 'var(--forge-gold)',
+            color: '#000',
+            borderRadius: '4px',
+            fontSize: '0.75rem',
+            fontWeight: 600,
+            marginRight: '0.5rem'
+          }}>
+            {preset.type}
+          </span>
+          <span style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>
+            {getParamsSummary(preset)}
+          </span>
+        </div>
         <button
           type="button"
           onClick={(e) => {
@@ -212,9 +246,9 @@ function PresetListItem({
         </button>
       </div>
       
-      {preset.tags.length > 0 && (
-        <div style={{ fontSize: '0.875rem', color: 'var(--muted)' }}>
-          Tags: {preset.tags.join(', ')}
+      {preset.tags.length > 1 && (
+        <div style={{ fontSize: '0.75rem', color: 'var(--muted)', marginTop: '0.25rem' }}>
+          Tags: {preset.tags.slice(1).join(', ')}
         </div>
       )}
     </div>

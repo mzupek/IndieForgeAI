@@ -395,8 +395,10 @@ export function ScenesView() {
   }
 
   useEffect(() => {
-    loadScenes()
-  }, [gameId])
+    if (activeProject) {
+      loadScenes()
+    }
+  }, [gameId, activeProject])
 
   const handleDelete = async (scene: Scene) => {
     if (!confirm(`Delete scene "${scene.name}"?${scene.storyboardId ? ' This will also remove the attached storyboard.' : ''}`)) {
@@ -428,6 +430,14 @@ export function ScenesView() {
     }
   }
 
+  if (!activeProject) {
+    return (
+      <div style={{ padding: '2rem' }}>
+        <p>Loading studio...</p>
+      </div>
+    )
+  }
+
   if (loading) {
     return (
       <div style={{ padding: '2rem' }}>
@@ -436,7 +446,7 @@ export function ScenesView() {
     )
   }
 
-  if (!activeProject?.assetPipeline) {
+  if (!activeProject.assetPipeline) {
     return (
       <div style={{ padding: '2rem' }}>
         <p style={{ color: 'var(--error)' }}>No active project. Please open a project first.</p>

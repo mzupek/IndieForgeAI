@@ -56,6 +56,7 @@ export function StoryboardEditor() {
   const [newStoryboardName, setNewStoryboardName] = useState('')
   const [creatingShot, setCreatingShot] = useState(false)
   const [newShotName, setNewShotName] = useState('')
+  const [linkingScene, setLinkingScene] = useState<string | null>(null)
   
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const animationFrameRef = useRef<number | null>(null)
@@ -80,10 +81,16 @@ export function StoryboardEditor() {
     : null
 
   useEffect(() => {
-    if (storyboards.length > 0 && !selectedStoryboardId) {
+    // Check for ?storyboardId= query param first
+    const urlParams = new URLSearchParams(window.location.search)
+    const queryStoryboardId = urlParams.get('storyboardId')
+    
+    if (queryStoryboardId && storyboards.find(sb => sb.id === queryStoryboardId)) {
+      setSelectedStoryboardId(queryStoryboardId)
+    } else if (storyboards.length > 0 && !selectedStoryboardId) {
       setSelectedStoryboardId(storyboards[0].id)
     }
-  }, [storyboards, selectedStoryboardId])
+  }, [storyboards.length])
 
   useEffect(() => {
     if (selectedShot && editingNotes) {
@@ -603,6 +610,63 @@ export function StoryboardEditor() {
     }
   }
 
+  const handleDeleteStoryboard = async (storyboardId: string) => {
+    const sb = storyboards.find(s => s.id === storyboardId)
+    if (!sb) return
+    
+    const linkedScene = sb.sceneId ? scenes.find(s => s.id === sb.sceneId) : null
+    const confirmMsg = linkedScene
+      ? `Delete storyboard "${sb.name}"? This will clear the storyboard link from scene "${linkedScene.name}".`
+      : `Delete storyboard "${sb.name}"?`
+    
+    if (!confirm(confirmMsg)) return
+
+    try {
+      // If linked to a scene, clear the scene's storyboardId first
+      if (sb.sceneId) {
+        await window.indieForge.pipeline.updateScene(sb.sceneId, { storyboardId: undefined })
+      }
+      
+      await window.indieForge.pipeline.deleteStoryboard(projectId!, storyboardId)
+      const updated = await window.indieForge.projects.open(projectId!)
+      setActiveProject(updated)
+      setSelectedStoryboardId(null)
+      setSelectedShotId(null)
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to delete storyboard')
+    }
+  }
+
+  const handleDeleteShot = async (shotId: string) => {
+    if (!selectedStoryboardId) return
+    
+    const shot = shots.find(s => s.id === shotId)
+    if (!shot) return
+    
+    if (!confirm(`Delete shot "${shot.name}"?`)) return
+
+    try {
+      await window.indieForge.pipeline.deleteShot(projectId!, selectedStoryboardId, shotId)
+      const updated = await window.indieForge.projects.open(projectId!)
+      setActiveProject(updated)
+      setSelectedShotId(null)
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to delete shot')
+    }
+  }
+
+  const handleLinkToScene = async (storyboardId: string, sceneId: string) => {
+    try {
+      await window.indieForge.pipeline.updateStoryboard(projectId!, storyboardId, { sceneId })
+      await window.indieForge.pipeline.updateScene(sceneId, { storyboardId })
+      const updated = await window.indieForge.projects.open(projectId!)
+      setActiveProject(updated)
+      setLinkingScene(null)
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to link storyboard to scene')
+    }
+  }
+
   const handleFlipLayer = async () => {
     if (!selectedLayer) return
     await window.indieForge.pipeline.updateLayer(projectId!, selectedShotId!, selectedLayerId!, { flipX: !selectedLayer.flipX })
@@ -723,26 +787,155 @@ export function StoryboardEditor() {
             No storyboards yet
           </div>
         ) : (
-          storyboards.map(sb => (
-          <div
-            key={sb.id}
-            onClick={() => {
-              setSelectedStoryboardId(sb.id)
-              setSelectedShotId(null)
-            }}
-            style={{
-              padding: '0.5rem',
-              marginBottom: '0.5rem',
-              background: selectedStoryboardId === sb.id ? 'var(--forge-gold)' : 'var(--bg-secondary)',
-              color: selectedStoryboardId === sb.id ? 'var(--bg)' : 'var(--text)',
-              borderRadius: '4px',
-              cursor: 'pointer',
-              fontSize: '0.9rem'
-            }}
-          >
-            {sb.name}
+          storyboards.map(sb => {
+          const sbScene = sb.sceneId ? scenes.find(s => s.id === sb.sceneId) : null
+          const isOrphan = !sb.sceneId
+          return (
+            <div
+              key={sb.id}
+              style={{
+                marginBottom: '0.5rem',
+                border: selectedStoryboardId === sb.id ? '2px solid var(--forge-gold)' : '1px solid var(--border)',
+                borderRadius: '4px',
+                background: 'var(--bg-secondary)'
+              }}
+            >
+              <div
+                onClick={() => {
+                  setSelectedStoryboardId(sb.id)
+                  setSelectedShotId(null)
+                }}
+                style={{
+                  padding: '0.5rem',
+                  cursor: 'pointer',
+                  fontSize: '0.9rem'
+                }}
+              >
+                <div style={{ fontWeight: selectedStoryboardId === sb.id ? 'bold' : 'normal' }}>
+                  {sb.name}
+                </div>
+                {sbScene ? (
+                  <div style={{ 
+                    fontSize: '0.75rem', 
+                    marginTop: '0.25rem',
+                    color: 'var(--success)'
+                  }}>
+                    ✓ Scene: {sbScene.name}
+                  </div>
+                ) : (
+                  <div style={{ 
+                    fontSize: '0.75rem', 
+                    marginTop: '0.25rem',
+                    color: 'var(--muted)'
+                  }}>
+                    ⚠ Not linked to a scene
+                  </div>
+                )}
+              </div>
+              {isOrphan && (
+                <div style={{ 
+                  padding: '0 0.5rem 0.5rem', 
+                  display: 'flex', 
+                  gap: '0.25rem',
+                  fontSize: '0.75rem'
+                }}>
+                  <button
+                    type="button"
+                    onClick={() => setLinkingScene(sb.id)}
+                    style={{ flex: 1, padding: '0.25rem', fontSize: '0.75rem' }}
+                  >
+                    Link to Scene
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      handleDeleteStoryboard(sb.id)
+                    }}
+                    style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', background: 'var(--danger)', color: 'white' }}
+                  >
+                    Delete
+                  </button>
+                </div>
+              )}
+              {!isOrphan && selectedStoryboardId === sb.id && (
+                <div style={{ 
+                  padding: '0 0.5rem 0.5rem',
+                  fontSize: '0.75rem'
+                }}>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      handleDeleteStoryboard(sb.id)
+                    }}
+                    style={{ width: '100%', padding: '0.25rem', fontSize: '0.75rem', background: 'var(--danger)', color: 'white' }}
+                  >
+                    Delete Storyboard
+                  </button>
+                </div>
+              )}
+            </div>
+          )
+        })
+        )}
+        
+        {linkingScene && (
+          <div style={{ 
+            position: 'fixed', 
+            inset: 0, 
+            background: 'rgba(0,0,0,0.5)', 
+            display: 'flex', 
+            alignItems: 'center', 
+            justifyContent: 'center',
+            zIndex: 1000
+          }}>
+            <div style={{ 
+              background: 'var(--bg)', 
+              padding: '1.5rem', 
+              borderRadius: '8px',
+              maxWidth: '400px',
+              width: '90%'
+            }}>
+              <h3 style={{ margin: '0 0 1rem 0' }}>Link to Scene</h3>
+              <div style={{ marginBottom: '1rem' }}>
+                {scenes.length === 0 ? (
+                  <p style={{ color: 'var(--muted)' }}>No scenes available. Create a scene first.</p>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', maxHeight: '300px', overflowY: 'auto' }}>
+                    {scenes.map(scene => (
+                      <button
+                        key={scene.id}
+                        type="button"
+                        onClick={() => handleLinkToScene(linkingScene, scene.id)}
+                        style={{ 
+                          padding: '0.75rem', 
+                          textAlign: 'left',
+                          background: 'var(--bg-secondary)',
+                          border: '1px solid var(--border)',
+                          borderRadius: '4px'
+                        }}
+                      >
+                        <div>{scene.name}</div>
+                        {scene.storyboardId && (
+                          <div style={{ fontSize: '0.75rem', color: 'var(--muted)', marginTop: '0.25rem' }}>
+                            Already has storyboard (will be replaced)
+                          </div>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setLinkingScene(null)}
+                style={{ width: '100%' }}
+              >
+                Cancel
+              </button>
+            </div>
           </div>
-        ))
         )}
         
         {selectedStoryboard && (
@@ -806,19 +999,38 @@ export function StoryboardEditor() {
             {shots.map((shot, idx) => (
               <div
                 key={shot.id}
-                onClick={() => setSelectedShotId(shot.id)}
                 style={{
-                  padding: '0.5rem',
                   marginBottom: '0.5rem',
-                  background: selectedShotId === shot.id ? 'var(--forge-gold)' : 'var(--bg-secondary)',
-                  color: selectedShotId === shot.id ? 'var(--bg)' : 'var(--text)',
+                  border: selectedShotId === shot.id ? '2px solid var(--forge-gold)' : '1px solid var(--border)',
                   borderRadius: '4px',
-                  cursor: 'pointer',
-                  fontSize: '0.85rem'
+                  background: 'var(--bg-secondary)'
                 }}
               >
-                <div style={{ fontWeight: 'bold' }}>{idx + 1}. {shot.name}</div>
-                <div style={{ fontSize: '0.75rem', opacity: 0.8 }}>{shot.durationSec}s</div>
+                <div
+                  onClick={() => setSelectedShotId(shot.id)}
+                  style={{
+                    padding: '0.5rem',
+                    cursor: 'pointer',
+                    fontSize: '0.85rem'
+                  }}
+                >
+                  <div style={{ fontWeight: 'bold' }}>{idx + 1}. {shot.name}</div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>{shot.durationSec}s · {shot.layers.length} layer{shot.layers.length !== 1 ? 's' : ''}</div>
+                </div>
+                {selectedShotId === shot.id && (
+                  <div style={{ padding: '0 0.5rem 0.5rem' }}>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleDeleteShot(shot.id)
+                      }}
+                      style={{ width: '100%', padding: '0.25rem', fontSize: '0.75rem', background: 'var(--danger)', color: 'white' }}
+                    >
+                      Delete Shot
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
           </>
