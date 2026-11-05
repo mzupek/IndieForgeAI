@@ -289,6 +289,105 @@ async function testClipImportWithGeneratedVideo() {
   }
 }
 
+async function testExportMigration() {
+  console.log('Testing: export target migration from pre-Phase-5 studio')
+  const testDir = await setupTestDataDir()
+  
+  try {
+    // Simulate pre-Phase-5 studio.json without exportTarget
+    const studioPath = join(testDir, 'studio.json')
+    const studioData = {
+      schemaVersion: 1,
+      assetPipeline: {
+        schemaVersion: 1,
+        games: [
+          {
+            id: 'game-neon-recall',
+            name: 'Neon Recall',
+            engine: 'unity',
+            exportRoot: './exports/neon-recall',
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          },
+          {
+            id: 'game-ring-em-up',
+            name: "Ring'Em Up",
+            engine: 'godot',
+            exportRoot: './exports/ring-em-up',
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          }
+        ],
+        characters: [],
+        poses: [],
+        clips: [],
+        scenePresets: [],
+        exportProfiles: []
+      },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    }
+    
+    await writeFile(studioPath, JSON.stringify(studioData, null, 2))
+    
+    // Run export dry-run which should trigger migration
+    const result = runForgeCommand('export game-neon-recall --dry-run --json', testDir)
+    
+    assertEqual(result.exitCode, 0, 'Export should exit with code 0')
+    
+    const output = JSON.parse(result.stdout)
+    
+    // Check that targetDir is absolute
+    assert(output.targetDir, 'Should have targetDir')
+    assert(
+      output.targetDir.startsWith('/') || output.targetDir.startsWith('C:'),
+      `targetDir should be absolute, got: ${output.targetDir}`
+    )
+    
+    // Check it contains the correct structure for Unity
+    assert(
+      output.targetDir.includes('Neon_Recall') || output.targetDir.includes('Neon Recall'),
+      `targetDir should reference Neon Recall project, got: ${output.targetDir}`
+    )
+    assert(
+      output.targetDir.includes('Assets/IndieForge/game-neon-recall'),
+      `targetDir should have Unity structure, got: ${output.targetDir}`
+    )
+    
+    console.log(`  ✓ Migrated to absolute path: ${output.targetDir}`)
+    
+    // Test Ring'Em Up (Godot)
+    const godotResult = runForgeCommand('export game-ring-em-up --dry-run --json', testDir)
+    assertEqual(godotResult.exitCode, 0, 'Godot export should exit with code 0')
+    
+    const godotOutput = JSON.parse(godotResult.stdout)
+    assert(
+      godotOutput.targetDir.includes('RingEmUp') || godotOutput.targetDir.includes("Ring'Em Up"),
+      `targetDir should reference Ring'Em Up project, got: ${godotOutput.targetDir}`
+    )
+    assert(
+      godotOutput.targetDir.includes('assets/indie_forge/game-ring-em-up'),
+      `targetDir should have Godot structure, got: ${godotOutput.targetDir}`
+    )
+    
+    console.log(`  ✓ Godot path correct: ${godotOutput.targetDir}`)
+    
+    // Verify migration was saved
+    const updatedStudio = JSON.parse(await readFile(studioPath, 'utf-8'))
+    const neonRecall = updatedStudio.assetPipeline.games.find((g: any) => g.id === 'game-neon-recall')
+    assert(neonRecall.exportTarget, 'exportTarget should be set after migration')
+    assert(
+      neonRecall.exportTarget.startsWith('/') || neonRecall.exportTarget.startsWith('~'),
+      `exportTarget should be absolute, got: ${neonRecall.exportTarget}`
+    )
+    
+    console.log('  ✓ Migration saved to studio.json')
+    console.log('✓ Export migration test passed')
+  } finally {
+    await cleanupTestDataDir(testDir)
+  }
+}
+
 async function testPresetCommands() {
   console.log('Testing: preset create, list, show, update, remove')
   const testDir = await setupTestDataDir()
@@ -448,6 +547,7 @@ export async function runIntegrationTests() {
     await testClipImportWithGeneratedVideo()
     await testClipImportOnFreshDataDir()
     await testPresetCommands()
+    await testExportMigration()
     
     console.log('\n✓ All integration tests passed!')
     return true

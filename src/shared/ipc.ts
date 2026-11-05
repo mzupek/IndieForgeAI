@@ -32,6 +32,7 @@ export const IPC_CHANNELS = {
   FILES_CHOOSE_AUDIO: 'files:chooseAudio',
   FILES_CHOOSE_EXPORT_DIR: 'files:chooseExportDirectory',
   FILES_READ_PREVIEW_DATA_URL: 'files:readPreviewDataUrl',
+  FILES_GET_LOCAL_URL: 'files:getLocalUrl',
   EXPORT_PROJECT_MANIFEST: 'export:projectManifest',
   EXPORT_SCENE_MANIFEST: 'export:sceneManifest',
   EXPORT_SCENE_PACKAGE: 'export:scenePackage',
@@ -66,5 +67,9 @@ export const IPC_CHANNELS = {
   PIPELINE_CLIP_UPDATE: 'pipeline:clipUpdate',
   PIPELINE_PRESET_CREATE: 'pipeline:presetCreate',
   PIPELINE_PRESET_UPDATE: 'pipeline:presetUpdate',
-  PIPELINE_PRESET_REMOVE: 'pipeline:presetRemove'
+  PIPELINE_PRESET_REMOVE: 'pipeline:presetRemove',
+  EXPORT_VALIDATE: 'export:validate',
+  EXPORT_DRY_RUN: 'export:dryRun',
+  EXPORT_RUN: 'export:run',
+  PROJECTS_UPDATE_GAME: 'projects:updateGame'
 } as const

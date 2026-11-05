@@ -12,7 +12,9 @@ const api: IndieForgeAPI = {
     duplicate: (projectId, newName) =>
       ipcRenderer.invoke(IPC_CHANNELS.PROJECTS_DUPLICATE, projectId, newName),
     seedSample: (kind?: 'ring-em-up' | 'neon-recall') =>
-      ipcRenderer.invoke(IPC_CHANNELS.PROJECTS_SEED_SAMPLE, kind)
+      ipcRenderer.invoke(IPC_CHANNELS.PROJECTS_SEED_SAMPLE, kind),
+    updateGame: (projectId, gameId, patch) =>
+      ipcRenderer.invoke(IPC_CHANNELS.PROJECTS_UPDATE_GAME, projectId, gameId, patch)
   },
   ai: {
     planProject: (projectId) => ipcRenderer.invoke(IPC_CHANNELS.AI_PLAN_PROJECT, projectId),
@@ -103,7 +105,12 @@ const api: IndieForgeAPI = {
     chooseImage: () => ipcRenderer.invoke(IPC_CHANNELS.FILES_CHOOSE_IMAGE),
     chooseAudio: () => ipcRenderer.invoke(IPC_CHANNELS.FILES_CHOOSE_AUDIO),
     chooseExportDirectory: () => ipcRenderer.invoke(IPC_CHANNELS.FILES_CHOOSE_EXPORT_DIR),
-    readPreviewDataUrl: (filePath) => ipcRenderer.invoke(IPC_CHANNELS.FILES_READ_PREVIEW_DATA_URL, filePath)
+    readPreviewDataUrl: (filePath) => ipcRenderer.invoke(IPC_CHANNELS.FILES_READ_PREVIEW_DATA_URL, filePath),
+    getLocalUrl: (filePath) => ipcRenderer.invoke(IPC_CHANNELS.FILES_GET_LOCAL_URL, filePath)
+  },
+  config: {
+    getOpenAIKey: () => ipcRenderer.invoke(IPC_CHANNELS.CONFIG_GET_OPENAI_KEY),
+    setOpenAIKey: (apiKey) => ipcRenderer.invoke(IPC_CHANNELS.CONFIG_SET_OPENAI_KEY, apiKey)
   },
   export: {
     projectManifest: (projectId, exportDir) =>
@@ -115,11 +122,13 @@ const api: IndieForgeAPI = {
     copyAudio: (projectId, exportDir) =>
       ipcRenderer.invoke(IPC_CHANNELS.EXPORT_COPY_AUDIO, projectId, exportDir),
     visualAssets: (projectId, exportDir, mode, exportSize) =>
-      ipcRenderer.invoke(IPC_CHANNELS.EXPORT_VISUAL_ASSETS, projectId, exportDir, mode, exportSize)
-  },
-  config: {
-    getOpenAIKey: () => ipcRenderer.invoke(IPC_CHANNELS.CONFIG_GET_OPENAI_KEY),
-    setOpenAIKey: (apiKey) => ipcRenderer.invoke(IPC_CHANNELS.CONFIG_SET_OPENAI_KEY, apiKey)
+      ipcRenderer.invoke(IPC_CHANNELS.EXPORT_VISUAL_ASSETS, projectId, exportDir, mode, exportSize),
+    validate: (gameId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.EXPORT_VALIDATE, gameId),
+    dryRun: (gameId, targetDir) =>
+      ipcRenderer.invoke(IPC_CHANNELS.EXPORT_DRY_RUN, gameId, targetDir),
+    run: (gameId, targetDir) =>
+      ipcRenderer.invoke(IPC_CHANNELS.EXPORT_RUN, gameId, targetDir)
   },
   pipeline: {
     createCharacter: (projectId, input) =>

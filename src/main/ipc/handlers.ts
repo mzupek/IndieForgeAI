@@ -76,6 +76,11 @@ import {
   removePreset
 } from '../../core/storage/presetService'
 import {
+  validateExport,
+  dryRunExport,
+  exportGame
+} from '../../core/storage/exportService'
+import {
   applyDesignerAssetPrompt,
   applyDesignerStyleGuide,
   clearDesignerChat,
@@ -435,6 +440,14 @@ export function registerIpcHandlers(): void {
     return { dataUrl: `data:${mime};base64,${data.toString('base64')}` }
   })
 
+  ipcMain.handle(IPC_CHANNELS.FILES_GET_LOCAL_URL, async (_e, filePath: string) => {
+    if (!filePath || !existsSync(filePath)) {
+      throw new Error(`File not found: ${filePath}`)
+    }
+    const encodedPath = encodeURIComponent(filePath)
+    return { localUrl: `forge-file://${encodedPath}` }
+  })
+
   ipcMain.handle(IPC_CHANNELS.EXPORT_PROJECT_MANIFEST, async (_e, projectId: string, exportDir: string) => {
     const project = await loadProject(projectId)
     await mkdir(exportDir, { recursive: true })
@@ -677,6 +690,44 @@ export function registerIpcHandlers(): void {
     async (_e, presetId: string) => {
       await removePreset(presetId)
       return { ok: true as const }
+    }
+  )
+
+  // Export handlers
+  ipcMain.handle(
+    IPC_CHANNELS.EXPORT_VALIDATE,
+    async (_e, gameId: string) =>
+      validateExport(gameId)
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.EXPORT_DRY_RUN,
+    async (_e, gameId: string, targetDir?: string) =>
+      dryRunExport(gameId, targetDir)
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.EXPORT_RUN,
+    async (_e, gameId: string, targetDir?: string) =>
+      exportGame(gameId, targetDir)
+  )
+
+  // Update game (for export target path)
+  ipcMain.handle(
+    IPC_CHANNELS.PROJECTS_UPDATE_GAME,
+    async (_e, projectId: string, gameId: string, patch: any) => {
+      const project = await loadProject(projectId)
+      const game = project.assetPipeline.games.find(g => g.id === gameId)
+      
+      if (!game) {
+        throw new Error(`Game not found: ${gameId}`)
+      }
+      
+      Object.assign(game, patch)
+      game.updatedAt = new Date().toISOString()
+      
+      await updateProject(projectId, project)
+      return project
     }
   )
 }

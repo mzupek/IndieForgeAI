@@ -85,6 +85,7 @@ export interface IndieForgeAPI {
     delete: (projectId: string) => Promise<{ ok: true }>
     duplicate: (projectId: string, newName?: string) => Promise<IndieForgeProject>
     seedSample: (kind?: 'ring-em-up' | 'neon-recall') => Promise<IndieForgeProject>
+    updateGame: (projectId: string, gameId: string, patch: any) => Promise<IndieForgeProject>
   }
   ai: {
     planProject: (projectId: string) => Promise<AIAssetPlan>
@@ -486,6 +487,7 @@ export interface IndieForgeAPI {
     chooseAudio: () => Promise<{ filePath: string | null }>
     chooseExportDirectory: () => Promise<{ dirPath: string | null }>
     readPreviewDataUrl: (filePath: string) => Promise<{ dataUrl: string }>
+    getLocalUrl: (filePath: string) => Promise<{ localUrl: string }>
   }
   export: {
     projectManifest: (projectId: string, exportDir: string) => Promise<{ manifestPath: string }>
@@ -510,6 +512,11 @@ export interface IndieForgeAPI {
   config: {
     getOpenAIKey: () => Promise<{ configured: boolean }>
     setOpenAIKey: (apiKey: string) => Promise<{ ok: true }>
+  }
+  export: {
+    validate: (gameId: string) => Promise<any>
+    dryRun: (gameId: string, targetDir?: string) => Promise<any>
+    run: (gameId: string, targetDir?: string) => Promise<any>
   }
   pipeline: {
     createCharacter: (projectId: string, input: any) => Promise<any>

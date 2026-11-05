@@ -1,0 +1,179 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://adventurelensgames.com/schemas/export-manifest-v1.json",
+  "title": "Adventure Lens Games Export Manifest",
+  "description": "Schema for exported game assets from Indie Forge AI asset pipeline",
+  "type": "object",
+  "required": ["schemaVersion", "exportedAt", "game", "characters", "clips", "presets"],
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "description": "Schema version for compatibility checking",
+      "const": 1
+    },
+    "exportedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp when this manifest was exported"
+    },
+    "game": {
+      "type": "object",
+      "required": ["id", "name", "engine"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Game identifier"
+        },
+        "name": {
+          "type": "string",
+          "description": "Human-readable game name"
+        },
+        "engine": {
+          "type": "string",
+          "enum": ["unity", "godot"],
+          "description": "Game engine"
+        }
+      }
+    },
+    "characters": {
+      "type": "array",
+      "description": "Characters with approved poses",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "role", "tags", "poses"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Character identifier"
+          },
+          "name": {
+            "type": "string",
+            "description": "Character name"
+          },
+          "role": {
+            "type": "string",
+            "description": "Character role (protagonist, antagonist, etc.)"
+          },
+          "styleNotes": {
+            "type": "string",
+            "description": "Style notes for the character"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Character tags"
+          },
+          "poses": {
+            "type": "array",
+            "description": "Approved poses for this character",
+            "items": {
+              "type": "object",
+              "required": ["slot", "file", "width", "height", "status"],
+              "properties": {
+                "slot": {
+                  "type": "string",
+                  "enum": ["ready", "success", "hurt", "win", "defeat"],
+                  "description": "Pose slot"
+                },
+                "file": {
+                  "type": "string",
+                  "description": "Relative path to pose image file in export directory"
+                },
+                "width": {
+                  "type": "integer",
+                  "const": 1024,
+                  "description": "Image width (must be 1024 for approved poses)"
+                },
+                "height": {
+                  "type": "integer",
+                  "const": 1024,
+                  "description": "Image height (must be 1024 for approved poses)"
+                },
+                "status": {
+                  "type": "string",
+                  "const": "approved",
+                  "description": "Pose status (only approved poses are exported)"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "clips": {
+      "type": "array",
+      "description": "Clips for cutscenes and moments",
+      "items": {
+        "type": "object",
+        "required": ["id", "moment", "durationSec", "file", "thumbnail", "tags"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Clip identifier"
+          },
+          "moment": {
+            "type": "string",
+            "enum": ["intro", "hit", "finisher", "defeat", "story_beat"],
+            "description": "Clip moment type"
+          },
+          "characterId": {
+            "type": "string",
+            "description": "Associated character ID (if any)"
+          },
+          "durationSec": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Duration in seconds"
+          },
+          "file": {
+            "type": "string",
+            "description": "Relative path to video file in export directory"
+          },
+          "thumbnail": {
+            "type": "string",
+            "description": "Relative path to thumbnail image in export directory"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Clip tags"
+          }
+        }
+      }
+    },
+    "presets": {
+      "type": "array",
+      "description": "Scene and camera presets",
+      "items": {
+        "type": "object",
+        "required": ["id", "type", "params", "tags"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Preset identifier"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["versus", "zoom_punch", "shake", "flash", "freeze"],
+            "description": "Preset type"
+          },
+          "params": {
+            "type": "object",
+            "description": "Preset parameters (schema varies by type)"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Preset tags"
+          }
+        }
+      }
+    }
+  }
+}

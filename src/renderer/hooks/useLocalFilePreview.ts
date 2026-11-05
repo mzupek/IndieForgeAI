@@ -1,5 +1,10 @@
 import { useEffect, useState } from 'react'
 
+function isVideoFile(filePath: string): boolean {
+  const ext = filePath.toLowerCase().split('.').pop()
+  return ext === 'mp4' || ext === 'mov' || ext === 'webm'
+}
+
 export function useLocalFilePreview(
   filePath: string | null | undefined,
   reloadKey?: number | string
@@ -13,14 +18,26 @@ export function useLocalFilePreview(
     }
 
     let cancelled = false
-    window.indieForge.files
-      .readPreviewDataUrl(filePath)
-      .then(({ dataUrl }) => {
-        if (!cancelled) setSrc(dataUrl)
-      })
-      .catch(() => {
-        if (!cancelled) setSrc(null)
-      })
+    
+    if (isVideoFile(filePath)) {
+      window.indieForge.files
+        .getLocalUrl(filePath)
+        .then(({ localUrl }) => {
+          if (!cancelled) setSrc(localUrl)
+        })
+        .catch(() => {
+          if (!cancelled) setSrc(null)
+        })
+    } else {
+      window.indieForge.files
+        .readPreviewDataUrl(filePath)
+        .then(({ dataUrl }) => {
+          if (!cancelled) setSrc(dataUrl)
+        })
+        .catch(() => {
+          if (!cancelled) setSrc(null)
+        })
+    }
 
     return () => {
       cancelled = true

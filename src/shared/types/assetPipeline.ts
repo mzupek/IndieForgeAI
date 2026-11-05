@@ -34,6 +34,8 @@ export interface Game {
   engine: GameEngine
   /** Root directory for exports (relative or absolute) */
   exportRoot: string
+  /** Target path for exports (e.g., Unity project path or Godot project path) */
+  exportTarget?: string
   createdAt: string
   updatedAt: string
 }
