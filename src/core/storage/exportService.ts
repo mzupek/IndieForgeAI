@@ -505,6 +505,10 @@ export async function exportGame(
     }
   }
   
+  // Generate storyboard thumbnails
+  const { generateStoryboardThumbnails } = require('../export/storyboardThumbnails')
+  await generateStoryboardThumbnails(pipeline, gameId, targetDir)
+  
   // Generate and write manifest
   const manifest = await generateManifest(game, dataDirOverride)
   const manifestPath = join(targetDir, 'manifest.json')

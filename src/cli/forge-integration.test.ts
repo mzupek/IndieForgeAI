@@ -534,6 +534,47 @@ async function testHelpCommand() {
   }
 }
 
+async function testStoryboardCommands() {
+  console.log('Testing: storyboard create, shot add, layer add')
+  const testDir = await setupTestDataDir()
+  
+  try {
+    // Create storyboard
+    const createResult = runForgeCommand(
+      'storyboard create --game test-game-1 --name "Gate Drone Battle" --description "Opening cutscene" --json',
+      testDir
+    )
+    assertEqual(createResult.exitCode, 0, 'Create storyboard should succeed')
+    const storyboard = JSON.parse(createResult.stdout)
+    assert(storyboard.id, 'Should have storyboard ID')
+    assertEqual(storyboard.name, 'Gate Drone Battle', 'Should have correct name')
+    
+    // List storyboards
+    const listResult = runForgeCommand(`storyboard list --game test-game-1 --json`, testDir)
+    assertEqual(listResult.exitCode, 0, 'List storyboards should succeed')
+    const storyboards = JSON.parse(listResult.stdout)
+    assertEqual(storyboards.length, 1, 'Should have 1 storyboard')
+    
+    // Add shot
+    const shotResult = runForgeCommand(
+      `shot add --storyboard ${storyboard.id} --name "Drone appears" --duration 3.0 --notes "Drone enters from top right" --json`,
+      testDir
+    )
+    assertEqual(shotResult.exitCode, 0, 'Add shot should succeed')
+    
+    // Show storyboard
+    const showResult = runForgeCommand(`storyboard show --id ${storyboard.id} --json`, testDir)
+    assertEqual(showResult.exitCode, 0, 'Show storyboard should succeed')
+    const details = JSON.parse(showResult.stdout)
+    assertEqual(details.shots.length, 1, 'Should have 1 shot')
+    assertEqual(details.shots[0].name, 'Drone appears', 'Shot should have correct name')
+    
+    console.log('✓ Storyboard commands test passed')
+  } finally {
+    await cleanupTestDataDir(testDir)
+  }
+}
+
 export async function runIntegrationTests() {
   console.log('Running Forge CLI Integration Tests...\n')
   console.log('These tests run the actual "npm run forge" command\n')
@@ -548,6 +589,7 @@ export async function runIntegrationTests() {
     await testClipImportOnFreshDataDir()
     await testPresetCommands()
     await testExportMigration()
+    await testStoryboardCommands()
     
     console.log('\n✓ All integration tests passed!')
     return true
