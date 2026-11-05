@@ -335,6 +335,14 @@ export interface StoryboardShot {
   backgroundImage?: string
   backgroundClipId?: string
   
+  /** Stage treatment effects applied to background only (Phase C.1) */
+  stageTreatment?: {
+    /** Darken background: 0 = no effect, 1 = full black */
+    bgDim?: number
+    /** Vignette darkness toward edges: 0 = none, 1 = strong */
+    vignette?: number
+  }
+  
   /** Layers composited on stage */
   layers: StoryboardLayer[]
   

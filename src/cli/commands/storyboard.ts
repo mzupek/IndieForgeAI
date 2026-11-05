@@ -240,6 +240,19 @@ export function registerStoryboardCommands(program: Command): void {
           updates.backgroundImage = undefined
           updates.backgroundClipId = undefined
         }
+        
+        // Stage treatment (Phase C.1)
+        if (options.bgDim !== undefined || options.vignette !== undefined) {
+          const currentShot = await getShot(options.id, getDataDir(mergedOpts.dataDir))
+          updates.stageTreatment = {
+            ...currentShot.stageTreatment,
+            ...(options.bgDim !== undefined && { bgDim: parseFloat(options.bgDim) }),
+            ...(options.vignette !== undefined && { vignette: parseFloat(options.vignette) })
+          }
+        }
+        if (options.clearStageTreatment) {
+          updates.stageTreatment = undefined
+        }
 
         const shot = await updateShot(options.id, updates, getDataDir(mergedOpts.dataDir))
 

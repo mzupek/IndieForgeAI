@@ -391,6 +391,31 @@ export function StoryboardEditor() {
       }
       
       ctx.drawImage(backgroundImage.element, drawX, drawY, drawWidth, drawHeight)
+      
+      // Apply stage treatment effects to background only (Phase C.1)
+      if (selectedShot.stageTreatment) {
+        const { bgDim, vignette } = selectedShot.stageTreatment
+        
+        // bgDim: darken background with black overlay
+        if (bgDim && bgDim > 0) {
+          ctx.fillStyle = `rgba(0, 0, 0, ${bgDim})`
+          ctx.fillRect(drawX, drawY, drawWidth, drawHeight)
+        }
+        
+        // Vignette: radial gradient darkening toward edges
+        if (vignette && vignette > 0) {
+          const centerX = canvas.width / 2
+          const centerY = canvas.height / 2
+          const radius = Math.max(canvas.width, canvas.height) * 0.7
+          
+          const gradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, radius)
+          gradient.addColorStop(0, 'rgba(0, 0, 0, 0)')
+          gradient.addColorStop(1, `rgba(0, 0, 0, ${vignette})`)
+          
+          ctx.fillStyle = gradient
+          ctx.fillRect(0, 0, canvas.width, canvas.height)
+        }
+      }
     }
 
     // Apply camera transform
@@ -1623,6 +1648,77 @@ export function StoryboardEditor() {
                 <div style={{ fontSize: '0.7rem', marginTop: '0.25rem', color: 'var(--muted)', fontStyle: 'italic' }}>
                   Clip plays over static image
                 </div>
+              )}
+            </div>
+            
+            {/* Stage Treatment (Phase C.1) */}
+            <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
+              <h4 style={{ fontSize: '0.85rem', margin: '0 0 0.5rem 0', fontWeight: 'bold' }}>Stage Treatment</h4>
+              
+              {/* BG Dim Slider */}
+              <div style={{ marginBottom: '0.75rem' }}>
+                <label style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.25rem', color: 'var(--text-secondary)' }}>
+                  BG Dim: {Math.round((selectedShot.stageTreatment?.bgDim ?? 0) * 100)}%
+                </label>
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={(selectedShot.stageTreatment?.bgDim ?? 0) * 100}
+                  onChange={async (e) => {
+                    const value = parseInt(e.target.value) / 100
+                    await window.indieForge.pipeline.updateShot(projectId!, selectedShotId!, {
+                      stageTreatment: {
+                        ...selectedShot.stageTreatment,
+                        bgDim: value
+                      }
+                    })
+                    const updated = await window.indieForge.projects.open(projectId!)
+                    setActiveProject(updated)
+                  }}
+                  style={{ width: '100%' }}
+                />
+              </div>
+              
+              {/* Vignette Slider */}
+              <div style={{ marginBottom: '0.75rem' }}>
+                <label style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.25rem', color: 'var(--text-secondary)' }}>
+                  Vignette: {Math.round((selectedShot.stageTreatment?.vignette ?? 0) * 100)}%
+                </label>
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={(selectedShot.stageTreatment?.vignette ?? 0) * 100}
+                  onChange={async (e) => {
+                    const value = parseInt(e.target.value) / 100
+                    await window.indieForge.pipeline.updateShot(projectId!, selectedShotId!, {
+                      stageTreatment: {
+                        ...selectedShot.stageTreatment,
+                        vignette: value
+                      }
+                    })
+                    const updated = await window.indieForge.projects.open(projectId!)
+                    setActiveProject(updated)
+                  }}
+                  style={{ width: '100%' }}
+                />
+              </div>
+              
+              {/* Clear Button */}
+              {(selectedShot.stageTreatment?.bgDim || selectedShot.stageTreatment?.vignette) && (
+                <button
+                  onClick={async () => {
+                    await window.indieForge.pipeline.updateShot(projectId!, selectedShotId!, {
+                      stageTreatment: undefined
+                    })
+                    const updated = await window.indieForge.projects.open(projectId!)
+                    setActiveProject(updated)
+                  }}
+                  style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem' }}
+                >
+                  Clear Treatment
+                </button>
               )}
             </div>
           </div>
