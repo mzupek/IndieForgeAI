@@ -14,10 +14,7 @@ import type {
   Clip,
   ScenePreset
 } from '@shared/types/assetPipeline'
-import { IPC_CHANNELS } from '@shared/ipc'
 import { useProjectStore } from '../state/indieForgeStore'
-
-const { ipcRenderer } = window.electron
 
 export function GameDefinitionView() {
   const { gameId } = useParams<{ gameId: string }>()
@@ -54,10 +51,10 @@ export function GameDefinitionView() {
     
     setLoading(true)
     try {
-      let def = await ipcRenderer.invoke(IPC_CHANNELS.GAME_DEFINITION_GET_BY_GAME, gameId)
+      let def = await window.indieForge.gameDefinitions.getByGame(gameId)
       
       if (!def) {
-        def = await ipcRenderer.invoke(IPC_CHANNELS.GAME_DEFINITION_CREATE, gameId)
+        def = await window.indieForge.gameDefinitions.create(gameId)
       }
       
       setDefinition(def)
@@ -73,8 +70,7 @@ export function GameDefinitionView() {
     
     setSaving(true)
     try {
-      const updated = await ipcRenderer.invoke(
-        IPC_CHANNELS.GAME_DEFINITION_UPDATE,
+      const updated = await window.indieForge.gameDefinitions.update(
         definition.id,
         updates
       )
