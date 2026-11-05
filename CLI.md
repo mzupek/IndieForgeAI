@@ -990,3 +990,348 @@ Presets are stored in `studio.json` in the studio data directory:
 - **Windows:** `%APPDATA%/indie-forge-ai/studio.json`
 
 Presets are studio-wide and can be reused across games and scenes.
+
+---
+
+# Storyboard Commands (Phase 4.5)
+
+Storyboards are scenes with ordered shots, each containing layers (characters/poses/clips/images), camera animation, and effects timeline. Storyboards provide engineers with complete cinematography and timing for cutscenes and gameplay moments.
+
+## Storyboard Management
+
+### List Storyboards
+
+```bash
+forge storyboard list --game <gameId> [--json]
+```
+
+### Show Storyboard Details
+
+```bash
+forge storyboard show --id <storyboardId> [--json]
+```
+
+### Create Storyboard
+
+```bash
+forge storyboard create \
+  --game <gameId> \
+  --name "Gate Drone Battle" \
+  --description "Opening cutscene battle sequence" \
+  [--json]
+```
+
+### Remove Storyboard
+
+```bash
+forge storyboard remove --id <storyboardId> [--json]
+```
+
+---
+
+## Shot Management
+
+Shots are fixed-aspect-ratio stages with layers, camera animation, and effects.
+
+### Add Shot
+
+```bash
+forge shot add \
+  --storyboard <storyboardId> \
+  --name "Drone appears" \
+  --duration 3.5 \
+  --aspect 16:9 \
+  --notes "Drone flies in from upper right" \
+  [--json]
+```
+
+### Update Shot
+
+```bash
+forge shot update \
+  --id <shotId> \
+  --name "Updated shot name" \
+  --duration 4.0 \
+  --notes "Engineer notes here" \
+  [--json]
+```
+
+### Remove Shot
+
+```bash
+forge shot remove \
+  --storyboard <storyboardId> \
+  --id <shotId> \
+  [--json]
+```
+
+---
+
+## Layer Management
+
+Layers are composited elements: character poses, clips, or images with transforms.
+
+### Add Layer
+
+```bash
+# Character with pose
+forge layer add \
+  --shot <shotId> \
+  --z 10 \
+  --character <characterId> \
+  --pose <poseId> \
+  --x 0.3 \
+  --y 0.5 \
+  --scale 1.2 \
+  --rotation 0 \
+  --opacity 1.0 \
+  [--flip-x] \
+  [--json]
+
+# Clip layer
+forge layer add \
+  --shot <shotId> \
+  --z 5 \
+  --clip <clipId> \
+  --x 0.5 \
+  --y 0.5 \
+  --scale 1.0 \
+  [--json]
+
+# Image layer
+forge layer add \
+  --shot <shotId> \
+  --z 1 \
+  --image ./path/to/background.png \
+  --x 0.5 \
+  --y 0.5 \
+  --scale 1.0 \
+  [--json]
+```
+
+**Layer Coordinates:**
+- `x`, `y`: normalized stage coords [0-1] (0.5, 0.5 = center)
+- `scale`: scaling factor (1.0 = original size)
+- `rotation`: degrees (0-360)
+- `z`: z-order (higher = closer to camera)
+- `opacity`: 0.0 (transparent) to 1.0 (opaque)
+
+### Update Layer
+
+```bash
+forge layer update \
+  --shot <shotId> \
+  --id <layerId> \
+  --pose <newPoseId> \
+  --x 0.4 \
+  --scale 1.5 \
+  --rotation 15 \
+  [--json]
+```
+
+### Remove Layer
+
+```bash
+forge layer remove \
+  --shot <shotId> \
+  --id <layerId> \
+  [--json]
+```
+
+---
+
+## Camera Animation
+
+Camera keyframes define focus targets, zoom, and framing over time.
+
+### Add Camera Keyframe
+
+```bash
+# Target a specific layer
+forge camera key \
+  --shot <shotId> \
+  --time 0.0 \
+  --target-layer <layerId> \
+  --zoom 1.0 \
+  [--json]
+
+# Target explicit coordinates
+forge camera key \
+  --shot <shotId> \
+  --time 2.5 \
+  --target-x 0.7 \
+  --target-y 0.3 \
+  --zoom 1.5 \
+  --frame-x 0.6 \
+  --frame-y 0.2 \
+  --frame-w 0.4 \
+  --frame-h 0.6 \
+  [--json]
+```
+
+**Camera Params:**
+- `time`: seconds within shot
+- `target`: layer ID or (x,y) point
+- `zoom`: 1.0 = normal, 2.0 = 2x zoom
+- `framingRect` (optional): viewport window {x, y, width, height} in normalized coords
+
+### Remove Camera Keyframe
+
+```bash
+forge camera remove \
+  --shot <shotId> \
+  --time 2.5 \
+  [--json]
+```
+
+---
+
+## Effect Markers
+
+Effect markers trigger presets or inline effects at specific times, optionally tied to clip moments.
+
+### Add Effect
+
+```bash
+# Use preset
+forge effect add \
+  --shot <shotId> \
+  --time 1.2 \
+  --preset <presetId> \
+  --moment hit \
+  [--json]
+
+# Inline effect
+forge effect add \
+  --shot <shotId> \
+  --time 0.5 \
+  --type shake \
+  --params '{"intensity": 25, "durationMs": 300}' \
+  [--json]
+```
+
+**Effect Types:** versus, zoom_punch, shake, flash, freeze (see Preset Commands for params)
+
+### Remove Effect
+
+```bash
+forge effect remove \
+  --shot <shotId> \
+  --time 1.2 \
+  [--json]
+```
+
+---
+
+## Storyboard Workflow Example
+
+```bash
+# 1. Create storyboard
+BOARD_ID=$(forge storyboard create \
+  --game game-neon-recall \
+  --name "Gate Drone Battle" \
+  --description "Opening cutscene" \
+  --json | jq -r '.id')
+
+# 2. Add shots
+SHOT1=$(forge shot add \
+  --storyboard $BOARD_ID \
+  --name "Drone appears" \
+  --duration 3.0 \
+  --notes "Drone enters from top right" \
+  --json | jq -r '.id')
+
+SHOT2=$(forge shot add \
+  --storyboard $BOARD_ID \
+  --name "Player reacts" \
+  --duration 2.5 \
+  --json | jq -r '.id')
+
+# 3. Add layers to shot 1
+# Background
+forge layer add --shot $SHOT1 --z 1 \
+  --image ./backgrounds/city-gate.png \
+  --x 0.5 --y 0.5 --scale 1.0 --json
+
+# Drone clip
+DRONE_CLIP=$(forge clip list --game game-neon-recall --moment intro --json | jq -r '.[0].id')
+forge layer add --shot $SHOT1 --z 10 \
+  --clip $DRONE_CLIP \
+  --x 0.7 --y 0.3 --scale 0.8 --json
+
+# 4. Add camera animation
+forge camera key --shot $SHOT1 \
+  --time 0.0 --target-x 0.5 --target-y 0.5 --zoom 1.0 --json
+
+forge camera key --shot $SHOT1 \
+  --time 2.0 --target-x 0.7 --target-y 0.3 --zoom 1.5 --json
+
+# 5. Add effects
+SHAKE_PRESET=$(forge preset list --type shake --json | jq -r '.[0].id')
+forge effect add --shot $SHOT1 \
+  --time 2.8 --preset $SHAKE_PRESET --moment hit --json
+
+# 6. Add player to shot 2
+PLAYER=$(forge character list --game game-neon-recall --json | jq -r '.[] | select(.role == "player") | .id')
+HURT_POSE=$(forge pose list $PLAYER --json | jq -r '.[] | select(.slot == "hurt" and .status == "approved") | .id')
+
+forge layer add --shot $SHOT2 --z 10 \
+  --character $PLAYER --pose $HURT_POSE \
+  --x 0.4 --y 0.6 --scale 1.2 --json
+
+# 7. View storyboard
+forge storyboard show --id $BOARD_ID --json
+```
+
+---
+
+## Export with Storyboards
+
+When you export a game with storyboards, the manifest includes:
+- Shot sequences with resolved asset paths
+- Layer transforms (x, y, scale, rotation, flipX, opacity)
+- Camera keyframes with targets and framing
+- Effect markers with timing and parameters
+- Engineer notes per shot
+- Shot thumbnails (PNG)
+- Contact sheet (PNG) showing all shots
+
+```bash
+forge export game-neon-recall --json
+```
+
+The storyboard data appears in the manifest under `"storyboards"` (schema v2).
+
+---
+
+## Storyboard Data Model
+
+**Storyboard:**
+- ID, name, description
+- Ordered list of shot IDs
+
+**Shot:**
+- ID, name, duration (seconds), aspect ratio (e.g., 16:9)
+- Optional background image or clip
+- Layers (z-ordered)
+- Camera track (keyframes)
+- Effects track (markers)
+- Engineer notes
+
+**Layer:**
+- Character + pose, OR clip, OR image
+- Transform: x, y, scale, rotation, flipX, opacity
+- Z-order (higher = closer)
+
+**Camera Keyframe:**
+- Time (seconds)
+- Target (layer ID or point)
+- Zoom level
+- Framing rect (optional)
+
+**Effect Marker:**
+- Time (seconds)
+- Preset reference OR inline type + params
+- Optional clip moment binding
+
+Storyboards are stored in `studio.json` and exported to the game engine manifest (schema v2).

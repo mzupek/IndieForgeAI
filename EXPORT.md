@@ -292,3 +292,218 @@ The `schemaVersion` field enables backward compatibility:
 - **Service**: `src/core/storage/exportService.ts`
 - **CLI**: `src/cli/commands/export.ts`
 - **UI**: `src/renderer/components/ExportView.tsx`
+
+---
+
+## Schema Version 2: Storyboards (Phase 4.5)
+
+**Schema v2** adds storyboard support while maintaining backward compatibility with v1 fields.
+
+### New in v2
+
+#### Storyboards Array
+
+The manifest now includes an optional `storyboards` array containing complete shot sequences with:
+
+- **Shot metadata**: Name, duration, aspect ratio, engineer notes
+- **Layers**: Characters with poses, clips, or images, each with:
+  - Z-order, position (x, y), scale, rotation, flipX, opacity
+  - Resolved asset paths (pose files, clip files)
+- **Camera track**: Keyframes with target (layer ID or point), zoom, framing rect
+- **Effects track**: Effect markers with timing, preset references or inline definitions, optional clip moment bindings
+
+**Example storyboard entry:**
+
+```json
+{
+  "schemaVersion": 2,
+  "storyboards": [
+    {
+      "id": "sb-gate-drone-battle",
+      "name": "Gate Drone Battle",
+      "description": "Opening cutscene",
+      "shots": [
+        {
+          "id": "shot-1",
+          "name": "Drone appears",
+          "durationSec": 3.0,
+          "aspectRatio": { "width": 16, "height": 9 },
+          "layers": [
+            {
+              "id": "layer-bg",
+              "zOrder": 1,
+              "imagePath": "backgrounds/city-gate.png",
+              "x": 0.5,
+              "y": 0.5,
+              "scale": 1.0,
+              "rotation": 0,
+              "flipX": false,
+              "opacity": 1.0
+            },
+            {
+              "id": "layer-drone",
+              "zOrder": 10,
+              "clipId": "clip-drone-intro",
+              "clipFile": "clips/drone_intro.mp4",
+              "x": 0.7,
+              "y": 0.3,
+              "scale": 0.8,
+              "rotation": 0,
+              "flipX": false,
+              "opacity": 1.0
+            }
+          ],
+          "cameraTrack": [
+            {
+              "t": 0.0,
+              "target": { "x": 0.5, "y": 0.5 },
+              "zoom": 1.0
+            },
+            {
+              "t": 2.0,
+              "target": "layer-drone",
+              "zoom": 1.5,
+              "framingRect": { "x": 0.6, "y": 0.2, "width": 0.4, "height": 0.6 }
+            }
+          ],
+          "effectsTrack": [
+            {
+              "t": 2.8,
+              "presetId": "preset-shake-01",
+              "moment": "hit"
+            }
+          ],
+          "notes": "Drone enters from top right, camera follows and zooms. Shake effect on impact."
+        }
+      ]
+    }
+  ]
+}
+```
+
+### Layer Types
+
+Layers can contain:
+1. **Character pose**: `characterId` + `poseId` + resolved `poseFile` path
+2. **Clip**: `clipId` + resolved `clipFile` path
+3. **Image**: `imagePath` (absolute or relative)
+
+### Camera Animation
+
+Camera keyframes define:
+- **Target**: Layer ID (string) or explicit point `{x, y}`
+- **Zoom**: Multiplier (1.0 = normal, 2.0 = 2x zoom)
+- **Framing rect** (optional): Viewport window in normalized coords
+
+Engine interpolates between keyframes for smooth camera motion.
+
+### Effect Markers
+
+Effects can:
+- Reference a preset by `presetId`
+- Define inline with `inlineType` + `inlineParams`
+- Bind to clip moments (`intro`, `hit`, `finisher`, `defeat`, `story_beat`)
+
+### Contact Sheets & Thumbnails
+
+Storyboards may include:
+- **Contact sheet**: PNG showing all shots in grid layout (for engineer review)
+- **Shot thumbnails**: Individual PNG previews per shot
+
+### Engine Integration (v2)
+
+#### Unity
+```csharp
+[System.Serializable]
+public class StoryboardManifest {
+    public int schemaVersion;
+    public StoryboardData[] storyboards;
+}
+
+[System.Serializable]
+public class StoryboardData {
+    public string id;
+    public string name;
+    public ShotData[] shots;
+}
+
+[System.Serializable]
+public class ShotData {
+    public string id;
+    public string name;
+    public float durationSec;
+    public LayerData[] layers;
+    public CameraKeyframe[] cameraTrack;
+    public EffectMarker[] effectsTrack;
+    public string notes;
+}
+
+// Load manifest
+var json = Resources.Load<TextAsset>("IndieForge/game-id/manifest").text;
+var manifest = JsonUtility.FromJson<StoryboardManifest>(json);
+
+foreach (var storyboard in manifest.storyboards) {
+    // Process shots, layers, camera, effects
+}
+```
+
+#### Godot
+```gdscript
+# Load manifest
+var file = FileAccess.open("res://assets/indie_forge/game-id/manifest.json", FileAccess.READ)
+var manifest = JSON.parse_string(file.get_as_text())
+
+for storyboard in manifest.storyboards:
+    for shot in storyboard.shots:
+        # Process layers
+        for layer in shot.layers:
+            if layer.has("poseFile"):
+                var texture = load("res://assets/indie_forge/game-id/" + layer.poseFile)
+            elif layer.has("clipFile"):
+                var video = load("res://assets/indie_forge/game-id/" + layer.clipFile)
+        
+        # Process camera animation
+        for keyframe in shot.cameraTrack:
+            # Interpolate camera position/zoom
+            pass
+        
+        # Process effects
+        for effect in shot.effectsTrack:
+            # Trigger effect at effect.t seconds
+            pass
+```
+
+## v1 → v2 Migration
+
+v2 is backward compatible:
+- All v1 fields remain unchanged
+- `storyboards` is optional (absent in v1 exports)
+- Engines can check `schemaVersion` and handle accordingly
+
+**Fallback:**
+```javascript
+if (manifest.schemaVersion === 1 || !manifest.storyboards) {
+    // Use legacy v1 workflow
+} else {
+    // Use v2 storyboard workflow
+}
+```
+
+## Storyboard Workflow
+
+1. **Create storyboard** for a scene
+2. **Add shots** with durations and aspect ratios
+3. **Add layers** to shots (characters, poses, clips, images)
+4. **Position & transform** layers (CLI or UI)
+5. **Add camera keyframes** for focus and framing
+6. **Add effect markers** tied to presets or inline
+7. **Export** to generate manifest v2 with storyboards
+8. **Engine imports** shots as timeline sequences
+
+## Files (v2)
+
+- **Schema v2**: `docs/export-manifest-schema-v2.json`
+- **Types**: `src/shared/types/exportManifest.ts`
+- **Service**: `src/core/storage/exportService.ts` (updated)
+- **CLI**: `src/cli/commands/storyboard.ts`, `CLI.md`
+- **UI**: `src/renderer/components/StoryboardsView.tsx`
