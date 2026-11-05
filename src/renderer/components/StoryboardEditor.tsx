@@ -356,6 +356,7 @@ export function StoryboardEditor() {
   const [mode, setMode] = useState<EditorMode>('layout')
   const [playbackState, setPlaybackState] = useState<'stopped' | 'playing' | 'paused'>('stopped')
   const [playbackTime, setPlaybackTime] = useState(0)
+  const [loopPlayback, setLoopPlayback] = useState(false)
   
   const [dragMode, setDragMode] = useState<DragMode>(null)
   const [dragStart, setDragStart] = useState<any>(null)
@@ -1368,20 +1369,42 @@ export function StoryboardEditor() {
   }
 
   const animatePlayback = () => {
-    const animate = () => {
+    let lastTime = performance.now()
+    
+    const animate = (currentTime: number) => {
+      const deltaTime = (currentTime - lastTime) / 1000 // Convert to seconds
+      lastTime = currentTime
+      
       setPlaybackTime(t => {
         if (!selectedShot) return 0
-        const newTime = t + 0.016
+        const newTime = t + deltaTime
+        
         if (newTime >= selectedShot.durationSec) {
-          setPlaybackState('stopped')
-          return 0
+          if (loopPlayback) {
+            // Loop: restart from beginning
+            return 0
+          } else {
+            // Stop: clamp to duration and stop playback
+            setTimeout(() => setPlaybackState('stopped'), 0)
+            return selectedShot.durationSec
+          }
         }
         return newTime
       })
+      
+      // Continue animation - check will happen on next render
       animationFrameRef.current = requestAnimationFrame(animate)
     }
     animationFrameRef.current = requestAnimationFrame(animate)
   }
+  
+  // Stop animation when playback stops
+  useEffect(() => {
+    if (playbackState !== 'playing' && animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current)
+      animationFrameRef.current = null
+    }
+  }, [playbackState])
 
   const handleStopPlayback = () => {
     setPlaybackState('stopped')
@@ -1766,13 +1789,21 @@ export function StoryboardEditor() {
                   Camera
                 </button>
               </div>
-              <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.5rem' }}>
+              <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                 <button type="button" onClick={handlePlayAnimatic}>
                   {playbackState === 'playing' ? '⏸ Pause' : '▶ Play'}
                 </button>
                 <button type="button" onClick={handleStopPlayback}>
                   ⏹ Stop
                 </button>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.85rem', cursor: 'pointer', userSelect: 'none' }}>
+                  <input
+                    type="checkbox"
+                    checked={loopPlayback}
+                    onChange={(e) => setLoopPlayback(e.target.checked)}
+                  />
+                  Loop
+                </label>
               </div>
             </div>
             
@@ -1786,6 +1817,11 @@ export function StoryboardEditor() {
                 color: 'var(--text-secondary)'
               }}>
                 💡 <strong>Camera</strong> zooms the whole shot. <strong>Layer Scale</strong> (right panel) sizes each character individually.
+                {selectedShot && selectedShot.cameraTrack.length > 1 && (
+                  <div style={{ marginTop: '0.25rem', fontSize: '0.75rem', fontStyle: 'italic' }}>
+                    Camera smoothly interpolates between keys over time. Check timeline markers and live readout below.
+                  </div>
+                )}
               </div>
             )}
 
@@ -1811,6 +1847,23 @@ export function StoryboardEditor() {
               {mode === 'camera' && (() => {
                 const cam = getInterpolatedCamera(playbackTime)
                 if (!cam) return null
+                
+                // Find which keys are active for interpolation
+                const sorted = [...selectedShot.cameraTrack].sort((a, b) => a.t - b.t)
+                let interpolationInfo = ''
+                if (sorted.length > 0) {
+                  const onKey = sorted.find(k => Math.abs(k.t - playbackTime) < 0.01)
+                  if (onKey) {
+                    interpolationInfo = ' (on key)'
+                  } else {
+                    const before = sorted.filter(k => k.t <= playbackTime).pop()
+                    const after = sorted.find(k => k.t > playbackTime)
+                    if (before && after) {
+                      interpolationInfo = ` (blend ${before.t.toFixed(1)}s → ${after.t.toFixed(1)}s)`
+                    }
+                  }
+                }
+                
                 const targetLabel = typeof cam.target === 'string' 
                   ? selectedShot?.layers.find(l => l.id === cam.target)?.characterId || 'layer'
                   : `(${cam.target.x.toFixed(2)}, ${cam.target.y.toFixed(2)})`
@@ -1827,7 +1880,7 @@ export function StoryboardEditor() {
                     alignItems: 'center'
                   }}>
                     <span>
-                      <strong>Camera:</strong> Zoom {cam.zoom.toFixed(2)}x · Target: {targetLabel}
+                      <strong>Camera:</strong> Zoom {cam.zoom.toFixed(2)}x · Target: {targetLabel}{interpolationInfo}
                     </span>
                     <span style={{ color: 'var(--muted)', fontSize: '0.75rem' }}>
                       @ {playbackTime.toFixed(2)}s
@@ -1862,23 +1915,26 @@ export function StoryboardEditor() {
                 onPointerMove={handleTimelinePointerMove}
                 onPointerUp={handleTimelinePointerUp}
               >
-                {/* Track Labels */}
-                <div style={{ position: 'absolute', left: '0.5rem', top: '5px', fontSize: '0.7rem', fontWeight: 'bold', color: '#00AAFF', zIndex: 5 }}>
+                {/* Track Labels - pointerEvents none to not block marker clicks */}
+                <div style={{ position: 'absolute', left: '0.5rem', top: '5px', fontSize: '0.7rem', fontWeight: 'bold', color: '#00AAFF', zIndex: 5, pointerEvents: 'none' }}>
                   Camera
                 </div>
-                <div style={{ position: 'absolute', left: '0.5rem', bottom: '5px', fontSize: '0.7rem', fontWeight: 'bold', color: '#FF6B6B', zIndex: 5 }}>
+                <div style={{ position: 'absolute', left: '0.5rem', bottom: '5px', fontSize: '0.7rem', fontWeight: 'bold', color: '#FF6B6B', zIndex: 5, pointerEvents: 'none' }}>
                   Effects
                 </div>
                 
-                {/* Track Divider */}
-                <div style={{ position: 'absolute', left: 0, right: 0, top: '45px', height: '1px', background: 'rgba(255,255,255,0.1)' }} />
+                {/* Track Divider - pointerEvents none to not block marker clicks */}
+                <div style={{ position: 'absolute', left: 0, right: 0, top: '45px', height: '1px', background: 'rgba(255,255,255,0.1)', pointerEvents: 'none' }} />
                 
                 {/* Playhead - draggable for scrubbing */}
                 <div
                   onPointerDown={(e) => {
-                    e.stopPropagation()
-                    e.currentTarget.setPointerCapture(e.pointerId)
+                    // Don't stopPropagation - let timeline handle the move
                     setDragMode('playhead' as any)
+                    // Immediately update time on mousedown
+                    const rect = e.currentTarget.parentElement!.getBoundingClientRect()
+                    const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+                    setPlaybackTime(x * selectedShot.durationSec)
                   }}
                   style={{
                     position: 'absolute',
@@ -1897,7 +1953,8 @@ export function StoryboardEditor() {
                     top: 0,
                     bottom: 0,
                     width: '2px',
-                    background: '#FFC800'
+                    background: '#FFC800',
+                    pointerEvents: 'none'
                   }} />
                   <div style={{
                     position: 'absolute',
@@ -1906,7 +1963,8 @@ export function StoryboardEditor() {
                     width: '12px',
                     height: '12px',
                     background: '#FFC800',
-                    clipPath: 'polygon(50% 0%, 100% 100%, 0% 100%)'
+                    clipPath: 'polygon(50% 0%, 100% 100%, 0% 100%)',
+                    pointerEvents: 'none'
                   }} />
                 </div>
                 
