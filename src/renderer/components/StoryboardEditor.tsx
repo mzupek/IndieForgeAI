@@ -690,8 +690,8 @@ export function StoryboardEditor() {
 
     ctx.restore()
 
-    // Draw framing rect overlay in camera mode (persistent - Matt's fix)
-    if (mode === 'camera' && playbackState === 'stopped') {
+    // Draw framing rect overlay in camera mode (persistent - Matt's fix v2)
+    if (mode === 'camera') {
       const cam = getInterpolatedCamera(playbackTime)
       if (cam) {
         // Use explicit framingRect if present, otherwise calculate from zoom
@@ -708,16 +708,32 @@ export function StoryboardEditor() {
           }
         }
         
+        // Draw the framing rect
         ctx.strokeStyle = '#00AAFF'
-        ctx.lineWidth = 3
-        ctx.setLineDash([5, 5])
-        ctx.strokeRect(
-          rect.x * canvas.width,
-          rect.y * canvas.height,
-          rect.width * canvas.width,
-          rect.height * canvas.height
-        )
+        ctx.lineWidth = 4
+        ctx.setLineDash([8, 4])
+        const rectX = rect.x * canvas.width
+        const rectY = rect.y * canvas.height
+        const rectW = rect.width * canvas.width
+        const rectH = rect.height * canvas.height
+        ctx.strokeRect(rectX, rectY, rectW, rectH)
         ctx.setLineDash([])
+        
+        // Draw corner handles for visibility (especially when zoom ≈ 1)
+        const handleSize = 20
+        ctx.fillStyle = '#00AAFF'
+        // Top-left
+        ctx.fillRect(rectX - 2, rectY - 2, handleSize, 4)
+        ctx.fillRect(rectX - 2, rectY - 2, 4, handleSize)
+        // Top-right
+        ctx.fillRect(rectX + rectW - handleSize + 2, rectY - 2, handleSize, 4)
+        ctx.fillRect(rectX + rectW - 2, rectY - 2, 4, handleSize)
+        // Bottom-left
+        ctx.fillRect(rectX - 2, rectY + rectH - 2, handleSize, 4)
+        ctx.fillRect(rectX - 2, rectY + rectH - handleSize + 2, 4, handleSize)
+        // Bottom-right
+        ctx.fillRect(rectX + rectW - handleSize + 2, rectY + rectH - 2, handleSize, 4)
+        ctx.fillRect(rectX + rectW - 2, rectY + rectH - handleSize + 2, 4, handleSize)
       }
     }
   }, [selectedShot, selectedLayerId, mode, playbackTime, loadedImages, dragStart, getInterpolatedCamera])
@@ -937,11 +953,20 @@ export function StoryboardEditor() {
   }
 
   const handleTimelinePointerMove = async (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!draggedMarker || !selectedShot) return
+    if (!selectedShot) return
     
     const rect = e.currentTarget.getBoundingClientRect()
     const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
     const newTime = x * selectedShot.durationSec
+    
+    // Handle playhead scrubbing
+    if (dragMode === 'playhead' as any) {
+      setPlaybackTime(newTime)
+      return
+    }
+    
+    // Handle marker dragging
+    if (!draggedMarker) return
     
     if (draggedMarker.type === 'camera') {
       const updated = [...selectedShot.cameraTrack]
@@ -961,8 +986,13 @@ export function StoryboardEditor() {
   }
 
   const handleTimelinePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (dragMode === 'playhead' as any) {
+      setDragMode(null)
+    }
     setDraggedMarker(null)
-    e.currentTarget.releasePointerCapture(e.pointerId)
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId)
+    }
   }
 
   const handleAddCameraKeyframe = async () => {
@@ -1729,19 +1759,42 @@ export function StoryboardEditor() {
                 {/* Track Divider */}
                 <div style={{ position: 'absolute', left: 0, right: 0, top: '45px', height: '1px', background: 'rgba(255,255,255,0.1)' }} />
                 
-                {/* Playhead */}
+                {/* Playhead - draggable for scrubbing */}
                 <div
+                  onPointerDown={(e) => {
+                    e.stopPropagation()
+                    e.currentTarget.setPointerCapture(e.pointerId)
+                    setDragMode('playhead' as any)
+                  }}
                   style={{
                     position: 'absolute',
                     left: `${(playbackTime / selectedShot.durationSec) * 100}%`,
                     top: 0,
                     bottom: 0,
-                    width: '2px',
-                    background: '#FFC800',
-                    zIndex: 10,
-                    pointerEvents: 'none'
+                    width: '12px',
+                    transform: 'translateX(-6px)',
+                    cursor: 'ew-resize',
+                    zIndex: 10
                   }}
-                />
+                >
+                  <div style={{
+                    position: 'absolute',
+                    left: '5px',
+                    top: 0,
+                    bottom: 0,
+                    width: '2px',
+                    background: '#FFC800'
+                  }} />
+                  <div style={{
+                    position: 'absolute',
+                    left: '0',
+                    top: '0',
+                    width: '12px',
+                    height: '12px',
+                    background: '#FFC800',
+                    clipPath: 'polygon(50% 0%, 100% 100%, 0% 100%)'
+                  }} />
+                </div>
                 
                 {/* Camera keyframes */}
                 {selectedShot.cameraTrack.map((kf, idx) => {
@@ -1753,27 +1806,31 @@ export function StoryboardEditor() {
                   return (
                     <div
                       key={idx}
-                      onClick={() => {
+                      onPointerDown={(e) => {
+                        e.stopPropagation()
                         setSelectedCameraIndex(idx)
                         setEditingCamera(true)
                         setCameraManuallySelected(true)
+                        setPlaybackTime(kf.t)
                       }}
                       onContextMenu={(e) => {
                         e.preventDefault()
+                        e.stopPropagation()
                         handleDeleteCameraKeyframe(idx)
                       }}
                       style={{
                         position: 'absolute',
                         left: `${(kf.t / selectedShot.durationSec) * 100}%`,
                         top: '15px',
-                        width: '14px',
-                        height: '14px',
+                        width: '16px',
+                        height: '16px',
                         background: selectedCameraIndex === idx ? '#FFD700' : '#00AAFF',
                         borderRadius: '50%',
                         transform: 'translateX(-50%)',
                         cursor: 'pointer',
-                        border: '2px solid #fff',
-                        boxShadow: '0 2px 4px rgba(0,0,0,0.3)'
+                        border: selectedCameraIndex === idx ? '3px solid #FFF' : '2px solid #fff',
+                        boxShadow: selectedCameraIndex === idx ? '0 0 8px rgba(255, 215, 0, 0.6)' : '0 2px 4px rgba(0,0,0,0.3)',
+                        zIndex: selectedCameraIndex === idx ? 11 : 5
                       }}
                       title={tooltip}
                     />
@@ -1787,26 +1844,30 @@ export function StoryboardEditor() {
                   return (
                     <div
                       key={idx}
-                      onClick={() => {
+                      onPointerDown={(e) => {
+                        e.stopPropagation()
                         setSelectedEffectIndex(idx)
                         setEditingEffect(true)
+                        setPlaybackTime(ef.t)
                       }}
                       onContextMenu={(e) => {
                         e.preventDefault()
+                        e.stopPropagation()
                         handleDeleteMarker('effect', idx)
                       }}
                       style={{
                         position: 'absolute',
                         left: `${(ef.t / selectedShot.durationSec) * 100}%`,
                         bottom: '15px',
-                        width: '14px',
-                        height: '14px',
+                        width: '16px',
+                        height: '16px',
                         background: selectedEffectIndex === idx ? '#FFD700' : '#FF6B6B',
                         borderRadius: '50%',
                         transform: 'translateX(-50%)',
                         cursor: 'pointer',
-                        border: '2px solid #fff',
-                        boxShadow: '0 2px 4px rgba(0,0,0,0.3)'
+                        border: selectedEffectIndex === idx ? '3px solid #FFF' : '2px solid #fff',
+                        boxShadow: selectedEffectIndex === idx ? '0 0 8px rgba(255, 215, 0, 0.6)' : '0 2px 4px rgba(0,0,0,0.3)',
+                        zIndex: selectedEffectIndex === idx ? 11 : 5
                       }}
                       title={`${label} @ ${ef.t.toFixed(1)}s (click to edit, right-click to delete)`}
                     />
