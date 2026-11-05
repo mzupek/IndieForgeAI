@@ -494,6 +494,58 @@ export function registerStoryboardCommands(program: Command): void {
     })
 
   cameraCmd
+    .command('update')
+    .description('Update camera keyframe at time')
+    .requiredOption('--shot <shotId>', 'Shot ID')
+    .requiredOption('--time <seconds>', 'Time in seconds (must match existing keyframe)')
+    .option('--target-layer <layerId>', 'New target layer ID')
+    .option('--target-x <coord>', 'New target X coordinate (0-1)')
+    .option('--target-y <coord>', 'New target Y coordinate (0-1)')
+    .option('--zoom <level>', 'New zoom level')
+    .option('--json', 'Output as JSON')
+    .action(async (options, cmd) => {
+      try {
+        const mergedOpts = { ...cmd.parent!.parent!.opts(), ...options }
+        const shot = await getShot(options.shot, getDataDir(mergedOpts.dataDir))
+        
+        const keyframeIndex = shot.cameraTrack.findIndex(kf => Math.abs(kf.t - parseFloat(options.time)) < 0.01)
+        if (keyframeIndex < 0) {
+          console.error(`No camera keyframe found at t=${options.time}s`)
+          process.exit(1)
+        }
+        
+        const existing = shot.cameraTrack[keyframeIndex]
+        const updated: CameraKeyframe = {
+          t: existing.t,
+          target: options.targetLayer 
+            ? options.targetLayer
+            : (options.targetX !== undefined || options.targetY !== undefined)
+              ? {
+                  x: options.targetX !== undefined ? parseFloat(options.targetX) : (typeof existing.target === 'object' ? existing.target.x : 0.5),
+                  y: options.targetY !== undefined ? parseFloat(options.targetY) : (typeof existing.target === 'object' ? existing.target.y : 0.5)
+                }
+              : existing.target,
+          zoom: options.zoom !== undefined ? parseFloat(options.zoom) : existing.zoom,
+          framingRect: existing.framingRect
+        }
+        
+        const newTrack = [...shot.cameraTrack]
+        newTrack[keyframeIndex] = updated
+        
+        await updateShot(options.shot, { cameraTrack: newTrack }, getDataDir(mergedOpts.dataDir))
+
+        if (mergedOpts.json) {
+          console.log(JSON.stringify({ updated: true, keyframe: updated }, null, 2))
+        } else {
+          console.log(`✓ Updated camera keyframe at t=${options.time}s`)
+        }
+      } catch (err) {
+        console.error('Error:', err instanceof Error ? err.message : err)
+        process.exit(1)
+      }
+    })
+
+  cameraCmd
     .command('remove')
     .description('Remove camera keyframe at time')
     .requiredOption('--shot <shotId>', 'Shot ID')

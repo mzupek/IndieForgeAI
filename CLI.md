@@ -1175,6 +1175,68 @@ forge camera key \
 - `zoom`: 1.0 = normal, 2.0 = 2x zoom
 - `framingRect` (optional): viewport window {x, y, width, height} in normalized coords
 
+**JSON Output:**
+```json
+{
+  "added": true,
+  "keyframe": {
+    "t": 2.5,
+    "target": {"x": 0.7, "y": 0.3},
+    "zoom": 1.5,
+    "framingRect": {"x": 0.6, "y": 0.2, "width": 0.4, "height": 0.6}
+  }
+}
+```
+
+### Update Camera Keyframe
+
+Update an existing camera keyframe's zoom or target without recreating it.
+
+```bash
+# Update zoom only
+forge camera update \
+  --shot <shotId> \
+  --time 2.5 \
+  --zoom 2.0 \
+  [--json]
+
+# Update target to layer
+forge camera update \
+  --shot <shotId> \
+  --time 2.5 \
+  --target-layer <layerId> \
+  [--json]
+
+# Update target to coordinates
+forge camera update \
+  --shot <shotId> \
+  --time 2.5 \
+  --target-x 0.8 \
+  --target-y 0.4 \
+  [--json]
+
+# Update both zoom and target
+forge camera update \
+  --shot <shotId> \
+  --time 2.5 \
+  --zoom 1.8 \
+  --target-x 0.5 \
+  --target-y 0.6 \
+  [--json]
+```
+
+**JSON Output:**
+```json
+{
+  "updated": true,
+  "keyframe": {
+    "t": 2.5,
+    "target": {"x": 0.5, "y": 0.6},
+    "zoom": 1.8
+  }
+}
+```
+
 ### Remove Camera Keyframe
 
 ```bash
@@ -1182,6 +1244,13 @@ forge camera remove \
   --shot <shotId> \
   --time 2.5 \
   [--json]
+```
+
+**JSON Output:**
+```json
+{
+  "removed": true
+}
 ```
 
 ---
@@ -1260,11 +1329,18 @@ forge layer add --shot $SHOT1 --z 10 \
   --x 0.7 --y 0.3 --scale 0.8 --json
 
 # 4. Add camera animation
+# Start wide at center
 forge camera key --shot $SHOT1 \
   --time 0.0 --target-x 0.5 --target-y 0.5 --zoom 1.0 --json
 
+# Zoom to drone at 2.0s
+DRONE_LAYER=$(forge shot show --id $SHOT1 --json | jq -r '.shot.layers[] | select(.clipId != null) | .id' | head -1)
 forge camera key --shot $SHOT1 \
-  --time 2.0 --target-x 0.7 --target-y 0.3 --zoom 1.5 --json
+  --time 2.0 --target-layer $DRONE_LAYER --zoom 1.8 --json
+
+# Adjust zoom at 2.0s if needed
+forge camera update --shot $SHOT1 \
+  --time 2.0 --zoom 2.2 --json
 
 # 5. Add effects
 SHAKE_PRESET=$(forge preset list --type shake --json | jq -r '.[0].id')

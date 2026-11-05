@@ -32,6 +32,135 @@ function easeInOutCubic(t: number): number {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
 }
 
+function CameraInspector({
+  keyframe,
+  layers,
+  onSave,
+  onClose
+}: {
+  keyframe: CameraKeyframe
+  layers: StoryboardLayer[]
+  onSave: (updated: CameraKeyframe) => void
+  onClose: () => void
+}) {
+  const [zoom, setZoom] = useState(keyframe.zoom)
+  const [targetType, setTargetType] = useState<'layer' | 'point'>(
+    typeof keyframe.target === 'string' ? 'layer' : 'point'
+  )
+  const [targetLayer, setTargetLayer] = useState(
+    typeof keyframe.target === 'string' ? keyframe.target : ''
+  )
+  const [targetX, setTargetX] = useState(
+    typeof keyframe.target === 'object' ? keyframe.target.x : 0.5
+  )
+  const [targetY, setTargetY] = useState(
+    typeof keyframe.target === 'object' ? keyframe.target.y : 0.5
+  )
+
+  const handleSave = () => {
+    const updated: CameraKeyframe = {
+      t: keyframe.t,
+      zoom,
+      target: targetType === 'layer' ? targetLayer : { x: targetX, y: targetY },
+      framingRect: keyframe.framingRect
+    }
+    onSave(updated)
+  }
+
+  return (
+    <div style={{ marginTop: '0.5rem', padding: '0.75rem', background: 'var(--bg)', borderRadius: '4px', border: '2px solid #00AAFF' }}>
+      <div style={{ fontWeight: 'bold', marginBottom: '0.5rem', fontSize: '0.9rem' }}>
+        Edit Camera @ {keyframe.t.toFixed(1)}s
+      </div>
+      
+      <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.85rem' }}>
+        Zoom:
+        <input
+          type="number"
+          step="0.1"
+          min="0.5"
+          max="5"
+          value={zoom}
+          onChange={(e) => setZoom(Number(e.target.value))}
+          style={{ width: '100%', marginTop: '0.25rem' }}
+        />
+      </label>
+      
+      <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.85rem' }}>
+        Target Type:
+        <select
+          value={targetType}
+          onChange={(e) => setTargetType(e.target.value as 'layer' | 'point')}
+          style={{ width: '100%', marginTop: '0.25rem' }}
+        >
+          <option value="layer">Layer</option>
+          <option value="point">Point</option>
+        </select>
+      </label>
+      
+      {targetType === 'layer' ? (
+        <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.85rem' }}>
+          Target Layer:
+          <select
+            value={targetLayer}
+            onChange={(e) => setTargetLayer(e.target.value)}
+            style={{ width: '100%', marginTop: '0.25rem' }}
+          >
+            <option value="">Center (no layer)</option>
+            {layers.map(layer => (
+              <option key={layer.id} value={layer.id}>
+                z{layer.zOrder} - {layer.characterId ? 'Character' : layer.clipId ? 'Clip' : 'Image'}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : (
+        <>
+          <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.85rem' }}>
+            Target X:
+            <input
+              type="number"
+              step="0.05"
+              min="0"
+              max="1"
+              value={targetX}
+              onChange={(e) => setTargetX(Number(e.target.value))}
+              style={{ width: '100%', marginTop: '0.25rem' }}
+            />
+          </label>
+          <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.85rem' }}>
+            Target Y:
+            <input
+              type="number"
+              step="0.05"
+              min="0"
+              max="1"
+              value={targetY}
+              onChange={(e) => setTargetY(Number(e.target.value))}
+              style={{ width: '100%', marginTop: '0.25rem' }}
+            />
+          </label>
+        </>
+      )}
+      
+      {keyframe.framingRect && (
+        <div style={{ fontSize: '0.75rem', color: 'var(--muted)', marginBottom: '0.5rem' }}>
+          Framing: {keyframe.framingRect.width.toFixed(2)} × {keyframe.framingRect.height.toFixed(2)}
+        </div>
+      )}
+      
+      <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem' }}>
+        <button type="button" onClick={handleSave} style={{ flex: 1 }}>
+          Save
+        </button>
+        <button type="button" onClick={onClose} style={{ flex: 1 }} className="secondary">
+          Cancel
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function EffectInspector({
   effect,
   presets,
@@ -205,6 +334,8 @@ export function StoryboardEditor() {
   const [linkingScene, setLinkingScene] = useState<string | null>(null)
   const [selectedEffectIndex, setSelectedEffectIndex] = useState<number | null>(null)
   const [editingEffect, setEditingEffect] = useState(false)
+  const [selectedCameraIndex, setSelectedCameraIndex] = useState<number | null>(null)
+  const [editingCamera, setEditingCamera] = useState(false)
   
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const animationFrameRef = useRef<number | null>(null)
@@ -804,15 +935,42 @@ export function StoryboardEditor() {
   const handleAddCameraKeyframe = async () => {
     if (!selectedShot) return
     
+    // Use interpolated camera state if available, otherwise default to center
+    const currentCam = getInterpolatedCamera(playbackTime)
     const keyframe: CameraKeyframe = {
       t: playbackTime,
-      target: { x: 0.5, y: 0.5 },
-      zoom: 1.0
+      target: currentCam?.target || { x: 0.5, y: 0.5 },
+      zoom: currentCam?.zoom || 1.0,
+      framingRect: currentCam?.framingRect
     }
     
     await window.indieForge.pipeline.addCameraKeyframe(projectId!, selectedShotId!, keyframe)
     const updated = await window.indieForge.projects.open(projectId!)
     setActiveProject(updated)
+  }
+  
+  const handleUpdateCameraKeyframe = async (index: number, updated: CameraKeyframe) => {
+    if (!selectedShot) return
+    
+    const newTrack = [...selectedShot.cameraTrack]
+    newTrack[index] = updated
+    
+    await window.indieForge.pipeline.updateShot(projectId!, selectedShotId!, { cameraTrack: newTrack })
+    const proj = await window.indieForge.projects.open(projectId!)
+    setActiveProject(proj)
+    setEditingCamera(false)
+    setSelectedCameraIndex(null)
+  }
+  
+  const handleDeleteCameraKeyframe = async (index: number) => {
+    if (!selectedShot || !confirm('Delete this camera keyframe?')) return
+    
+    const time = selectedShot.cameraTrack[index].t
+    await window.indieForge.pipeline.removeCameraKeyframe(projectId!, selectedShotId!, time)
+    const updated = await window.indieForge.projects.open(projectId!)
+    setActiveProject(updated)
+    setEditingCamera(false)
+    setSelectedCameraIndex(null)
   }
 
   const handleAddEffect = async (presetId?: string, inlineType?: ScenePresetType) => {
@@ -1087,6 +1245,28 @@ export function StoryboardEditor() {
       if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current)
     }
   }, [])
+  
+  // Auto-select camera keyframe when playhead is on one (Phase C.3b)
+  useEffect(() => {
+    if (!selectedShot || playbackState === 'playing') return
+    
+    const onKeyframe = selectedShot.cameraTrack.findIndex(kf => 
+      Math.abs(kf.t - playbackTime) < 0.05
+    )
+    
+    if (onKeyframe >= 0 && !editingCamera) {
+      setSelectedCameraIndex(onKeyframe)
+      setEditingCamera(true)
+    } else if (onKeyframe < 0 && editingCamera && selectedCameraIndex !== null) {
+      // Playhead moved away from keyframe
+      const stillOnSelected = selectedShot.cameraTrack[selectedCameraIndex] && 
+        Math.abs(selectedShot.cameraTrack[selectedCameraIndex].t - playbackTime) < 0.05
+      if (!stillOnSelected) {
+        setEditingCamera(false)
+        setSelectedCameraIndex(null)
+      }
+    }
+  }, [playbackTime, selectedShot, playbackState, editingCamera, selectedCameraIndex])
 
   if (!activeProject || !gameId) {
     return <p style={{ color: 'var(--muted)' }}>Loading...</p>
@@ -1471,11 +1651,22 @@ export function StoryboardEditor() {
               </div>
               
               <div 
-                style={{ position: 'relative', height: '60px', background: 'var(--bg)', borderRadius: '4px', cursor: 'pointer' }}
+                style={{ position: 'relative', height: '90px', background: 'var(--bg)', borderRadius: '4px', cursor: 'pointer' }}
                 onPointerDown={handleTimelinePointerDown}
                 onPointerMove={handleTimelinePointerMove}
                 onPointerUp={handleTimelinePointerUp}
               >
+                {/* Track Labels */}
+                <div style={{ position: 'absolute', left: '0.5rem', top: '5px', fontSize: '0.7rem', fontWeight: 'bold', color: '#00AAFF', zIndex: 5 }}>
+                  Camera
+                </div>
+                <div style={{ position: 'absolute', left: '0.5rem', bottom: '5px', fontSize: '0.7rem', fontWeight: 'bold', color: '#FF6B6B', zIndex: 5 }}>
+                  Effects
+                </div>
+                
+                {/* Track Divider */}
+                <div style={{ position: 'absolute', left: 0, right: 0, top: '45px', height: '1px', background: 'rgba(255,255,255,0.1)' }} />
+                
                 {/* Playhead */}
                 <div
                   style={{
@@ -1491,29 +1682,40 @@ export function StoryboardEditor() {
                 />
                 
                 {/* Camera keyframes */}
-                {selectedShot.cameraTrack.map((kf, idx) => (
-                  <div
-                    key={idx}
-                    onContextMenu={(e) => {
-                      e.preventDefault()
-                      handleDeleteMarker('camera', idx)
-                    }}
-                    style={{
-                      position: 'absolute',
-                      left: `${(kf.t / selectedShot.durationSec) * 100}%`,
-                      top: '10px',
-                      width: '14px',
-                      height: '14px',
-                      background: '#00AAFF',
-                      borderRadius: '50%',
-                      transform: 'translateX(-50%)',
-                      cursor: 'grab',
-                      border: '2px solid #fff',
-                      boxShadow: '0 2px 4px rgba(0,0,0,0.3)'
-                    }}
-                    title={`Camera @ ${kf.t.toFixed(1)}s (right-click to delete)`}
-                  />
-                ))}
+                {selectedShot.cameraTrack.map((kf, idx) => {
+                  const targetLabel = typeof kf.target === 'string' 
+                    ? `layer ${kf.target.slice(0, 8)}...` 
+                    : `(${kf.target.x.toFixed(2)}, ${kf.target.y.toFixed(2)})`
+                  const tooltip = `Camera @ ${kf.t.toFixed(1)}s\nZoom: ${kf.zoom.toFixed(1)}x\nTarget: ${targetLabel}`
+                  
+                  return (
+                    <div
+                      key={idx}
+                      onClick={() => {
+                        setSelectedCameraIndex(idx)
+                        setEditingCamera(true)
+                      }}
+                      onContextMenu={(e) => {
+                        e.preventDefault()
+                        handleDeleteCameraKeyframe(idx)
+                      }}
+                      style={{
+                        position: 'absolute',
+                        left: `${(kf.t / selectedShot.durationSec) * 100}%`,
+                        top: '15px',
+                        width: '14px',
+                        height: '14px',
+                        background: selectedCameraIndex === idx ? '#FFD700' : '#00AAFF',
+                        borderRadius: '50%',
+                        transform: 'translateX(-50%)',
+                        cursor: 'pointer',
+                        border: '2px solid #fff',
+                        boxShadow: '0 2px 4px rgba(0,0,0,0.3)'
+                      }}
+                      title={tooltip}
+                    />
+                  )
+                })}
                 
                 {/* Effect markers */}
                 {selectedShot.effectsTrack.map((ef, idx) => {
@@ -1533,7 +1735,7 @@ export function StoryboardEditor() {
                       style={{
                         position: 'absolute',
                         left: `${(ef.t / selectedShot.durationSec) * 100}%`,
-                        bottom: '10px',
+                        bottom: '15px',
                         width: '14px',
                         height: '14px',
                         background: selectedEffectIndex === idx ? '#FFD700' : '#FF6B6B',
@@ -1598,6 +1800,18 @@ export function StoryboardEditor() {
                   onClose={() => {
                     setEditingEffect(false)
                     setSelectedEffectIndex(null)
+                  }}
+                />
+              )}
+              
+              {editingCamera && selectedCameraIndex !== null && selectedShot && selectedShot.cameraTrack[selectedCameraIndex] && (
+                <CameraInspector
+                  keyframe={selectedShot.cameraTrack[selectedCameraIndex]}
+                  layers={selectedShot.layers}
+                  onSave={(updated) => handleUpdateCameraKeyframe(selectedCameraIndex, updated)}
+                  onClose={() => {
+                    setEditingCamera(false)
+                    setSelectedCameraIndex(null)
                   }}
                 />
               )}
