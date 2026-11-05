@@ -13,7 +13,8 @@
     "forge": "node out/cli/forge.js",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit",
-    "test:smoke": "node scripts/smoke-test-main.js"
+    "test:smoke": "node scripts/smoke-test-main.js",
+    "test:protocol": "node scripts/test-forge-file-protocol.js"
   },
   "dependencies": {
     "@types/fluent-ffmpeg": "^2.1.28",

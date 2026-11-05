@@ -460,7 +460,7 @@ export function registerIpcHandlers(): void {
       throw new Error(`File not found: ${filePath}`)
     }
     const encodedPath = encodeURIComponent(filePath)
-    return { localUrl: `forge-file://${encodedPath}` }
+    return { localUrl: `forge-file:///${encodedPath}` }
   })
 
   ipcMain.handle(IPC_CHANNELS.EXPORT_PROJECT_MANIFEST, async (_e, projectId: string, exportDir: string) => {

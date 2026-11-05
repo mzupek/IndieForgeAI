@@ -506,4 +506,4 @@ if (manifest.schemaVersion === 1 || !manifest.storyboards) {
 - **Types**: `src/shared/types/exportManifest.ts`
 - **Service**: `src/core/storage/exportService.ts` (updated)
 - **CLI**: `src/cli/commands/storyboard.ts`, `CLI.md`
-- **UI**: `src/renderer/components/StoryboardsView.tsx`
+- **UI**: `src/renderer/components/StoryboardEditor.tsx`

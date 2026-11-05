@@ -533,6 +533,19 @@ export interface IndieForgeAPI {
     createPreset: (type: string, options?: any) => Promise<any>
     updatePreset: (presetId: string, updates: any) => Promise<any>
     removePreset: (presetId: string) => Promise<{ ok: true }>
+    createStoryboard: (projectId: string, gameId: string, input: any) => Promise<any>
+    updateStoryboard: (projectId: string, storyboardId: string, updates: any) => Promise<any>
+    deleteStoryboard: (projectId: string, storyboardId: string) => Promise<any>
+    createShot: (projectId: string, storyboardId: string, input: any) => Promise<any>
+    updateShot: (projectId: string, shotId: string, updates: any) => Promise<any>
+    deleteShot: (projectId: string, storyboardId: string, shotId: string) => Promise<any>
+    addLayer: (projectId: string, shotId: string, layer: any) => Promise<any>
+    updateLayer: (projectId: string, shotId: string, layerId: string, updates: any) => Promise<any>
+    deleteLayer: (projectId: string, shotId: string, layerId: string) => Promise<any>
+    addCameraKeyframe: (projectId: string, shotId: string, keyframe: any) => Promise<any>
+    removeCameraKeyframe: (projectId: string, shotId: string, time: number) => Promise<any>
+    addEffectMarker: (projectId: string, shotId: string, effect: any) => Promise<any>
+    removeEffectMarker: (projectId: string, shotId: string, time: number) => Promise<any>
   }
 }
 

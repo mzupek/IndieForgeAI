@@ -52,6 +52,10 @@ export function StoryboardEditor() {
   const [showAddEffect, setShowAddEffect] = useState(false)
   const [editingNotes, setEditingNotes] = useState(false)
   const [notesText, setNotesText] = useState('')
+  const [creatingStoryboard, setCreatingStoryboard] = useState(false)
+  const [newStoryboardName, setNewStoryboardName] = useState('')
+  const [creatingShot, setCreatingShot] = useState(false)
+  const [newShotName, setNewShotName] = useState('')
   
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const animationFrameRef = useRef<number | null>(null)
@@ -545,6 +549,54 @@ export function StoryboardEditor() {
     setActiveProject(updated)
   }
 
+  const handleCreateStoryboard = async () => {
+    if (!newStoryboardName.trim()) {
+      alert('Please enter a storyboard name')
+      return
+    }
+
+    try {
+      await window.indieForge.pipeline.createStoryboard(projectId!, gameId, { name: newStoryboardName.trim() })
+      const updated = await window.indieForge.projects.open(projectId!)
+      setActiveProject(updated)
+      setCreatingStoryboard(false)
+      setNewStoryboardName('')
+      
+      // Select the newly created storyboard
+      const newStoryboard = updated.assetPipeline?.storyboards?.filter(sb => sb.gameId === gameId)
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0]
+      if (newStoryboard) {
+        setSelectedStoryboardId(newStoryboard.id)
+      }
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to create storyboard')
+    }
+  }
+
+  const handleCreateShot = async () => {
+    if (!selectedStoryboardId || !newShotName.trim()) {
+      alert('Please enter a shot name')
+      return
+    }
+
+    try {
+      await window.indieForge.pipeline.createShot(projectId!, selectedStoryboardId, { name: newShotName.trim() })
+      const updated = await window.indieForge.projects.open(projectId!)
+      setActiveProject(updated)
+      setCreatingShot(false)
+      setNewShotName('')
+      
+      // Select the newly created shot
+      const storyboard = updated.assetPipeline?.storyboards?.find(sb => sb.id === selectedStoryboardId)
+      if (storyboard && storyboard.shotIds.length > 0) {
+        const lastShotId = storyboard.shotIds[storyboard.shotIds.length - 1]
+        setSelectedShotId(lastShotId)
+      }
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to create shot')
+    }
+  }
+
   const handleFlipLayer = async () => {
     if (!selectedLayer) return
     await window.indieForge.pipeline.updateLayer(projectId!, selectedShotId!, selectedLayerId!, { flipX: !selectedLayer.flipX })
@@ -618,8 +670,54 @@ export function StoryboardEditor() {
     <div style={{ display: 'flex', height: 'calc(100vh - 120px)', gap: '1rem' }}>
       {/* Left sidebar */}
       <div style={{ width: '250px', borderRight: '1px solid var(--border)', paddingRight: '1rem', overflowY: 'auto' }}>
-        <h3 style={{ fontSize: '1rem', marginBottom: '0.75rem' }}>Storyboards</h3>
-        {storyboards.map(sb => (
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+          <h3 style={{ fontSize: '1rem', margin: 0 }}>Storyboards</h3>
+          <button
+            type="button"
+            onClick={() => setCreatingStoryboard(true)}
+            style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem' }}
+          >
+            + New
+          </button>
+        </div>
+        
+        {creatingStoryboard && (
+          <div style={{ marginBottom: '1rem', padding: '0.75rem', background: 'var(--bg)', borderRadius: '4px', border: '2px solid var(--forge-gold)' }}>
+            <div style={{ fontWeight: 'bold', marginBottom: '0.5rem', fontSize: '0.9rem' }}>Create Storyboard</div>
+            <input
+              type="text"
+              placeholder="Name"
+              value={newStoryboardName}
+              onChange={(e) => setNewStoryboardName(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleCreateStoryboard()}
+              style={{ width: '100%', padding: '0.4rem', marginBottom: '0.5rem', fontSize: '0.85rem' }}
+              autoFocus
+            />
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <button
+                type="button"
+                onClick={handleCreateStoryboard}
+                style={{ flex: 1, fontSize: '0.85rem', padding: '0.4rem' }}
+              >
+                Create
+              </button>
+              <button
+                type="button"
+                onClick={() => { setCreatingStoryboard(false); setNewStoryboardName('') }}
+                style={{ flex: 1, fontSize: '0.85rem', padding: '0.4rem' }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+        
+        {storyboards.length === 0 && !creatingStoryboard ? (
+          <div style={{ padding: '1rem', textAlign: 'center', color: 'var(--muted)', fontSize: '0.85rem' }}>
+            No storyboards yet
+          </div>
+        ) : (
+          storyboards.map(sb => (
           <div
             key={sb.id}
             onClick={() => {
@@ -638,11 +736,53 @@ export function StoryboardEditor() {
           >
             {sb.name}
           </div>
-        ))}
+        ))
+        )}
         
         {selectedStoryboard && (
           <>
-            <h3 style={{ fontSize: '1rem', margin: '1.5rem 0 0.75rem 0' }}>Shots</h3>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '1.5rem 0 0.75rem 0' }}>
+              <h3 style={{ fontSize: '1rem', margin: 0 }}>Shots</h3>
+              <button
+                type="button"
+                onClick={() => setCreatingShot(true)}
+                style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem' }}
+              >
+                + Add
+              </button>
+            </div>
+            
+            {creatingShot && (
+              <div style={{ marginBottom: '1rem', padding: '0.75rem', background: 'var(--bg)', borderRadius: '4px', border: '2px solid var(--forge-gold)' }}>
+                <div style={{ fontWeight: 'bold', marginBottom: '0.5rem', fontSize: '0.9rem' }}>Add Shot</div>
+                <input
+                  type="text"
+                  placeholder="Shot name"
+                  value={newShotName}
+                  onChange={(e) => setNewShotName(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleCreateShot()}
+                  style={{ width: '100%', padding: '0.4rem', marginBottom: '0.5rem', fontSize: '0.85rem' }}
+                  autoFocus
+                />
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <button
+                    type="button"
+                    onClick={handleCreateShot}
+                    style={{ flex: 1, fontSize: '0.85rem', padding: '0.4rem' }}
+                  >
+                    Add
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setCreatingShot(false); setNewShotName('') }}
+                    style={{ flex: 1, fontSize: '0.85rem', padding: '0.4rem' }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+            
             {shots.map((shot, idx) => (
               <div
                 key={shot.id}
