@@ -8,6 +8,7 @@ import * as games from './commands/games'
 import * as character from './commands/character'
 import * as pose from './commands/pose'
 import * as clips from './commands/clips'
+import * as preset from './commands/preset'
 import * as validate from './commands/validate'
 import * as status from './commands/status'
 
@@ -164,6 +165,54 @@ clipCmd
   .argument('<clip-id>', 'Clip ID')
   .action(async (clipId, options) => {
     await clips.remove(clipId, { ...program.opts(), ...options })
+  })
+
+// Preset commands
+const presetCmd = program.command('preset').description('Manage scene presets')
+
+presetCmd
+  .command('list')
+  .description('List presets')
+  .option('--type <type>', 'Filter by type (versus|zoom_punch|shake|flash|freeze)')
+  .option('--tags <tags>', 'Filter by tags (comma-separated)')
+  .action(async (options) => {
+    await preset.list({ ...program.opts(), ...options })
+  })
+
+presetCmd
+  .command('show')
+  .description('Show preset details')
+  .argument('<preset-id>', 'Preset ID')
+  .action(async (presetId, options) => {
+    await preset.show(presetId, { ...program.opts(), ...options })
+  })
+
+presetCmd
+  .command('create')
+  .description('Create a preset')
+  .requiredOption('--type <type>', 'Preset type (versus|zoom_punch|shake|flash|freeze)')
+  .option('--params <json>', 'JSON params object')
+  .option('--tags <tags>', 'Comma-separated tags')
+  .action(async (options) => {
+    await preset.create({ ...program.opts(), ...options })
+  })
+
+presetCmd
+  .command('update')
+  .description('Update a preset')
+  .argument('<preset-id>', 'Preset ID')
+  .option('--params <json>', 'JSON params object (merged with existing)')
+  .option('--tags <tags>', 'Comma-separated tags')
+  .action(async (presetId, options) => {
+    await preset.update(presetId, { ...program.opts(), ...options })
+  })
+
+presetCmd
+  .command('remove')
+  .description('Remove a preset')
+  .argument('<preset-id>', 'Preset ID')
+  .action(async (presetId, options) => {
+    await preset.remove(presetId, { ...program.opts(), ...options })
   })
 
 // Validate command

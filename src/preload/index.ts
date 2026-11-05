@@ -143,7 +143,13 @@ const api: IndieForgeAPI = {
     removeClip: (clipId) =>
       ipcRenderer.invoke(IPC_CHANNELS.PIPELINE_CLIP_REMOVE, clipId),
     updateClip: (clipId, patch) =>
-      ipcRenderer.invoke(IPC_CHANNELS.PIPELINE_CLIP_UPDATE, clipId, patch)
+      ipcRenderer.invoke(IPC_CHANNELS.PIPELINE_CLIP_UPDATE, clipId, patch),
+    createPreset: (type, options) =>
+      ipcRenderer.invoke(IPC_CHANNELS.PIPELINE_PRESET_CREATE, type, options),
+    updatePreset: (presetId, updates) =>
+      ipcRenderer.invoke(IPC_CHANNELS.PIPELINE_PRESET_UPDATE, presetId, updates),
+    removePreset: (presetId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.PIPELINE_PRESET_REMOVE, presetId)
   }
 }
 

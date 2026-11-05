@@ -289,6 +289,79 @@ async function testClipImportWithGeneratedVideo() {
   }
 }
 
+async function testPresetCommands() {
+  console.log('Testing: preset create, list, show, update, remove')
+  const testDir = await setupTestDataDir()
+  
+  try {
+    // Create a preset
+    const createResult = runForgeCommand(
+      'preset create --type shake --params \'{"intensity": 20, "durationMs": 600}\' --tags "dramatic,impact" --json',
+      testDir
+    )
+    
+    assertEqual(createResult.exitCode, 0, 'Create should exit with code 0')
+    
+    const preset = JSON.parse(createResult.stdout)
+    assert(preset.id, 'Preset should have an ID')
+    assertEqual(preset.type, 'shake', 'Preset should have correct type')
+    assertEqual(preset.params.intensity, 20, 'Preset should have custom intensity')
+    assertEqual(preset.params.durationMs, 600, 'Preset should have custom duration')
+    assert(preset.tags.includes('dramatic'), 'Preset should have dramatic tag')
+    
+    console.log(`  ✓ Created preset: ${preset.id}`)
+    
+    // List presets
+    const listResult = runForgeCommand('preset list --json', testDir)
+    assertEqual(listResult.exitCode, 0, 'List should exit with code 0')
+    
+    const presets = JSON.parse(listResult.stdout)
+    assertEqual(presets.length, 1, 'Should list 1 preset')
+    assertEqual(presets[0].id, preset.id, 'Listed preset should match created preset')
+    
+    console.log('  ✓ Listed presets')
+    
+    // Show preset
+    const showResult = runForgeCommand(`preset show ${preset.id} --json`, testDir)
+    assertEqual(showResult.exitCode, 0, 'Show should exit with code 0')
+    
+    const shownPreset = JSON.parse(showResult.stdout)
+    assertEqual(shownPreset.id, preset.id, 'Shown preset should match')
+    
+    console.log('  ✓ Showed preset details')
+    
+    // Update preset
+    const updateResult = runForgeCommand(
+      `preset update ${preset.id} --params '{"intensity": 30}' --json`,
+      testDir
+    )
+    assertEqual(updateResult.exitCode, 0, 'Update should exit with code 0')
+    
+    const updatedPreset = JSON.parse(updateResult.stdout)
+    assertEqual(updatedPreset.params.intensity, 30, 'Preset should have updated intensity')
+    assertEqual(updatedPreset.params.durationMs, 600, 'Other params should be preserved')
+    
+    console.log('  ✓ Updated preset')
+    
+    // Remove preset
+    const removeResult = runForgeCommand(`preset remove ${preset.id} --json`, testDir)
+    assertEqual(removeResult.exitCode, 0, 'Remove should exit with code 0')
+    
+    const removeOutput = JSON.parse(removeResult.stdout)
+    assertEqual(removeOutput.deleted, true, 'Should confirm deletion')
+    
+    // Verify deletion
+    const listAfterRemove = runForgeCommand('preset list --json', testDir)
+    const presetsAfter = JSON.parse(listAfterRemove.stdout)
+    assertEqual(presetsAfter.length, 0, 'Should have no presets after removal')
+    
+    console.log('  ✓ Removed preset')
+    console.log('✓ Preset commands test passed')
+  } finally {
+    await cleanupTestDataDir(testDir)
+  }
+}
+
 async function testClipImportOnFreshDataDir() {
   console.log('Testing: clip import on fresh empty data dir (should seed default games)')
   
@@ -374,6 +447,7 @@ export async function runIntegrationTests() {
     await testValidateCommand()
     await testClipImportWithGeneratedVideo()
     await testClipImportOnFreshDataDir()
+    await testPresetCommands()
     
     console.log('\n✓ All integration tests passed!')
     return true

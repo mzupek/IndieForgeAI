@@ -684,3 +684,309 @@ Default locations:
 - **Linux:** `~/.config/indie-forge-ai/clips`
 - **macOS:** `~/Library/Application Support/indie-forge-ai/clips`
 - **Windows:** `%APPDATA%/indie-forge-ai/clips`
+
+---
+
+## Preset Commands
+
+### `forge preset list`
+
+List scene and camera presets with optional filtering.
+
+**Usage:**
+```bash
+# List all presets
+forge preset list [--json]
+
+# Filter by type
+forge preset list --type shake [--json]
+
+# Filter by tags
+forge preset list --tags "dramatic,cinematic" [--json]
+```
+
+**Options:**
+- `--type <type>` - Filter by preset type (versus|zoom_punch|shake|flash|freeze)
+- `--tags <tags>` - Filter by tags (comma-separated, matches any)
+
+**JSON Output:**
+```json
+[
+  {
+    "id": "preset-uuid",
+    "type": "shake",
+    "params": {
+      "intensity": 20,
+      "durationMs": 500,
+      "frequency": 20
+    },
+    "tags": ["dramatic", "impact"],
+    "createdAt": "2024-01-01T00:00:00Z",
+    "updatedAt": "2024-01-01T00:00:00Z"
+  }
+]
+```
+
+---
+
+### `forge preset show <preset-id>`
+
+Show detailed information about a specific preset.
+
+**Usage:**
+```bash
+forge preset show preset-uuid [--json]
+```
+
+**JSON Output:**
+```json
+{
+  "id": "preset-uuid",
+  "type": "zoom_punch",
+  "params": {
+    "target": "center",
+    "zoomAmount": 1.5,
+    "durationMs": 300,
+    "ease": "easeOut"
+  },
+  "tags": ["impact", "fast"],
+  "createdAt": "2024-01-01T00:00:00Z",
+  "updatedAt": "2024-01-01T00:00:00Z"
+}
+```
+
+---
+
+### `forge preset create`
+
+Create a new preset with default or custom parameters.
+
+**Usage:**
+```bash
+# Create with default params
+forge preset create --type shake [--json]
+
+# Create with custom params
+forge preset create \
+  --type shake \
+  --params '{"intensity": 25, "durationMs": 600, "frequency": 25}' \
+  --tags "dramatic,impact" \
+  [--json]
+
+# Create a versus layout preset
+forge preset create \
+  --type versus \
+  --params '{"cameraAngle": "low", "zoom": 1.2, "framingPadding": 40}' \
+  --tags "battle,cinematic" \
+  [--json]
+```
+
+**Options:**
+- `--type <type>` (required) - Preset type (versus|zoom_punch|shake|flash|freeze)
+- `--params <json>` - JSON params object (merged with type defaults)
+- `--tags <tags>` - Comma-separated tags
+
+**Default Parameters by Type:**
+
+**versus:**
+```json
+{
+  "cameraAngle": "front",
+  "zoom": 1.0,
+  "framingPadding": 50
+}
+```
+
+**zoom_punch:**
+```json
+{
+  "target": "center",
+  "zoomAmount": 1.5,
+  "durationMs": 300,
+  "ease": "easeOut"
+}
+```
+
+**shake:**
+```json
+{
+  "intensity": 10,
+  "durationMs": 500,
+  "frequency": 20
+}
+```
+
+**flash:**
+```json
+{
+  "color": "#ffffff",
+  "durationMs": 200,
+  "opacity": 0.8
+}
+```
+
+**freeze:**
+```json
+{
+  "durationMs": 1000
+}
+```
+
+**JSON Output:**
+```json
+{
+  "id": "preset-uuid",
+  "type": "shake",
+  "params": {
+    "intensity": 25,
+    "durationMs": 600,
+    "frequency": 25
+  },
+  "tags": ["dramatic", "impact"],
+  "createdAt": "2024-01-01T00:00:00Z",
+  "updatedAt": "2024-01-01T00:00:00Z"
+}
+```
+
+---
+
+### `forge preset update <preset-id>`
+
+Update a preset's parameters or tags.
+
+**Usage:**
+```bash
+# Update params (merged with existing)
+forge preset update preset-uuid \
+  --params '{"intensity": 30}' \
+  [--json]
+
+# Update tags
+forge preset update preset-uuid \
+  --tags "cinematic,slow-mo" \
+  [--json]
+
+# Update both
+forge preset update preset-uuid \
+  --params '{"durationMs": 800}' \
+  --tags "extended,dramatic" \
+  [--json]
+```
+
+**Options:**
+- `--params <json>` - JSON params object (merged with existing params)
+- `--tags <tags>` - Comma-separated tags (replaces existing tags)
+
+**JSON Output:** Same as `show` command.
+
+---
+
+### `forge preset remove <preset-id>`
+
+Remove a preset.
+
+**Usage:**
+```bash
+forge preset remove preset-uuid [--json]
+```
+
+**JSON Output:**
+```json
+{
+  "deleted": true,
+  "presetId": "preset-uuid"
+}
+```
+
+---
+
+## Preset Types and Use Cases
+
+### versus
+Split-screen layout for character confrontation. Supports left/right character slots, camera angle, zoom, and framing padding. Common in battle sequences and dramatic face-offs.
+
+**Params:**
+- `leftCharacterId` (string, optional) - Left character ID
+- `rightCharacterId` (string, optional) - Right character ID
+- `cameraAngle` (string) - front|side|low|high
+- `zoom` (number) - Camera zoom multiplier (0.5-2.0)
+- `framingPadding` (number) - Edge padding in pixels
+
+### zoom_punch
+Quick zoom effect to emphasize impact or emotion. Commonly used for attacks, reactions, and dramatic reveals.
+
+**Params:**
+- `target` (string) - left|center|right - zoom target
+- `zoomAmount` (number) - Zoom multiplier (1.0-3.0)
+- `durationMs` (number) - Animation duration in milliseconds
+- `ease` (string) - linear|easeIn|easeOut|easeInOut
+
+### shake
+Screen shake for impact effects. Intensity, duration, and frequency are configurable for different impact levels.
+
+**Params:**
+- `intensity` (number) - Shake intensity in pixels (1-50)
+- `durationMs` (number) - Shake duration in milliseconds
+- `frequency` (number) - Shake frequency in Hz (5-60)
+
+### flash
+Flash effect for transitions, impacts, or dramatic moments. Color and opacity are customizable.
+
+**Params:**
+- `color` (string) - Hex color (e.g., "#ffffff")
+- `durationMs` (number) - Flash duration in milliseconds
+- `opacity` (number) - Flash opacity (0.0-1.0)
+
+### freeze
+Freeze frame effect for dramatic pauses. Optional pose slot to hold a specific character pose.
+
+**Params:**
+- `durationMs` (number) - Freeze duration in milliseconds
+- `holdPoseSlot` (string, optional) - ready|success|hurt|win|defeat
+
+---
+
+## Preset Workflow Example
+
+```bash
+# 1. Create presets for a dramatic battle scene
+forge preset create \
+  --type versus \
+  --params '{"cameraAngle": "low", "zoom": 1.3}' \
+  --tags "battle,dramatic" \
+  --json
+
+forge preset create \
+  --type zoom_punch \
+  --params '{"target": "left", "zoomAmount": 2.0, "durationMs": 250}' \
+  --tags "battle,impact" \
+  --json
+
+forge preset create \
+  --type shake \
+  --params '{"intensity": 30, "durationMs": 400}' \
+  --tags "battle,impact" \
+  --json
+
+# 2. List all battle presets
+forge preset list --tags "battle" --json
+
+# 3. Update a preset's intensity
+forge preset update <preset-id> \
+  --params '{"intensity": 40}' \
+  --json
+
+# 4. Remove unused presets
+forge preset remove <preset-id> --json
+```
+
+---
+
+## Studio Data Directory
+
+Presets are stored in `studio.json` in the studio data directory:
+- **Linux:** `~/.config/indie-forge-ai/studio.json`
+- **macOS:** `~/Library/Application Support/indie-forge-ai/studio.json`
+- **Windows:** `%APPDATA%/indie-forge-ai/studio.json`
+
+Presets are studio-wide and can be reused across games and scenes.
