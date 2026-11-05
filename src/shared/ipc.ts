@@ -90,5 +90,15 @@ export const IPC_CHANNELS = {
   GAME_DEFINITION_GET_BY_GAME: 'gameDefinition:getByGame',
   GAME_DEFINITION_CREATE: 'gameDefinition:create',
   GAME_DEFINITION_UPDATE: 'gameDefinition:update',
-  GAME_DEFINITION_DELETE: 'gameDefinition:delete'
+  GAME_DEFINITION_DELETE: 'gameDefinition:delete',
+  SCENE_CREATE: 'scene:create',
+  SCENE_GET: 'scene:get',
+  SCENE_LIST: 'scene:list',
+  SCENE_UPDATE: 'scene:update',
+  SCENE_DELETE: 'scene:delete',
+  SCENE_ADD_CHARACTER: 'scene:addCharacter',
+  SCENE_REMOVE_CHARACTER: 'scene:removeCharacter',
+  SCENE_ATTACH_PRESET: 'scene:attachPreset',
+  SCENE_DETACH_PRESET: 'scene:detachPreset',
+  SCENE_CREATE_STORYBOARD: 'scene:createStoryboard'
 } as const

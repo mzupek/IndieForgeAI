@@ -546,6 +546,16 @@ export interface IndieForgeAPI {
     removeCameraKeyframe: (projectId: string, shotId: string, time: number) => Promise<any>
     addEffectMarker: (projectId: string, shotId: string, effect: any) => Promise<any>
     removeEffectMarker: (projectId: string, shotId: string, time: number) => Promise<any>
+    createScene: (gameId: string, input: any) => Promise<any>
+    getScene: (sceneId: string) => Promise<any | undefined>
+    listScenes: (gameId: string) => Promise<any[]>
+    updateScene: (sceneId: string, updates: any) => Promise<any>
+    deleteScene: (sceneId: string, removeStoryboard?: boolean) => Promise<{ ok: true }>
+    addCharacterToScene: (sceneId: string, characterId: string) => Promise<any>
+    removeCharacterFromScene: (sceneId: string, characterId: string) => Promise<any>
+    attachPresetToScene: (sceneId: string, presetId: string) => Promise<any>
+    detachPresetFromScene: (sceneId: string, presetId: string) => Promise<any>
+    createSceneStoryboard: (sceneId: string, input: any) => Promise<{ scene: any; storyboardId: string }>
   }
   gameDefinitions: {
     list: () => Promise<any[]>

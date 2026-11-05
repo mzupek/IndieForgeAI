@@ -184,7 +184,27 @@ const api: IndieForgeAPI = {
     addEffectMarker: (projectId, shotId, effect) =>
       ipcRenderer.invoke(IPC_CHANNELS.EFFECT_MARKER_ADD, projectId, shotId, effect),
     removeEffectMarker: (projectId, shotId, t) =>
-      ipcRenderer.invoke(IPC_CHANNELS.EFFECT_MARKER_REMOVE, projectId, shotId, t)
+      ipcRenderer.invoke(IPC_CHANNELS.EFFECT_MARKER_REMOVE, projectId, shotId, t),
+    createScene: (gameId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SCENE_CREATE, gameId, input),
+    getScene: (sceneId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SCENE_GET, sceneId),
+    listScenes: (gameId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SCENE_LIST, gameId),
+    updateScene: (sceneId, updates) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SCENE_UPDATE, sceneId, updates),
+    deleteScene: (sceneId, removeStoryboard) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SCENE_DELETE, sceneId, removeStoryboard),
+    addCharacterToScene: (sceneId, characterId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SCENE_ADD_CHARACTER, sceneId, characterId),
+    removeCharacterFromScene: (sceneId, characterId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SCENE_REMOVE_CHARACTER, sceneId, characterId),
+    attachPresetToScene: (sceneId, presetId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SCENE_ATTACH_PRESET, sceneId, presetId),
+    detachPresetFromScene: (sceneId, presetId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SCENE_DETACH_PRESET, sceneId, presetId),
+    createSceneStoryboard: (sceneId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SCENE_CREATE_STORYBOARD, sceneId, input)
   },
   gameDefinitions: {
     list: () =>

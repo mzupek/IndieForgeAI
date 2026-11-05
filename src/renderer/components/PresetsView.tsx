@@ -21,6 +21,7 @@ export function PresetsView() {
   
   const presets = activeProject?.assetPipeline?.scenePresets || []
   const characters = activeProject?.assetPipeline?.characters.filter(c => c.gameId === gameId) || []
+  const scenes = activeProject?.assetPipeline?.scenes?.filter(s => s.gameId === gameId) || []
   
   const filteredPresets = filterType 
     ? presets.filter(p => p.type === filterType)
@@ -105,15 +106,21 @@ export function PresetsView() {
             </p>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-              {filteredPresets.map(preset => (
-                <PresetListItem
-                  key={preset.id}
-                  preset={preset}
-                  isSelected={selectedPreset?.id === preset.id}
-                  onClick={() => setSelectedPreset(preset)}
-                  onRemove={() => handleRemovePreset(preset.id)}
-                />
-              ))}
+          {filteredPresets.map(preset => {
+            const usedInScenes = scenes
+              .filter(s => s.attachedPresets.includes(preset.id))
+              .map(s => s.name)
+            return (
+              <PresetListItem
+                key={preset.id}
+                preset={preset}
+                isSelected={selectedPreset?.id === preset.id}
+                onClick={() => setSelectedPreset(preset)}
+                onRemove={() => handleRemovePreset(preset.id)}
+                usedInScenes={usedInScenes}
+              />
+            )
+          })}
             </div>
           )}
         </div>
@@ -156,12 +163,14 @@ function PresetListItem({
   preset,
   isSelected,
   onClick,
-  onRemove
+  onRemove,
+  usedInScenes
 }: {
   preset: ScenePreset
   isSelected: boolean
   onClick: () => void
   onRemove: () => void
+  usedInScenes?: string[]
 }) {
   return (
     <div

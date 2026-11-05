@@ -219,6 +219,37 @@ export interface ScenePreset {
 }
 
 /**
+ * Scene - narrative/gameplay moment with story, cast, and attached storyboard
+ * Phase C: Scenes as the spine
+ */
+export interface Scene {
+  id: string
+  gameId: string
+  name: string
+  description?: string
+  /** Background description or image reference */
+  background?: string
+  /** Character IDs in this scene */
+  cast: string[]
+  /** Story/dialogue text */
+  storyText?: string
+  /** Pose IDs referenced (for quick lookup) */
+  poseRefs: string[]
+  /** Clip IDs referenced (for quick lookup) */
+  clipRefs: string[]
+  /** Audio cue descriptions or references */
+  audioRefs: string[]
+  /** Interaction hook descriptions */
+  interactionHooks: string[]
+  /** Attached preset IDs (FX recipes) */
+  attachedPresets: string[]
+  /** Optional attached storyboard ID */
+  storyboardId?: string
+  createdAt: string
+  updatedAt: string
+}
+
+/**
  * Export profile - defines how to export assets for a specific game
  */
 export interface ExportProfile {
@@ -324,11 +355,14 @@ export interface StoryboardShot {
 }
 
 /**
- * Storyboard (scene) - ordered sequence of shots
+ * Storyboard - ordered sequence of shots, attached to a Scene
+ * Phase C: Storyboards hang off scenes (not orphaned)
  */
 export interface Storyboard {
   id: string
   gameId: string
+  /** Scene this storyboard belongs to (Phase C) */
+  sceneId?: string
   name: string
   description?: string
   /** Ordered list of shot IDs */
@@ -351,6 +385,7 @@ export interface AssetPipelineProject {
   poses: Pose[]
   clips: Clip[]
   scenePresets: ScenePreset[]
+  scenes: Scene[]
   storyboards: Storyboard[]
   storyboardShots: StoryboardShot[]
   exportProfiles: ExportProfile[]

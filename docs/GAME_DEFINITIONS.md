@@ -117,9 +117,43 @@ Phase E will add `forge definition export <game-id>` for full package exports. P
 
 - **Phase A** (Characters/Poses/Clips/Presets): Definitions link to these assets
 - **Phase 4.5** (Storyboards): Parallel; definitions do not depend on storyboards
-- **Phase C** (Scenes spine): Not implemented; definitions reference scenes conceptually
+- **Phase C** (Scenes spine): ✓ Implemented; scenes are narrative moments with attached storyboards and presets
 - **Phase D** (MVP board as separate product): Definitions include an embedded MVP board
 - **Phase E** (Full CLI package): Builds on Phase B definitions
+
+## Phase C — Scenes as the Spine
+
+**Scenes** provide the organizational spine for game content. Each scene represents a narrative or gameplay moment and owns:
+
+- **Name** and **Description**
+- **Background** (description or reference)
+- **Cast** (character IDs participating in this scene)
+- **Story/Dialogue Text** (key narrative content)
+- **Pose/Clip/Audio Refs** (linked assets for quick lookup)
+- **Interaction Hooks** (gameplay mechanic stubs)
+- **Attached Presets** (FX recipes: shake, flash, freeze, zoom_punch, versus)
+- **Storyboard** (optional attached shot-by-shot animatic)
+
+### Storyboard Attachment
+
+Previously storyboards were free-floating. In Phase C, storyboards attach to scenes via `sceneId`. This ensures:
+- Storyboards have narrative context
+- Scenes can have a visual planning layer
+- Export/CLI tools can package scene + storyboard together
+
+### UI Access
+
+Navigate to **Scenes** in the studio sidebar, then select a game. You can:
+- Create/edit/delete scenes
+- Add characters to the cast
+- Attach FX presets
+- Create or open the attached storyboard
+
+Storyboards opened from a scene show "Attached to Scene: [Scene Name]" in the sidebar.
+
+### Presets as Recipes
+
+Scene presets (camera/FX) are no longer treated as full scene composers. Instead, they are lightweight, reusable effect recipes that can be attached to multiple scenes. The PresetsView now shows which scenes use each preset.
 
 ## No Cold Lock
 

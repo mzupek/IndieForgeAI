@@ -96,6 +96,18 @@ import {
   removeEffectMarker
 } from '../../core/storage/storyboardService'
 import {
+  createScene as createSceneInPipeline,
+  getScene,
+  listScenes,
+  updateScene as updateSceneInPipeline,
+  removeScene,
+  addCharacterToCast,
+  removeCharacterFromCast,
+  attachPreset,
+  detachPreset,
+  createSceneStoryboard
+} from '../../core/storage/sceneService'
+import {
   listGameDefinitions,
   getGameDefinition,
   getGameDefinitionByGameId,
@@ -895,6 +907,60 @@ export function registerIpcHandlers(): void {
       await deleteGameDefinition(id)
       return { ok: true as const }
     }
+  )
+
+  // Scene handlers (Phase C)
+  ipcMain.handle(
+    IPC_CHANNELS.SCENE_CREATE,
+    async (_e, gameId: string, input: any) => createSceneInPipeline(gameId, input)
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SCENE_GET,
+    async (_e, sceneId: string) => getScene(sceneId)
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SCENE_LIST,
+    async (_e, gameId: string) => listScenes(gameId)
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SCENE_UPDATE,
+    async (_e, sceneId: string, updates: any) => updateSceneInPipeline(sceneId, updates)
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SCENE_DELETE,
+    async (_e, sceneId: string, removeStoryboard?: boolean) => {
+      await removeScene(sceneId, { removeStoryboard })
+      return { ok: true as const }
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SCENE_ADD_CHARACTER,
+    async (_e, sceneId: string, characterId: string) => addCharacterToCast(sceneId, characterId)
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SCENE_REMOVE_CHARACTER,
+    async (_e, sceneId: string, characterId: string) => removeCharacterFromCast(sceneId, characterId)
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SCENE_ATTACH_PRESET,
+    async (_e, sceneId: string, presetId: string) => attachPreset(sceneId, presetId)
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SCENE_DETACH_PRESET,
+    async (_e, sceneId: string, presetId: string) => detachPreset(sceneId, presetId)
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SCENE_CREATE_STORYBOARD,
+    async (_e, sceneId: string, input: any) => createSceneStoryboard(sceneId, input)
   )
 }
 

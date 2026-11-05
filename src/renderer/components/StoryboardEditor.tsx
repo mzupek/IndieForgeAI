@@ -72,6 +72,12 @@ export function StoryboardEditor() {
   const poses = activeProject?.assetPipeline?.poses ?? []
   const clips = activeProject?.assetPipeline?.clips ?? []
   const presets = activeProject?.assetPipeline?.scenePresets ?? []
+  const scenes = activeProject?.assetPipeline?.scenes ?? []
+  
+  // Phase C: Find scene attached to this storyboard
+  const attachedScene = selectedStoryboard?.sceneId 
+    ? scenes.find(s => s.id === selectedStoryboard.sceneId)
+    : null
 
   useEffect(() => {
     if (storyboards.length > 0 && !selectedStoryboardId) {
@@ -741,6 +747,20 @@ export function StoryboardEditor() {
         
         {selectedStoryboard && (
           <>
+            {attachedScene && (
+              <div style={{
+                marginTop: '1rem',
+                padding: '0.5rem',
+                background: 'var(--bg)',
+                borderRadius: '4px',
+                fontSize: '0.85rem',
+                color: 'var(--muted)',
+                border: '1px solid var(--border)'
+              }}>
+                <div style={{ fontWeight: 'bold', marginBottom: '0.25rem' }}>Attached to Scene:</div>
+                <div>{attachedScene.name}</div>
+              </div>
+            )}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '1.5rem 0 0.75rem 0' }}>
               <h3 style={{ fontSize: '1rem', margin: 0 }}>Shots</h3>
               <button
