@@ -76,9 +76,20 @@ app.whenReady().then(async () => {
   protocol.handle('forge-file', async (request) => {
     try {
       const url = new URL(request.url)
-      let filePath = decodeURIComponent(url.pathname)
       
-      if (process.platform === 'win32') {
+      // Expect forge-file://local/<absolute-path>
+      // Host must be "local" for security
+      if (url.hostname !== 'local') {
+        console.error(`forge-file: invalid host "${url.hostname}", expected "local"`)
+        return new Response('Forbidden: invalid host', { status: 403 })
+      }
+      
+      // Decode pathname (Chromium decodes, but be explicit for safety)
+      // Split by /, decode each segment, rejoin to handle %2F vs / properly
+      let filePath = url.pathname.split('/').map(seg => decodeURIComponent(seg)).join('/')
+      
+      // On Windows, pathname starts with / before drive letter, remove it
+      if (process.platform === 'win32' && /^\/[A-Za-z]:/.test(filePath)) {
         filePath = filePath.slice(1)
       }
       

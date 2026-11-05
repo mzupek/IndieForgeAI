@@ -12,6 +12,7 @@ import * as preset from './commands/preset'
 import * as exportCmd from './commands/export'
 import * as validate from './commands/validate'
 import * as status from './commands/status'
+import { registerStoryboardCommands } from './commands/storyboard'
 
 const program = new Command()
 
@@ -252,5 +253,8 @@ program
   .action(async (options) => {
     await status.run({ ...program.opts(), ...options })
   })
+
+// Storyboard commands (storyboard, shot, layer, camera, effect)
+registerStoryboardCommands(program)
 
 program.parse()
