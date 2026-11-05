@@ -353,6 +353,14 @@ export function registerStoryboardCommands(program: Command): void {
     .option('--rotation <degrees>', 'Rotation in degrees')
     .option('--flip-x <bool>', 'Flip horizontally (true/false)')
     .option('--opacity <value>', 'Opacity (0-1)')
+    .option('--glow-blur <value>', 'Outer glow blur radius')
+    .option('--glow-alpha <value>', 'Outer glow alpha (0-1)')
+    .option('--glow-color <hex>', 'Outer glow color (hex)')
+    .option('--shadow-x <value>', 'Drop shadow offset X')
+    .option('--shadow-y <value>', 'Drop shadow offset Y')
+    .option('--shadow-blur <value>', 'Drop shadow blur radius')
+    .option('--shadow-alpha <value>', 'Drop shadow alpha (0-1)')
+    .option('--clear-fx', 'Clear all layer effects')
     .option('--json', 'Output as JSON')
     .action(async (options, cmd) => {
       try {
@@ -366,6 +374,39 @@ export function registerStoryboardCommands(program: Command): void {
         if (options.rotation !== undefined) updates.rotation = parseFloat(options.rotation)
         if (options.flipX !== undefined) updates.flipX = options.flipX === 'true'
         if (options.opacity !== undefined) updates.opacity = parseFloat(options.opacity)
+        
+        // Layer effects (Phase C.2)
+        if (options.clearFx) {
+          updates.fx = undefined
+        } else if (options.glowBlur !== undefined || options.glowAlpha !== undefined || options.glowColor !== undefined ||
+                   options.shadowX !== undefined || options.shadowY !== undefined || options.shadowBlur !== undefined || options.shadowAlpha !== undefined) {
+          // Get current layer to preserve existing effects when updating
+          const currentShot = await getShot(options.shot, getDataDir(mergedOpts.dataDir))
+          const currentLayer = currentShot.layers.find(l => l.id === options.id)
+          
+          updates.fx = { ...currentLayer?.fx }
+          
+          // Outer glow
+          if (options.glowBlur !== undefined || options.glowAlpha !== undefined || options.glowColor !== undefined) {
+            updates.fx.outerGlow = {
+              blur: options.glowBlur !== undefined ? parseFloat(options.glowBlur) : (currentLayer?.fx?.outerGlow?.blur ?? 12),
+              alpha: options.glowAlpha !== undefined ? parseFloat(options.glowAlpha) : (currentLayer?.fx?.outerGlow?.alpha ?? 0.8),
+              color: options.glowColor !== undefined ? options.glowColor : (currentLayer?.fx?.outerGlow?.color ?? '#00ffff'),
+              strength: currentLayer?.fx?.outerGlow?.strength ?? 1
+            }
+          }
+          
+          // Drop shadow
+          if (options.shadowX !== undefined || options.shadowY !== undefined || options.shadowBlur !== undefined || options.shadowAlpha !== undefined) {
+            updates.fx.dropShadow = {
+              offsetX: options.shadowX !== undefined ? parseFloat(options.shadowX) : (currentLayer?.fx?.dropShadow?.offsetX ?? 4),
+              offsetY: options.shadowY !== undefined ? parseFloat(options.shadowY) : (currentLayer?.fx?.dropShadow?.offsetY ?? 6),
+              blur: options.shadowBlur !== undefined ? parseFloat(options.shadowBlur) : (currentLayer?.fx?.dropShadow?.blur ?? 10),
+              color: currentLayer?.fx?.dropShadow?.color ?? '#000000',
+              alpha: options.shadowAlpha !== undefined ? parseFloat(options.shadowAlpha) : (currentLayer?.fx?.dropShadow?.alpha ?? 0.5)
+            }
+          }
+        }
 
         const layer = await updateLayer(options.shot, options.id, updates, getDataDir(mergedOpts.dataDir))
 

@@ -89,8 +89,9 @@ forge effect add --shot $SHOT_ID --time 1.2 --moment hit --preset shake-impact-0
 - **Layers** - Use `--pose` for character poses, `--clip` for animations, `--image` for statics
 - **Camera** - Target layers by ID or explicit `{x, y}` point; zoom 1.0 = normal, 2.0 = 2x
 - **Stage Treatment** (Phase C.1) - `--bg-dim 0.35 --vignette 0.4` darkens background (0-1) without affecting character layers
+- **Layer Effects** (Phase C.2) - `--glow-blur 12 --glow-alpha 0.8 --glow-color '#00ffff'` for outer glow; `--shadow-x 4 --shadow-y 6 --shadow-blur 10 --shadow-alpha 0.5` for drop shadow
 
-See `forge scene --help`, `forge storyboard --help`, `forge shot --help` for full CLI.
+See `forge scene --help`, `forge storyboard --help`, `forge shot --help`, `forge layer --help` for full CLI.
 
 ## Workflow
 

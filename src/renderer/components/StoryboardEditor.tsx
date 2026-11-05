@@ -1846,10 +1846,225 @@ export function StoryboardEditor() {
               <button 
                 type="button" 
                 onClick={handleDeleteLayer} 
-                style={{ width: '100%', fontSize: '0.85rem', background: 'var(--error)', color: '#fff' }}
+                style={{ width: '100%', marginBottom: '0.75rem', fontSize: '0.85rem', background: 'var(--error)', color: '#fff' }}
               >
                 Delete Layer
               </button>
+              
+              {/* Layer Effects (Phase C.2) */}
+              <div style={{ paddingTop: '0.75rem', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
+                <h4 style={{ fontSize: '0.85rem', margin: '0 0 0.5rem 0', fontWeight: 'bold' }}>Effects</h4>
+                
+                {/* Drop Shadow */}
+                <div style={{ marginBottom: '0.75rem' }}>
+                  <div style={{ fontSize: '0.75rem', fontWeight: 'bold', marginBottom: '0.25rem' }}>Drop Shadow</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.25rem', fontSize: '0.7rem' }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.65rem', marginBottom: '0.1rem' }}>Offset X</label>
+                      <input
+                        type="number"
+                        value={selectedLayer.fx?.dropShadow?.offsetX ?? 0}
+                        onChange={async (e) => {
+                          const value = parseFloat(e.target.value) || 0
+                          await window.indieForge.pipeline.updateLayer(projectId!, selectedShotId!, selectedLayer.id, {
+                            fx: {
+                              ...selectedLayer.fx,
+                              dropShadow: {
+                                offsetX: value,
+                                offsetY: selectedLayer.fx?.dropShadow?.offsetY ?? 6,
+                                blur: selectedLayer.fx?.dropShadow?.blur ?? 10,
+                                color: selectedLayer.fx?.dropShadow?.color ?? '#000000',
+                                alpha: selectedLayer.fx?.dropShadow?.alpha ?? 0.5
+                              }
+                            }
+                          })
+                          const updated = await window.indieForge.projects.open(projectId!)
+                          setActiveProject(updated)
+                        }}
+                        style={{ width: '100%', padding: '0.2rem', fontSize: '0.7rem' }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.65rem', marginBottom: '0.1rem' }}>Offset Y</label>
+                      <input
+                        type="number"
+                        value={selectedLayer.fx?.dropShadow?.offsetY ?? 0}
+                        onChange={async (e) => {
+                          const value = parseFloat(e.target.value) || 0
+                          await window.indieForge.pipeline.updateLayer(projectId!, selectedShotId!, selectedLayer.id, {
+                            fx: {
+                              ...selectedLayer.fx,
+                              dropShadow: {
+                                offsetX: selectedLayer.fx?.dropShadow?.offsetX ?? 4,
+                                offsetY: value,
+                                blur: selectedLayer.fx?.dropShadow?.blur ?? 10,
+                                color: selectedLayer.fx?.dropShadow?.color ?? '#000000',
+                                alpha: selectedLayer.fx?.dropShadow?.alpha ?? 0.5
+                              }
+                            }
+                          })
+                          const updated = await window.indieForge.projects.open(projectId!)
+                          setActiveProject(updated)
+                        }}
+                        style={{ width: '100%', padding: '0.2rem', fontSize: '0.7rem' }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.65rem', marginBottom: '0.1rem' }}>Blur</label>
+                      <input
+                        type="number"
+                        value={selectedLayer.fx?.dropShadow?.blur ?? 0}
+                        onChange={async (e) => {
+                          const value = parseFloat(e.target.value) || 0
+                          await window.indieForge.pipeline.updateLayer(projectId!, selectedShotId!, selectedLayer.id, {
+                            fx: {
+                              ...selectedLayer.fx,
+                              dropShadow: {
+                                offsetX: selectedLayer.fx?.dropShadow?.offsetX ?? 4,
+                                offsetY: selectedLayer.fx?.dropShadow?.offsetY ?? 6,
+                                blur: value,
+                                color: selectedLayer.fx?.dropShadow?.color ?? '#000000',
+                                alpha: selectedLayer.fx?.dropShadow?.alpha ?? 0.5
+                              }
+                            }
+                          })
+                          const updated = await window.indieForge.projects.open(projectId!)
+                          setActiveProject(updated)
+                        }}
+                        style={{ width: '100%', padding: '0.2rem', fontSize: '0.7rem' }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.65rem', marginBottom: '0.1rem' }}>Alpha {Math.round((selectedLayer.fx?.dropShadow?.alpha ?? 0) * 100)}%</label>
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        value={(selectedLayer.fx?.dropShadow?.alpha ?? 0) * 100}
+                        onChange={async (e) => {
+                          const value = parseInt(e.target.value) / 100
+                          await window.indieForge.pipeline.updateLayer(projectId!, selectedShotId!, selectedLayer.id, {
+                            fx: {
+                              ...selectedLayer.fx,
+                              dropShadow: {
+                                offsetX: selectedLayer.fx?.dropShadow?.offsetX ?? 4,
+                                offsetY: selectedLayer.fx?.dropShadow?.offsetY ?? 6,
+                                blur: selectedLayer.fx?.dropShadow?.blur ?? 10,
+                                color: selectedLayer.fx?.dropShadow?.color ?? '#000000',
+                                alpha: value
+                              }
+                            }
+                          })
+                          const updated = await window.indieForge.projects.open(projectId!)
+                          setActiveProject(updated)
+                        }}
+                        style={{ width: '100%' }}
+                      />
+                    </div>
+                  </div>
+                </div>
+                
+                {/* Outer Glow */}
+                <div style={{ marginBottom: '0.75rem' }}>
+                  <div style={{ fontSize: '0.75rem', fontWeight: 'bold', marginBottom: '0.25rem' }}>Outer Glow</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.25rem', fontSize: '0.7rem' }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.65rem', marginBottom: '0.1rem' }}>Blur</label>
+                      <input
+                        type="number"
+                        value={selectedLayer.fx?.outerGlow?.blur ?? 0}
+                        onChange={async (e) => {
+                          const value = parseFloat(e.target.value) || 0
+                          await window.indieForge.pipeline.updateLayer(projectId!, selectedShotId!, selectedLayer.id, {
+                            fx: {
+                              ...selectedLayer.fx,
+                              outerGlow: {
+                                blur: value,
+                                color: selectedLayer.fx?.outerGlow?.color ?? '#00ffff',
+                                alpha: selectedLayer.fx?.outerGlow?.alpha ?? 0.8,
+                                strength: selectedLayer.fx?.outerGlow?.strength ?? 1
+                              }
+                            }
+                          })
+                          const updated = await window.indieForge.projects.open(projectId!)
+                          setActiveProject(updated)
+                        }}
+                        style={{ width: '100%', padding: '0.2rem', fontSize: '0.7rem' }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.65rem', marginBottom: '0.1rem' }}>Alpha {Math.round((selectedLayer.fx?.outerGlow?.alpha ?? 0) * 100)}%</label>
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        value={(selectedLayer.fx?.outerGlow?.alpha ?? 0) * 100}
+                        onChange={async (e) => {
+                          const value = parseInt(e.target.value) / 100
+                          await window.indieForge.pipeline.updateLayer(projectId!, selectedShotId!, selectedLayer.id, {
+                            fx: {
+                              ...selectedLayer.fx,
+                              outerGlow: {
+                                blur: selectedLayer.fx?.outerGlow?.blur ?? 12,
+                                color: selectedLayer.fx?.outerGlow?.color ?? '#00ffff',
+                                alpha: value,
+                                strength: selectedLayer.fx?.outerGlow?.strength ?? 1
+                              }
+                            }
+                          })
+                          const updated = await window.indieForge.projects.open(projectId!)
+                          setActiveProject(updated)
+                        }}
+                        style={{ width: '100%' }}
+                      />
+                    </div>
+                    <div style={{ gridColumn: '1 / -1' }}>
+                      <label style={{ display: 'block', fontSize: '0.65rem', marginBottom: '0.1rem' }}>Color</label>
+                      <select
+                        value={selectedLayer.fx?.outerGlow?.color ?? '#00ffff'}
+                        onChange={async (e) => {
+                          await window.indieForge.pipeline.updateLayer(projectId!, selectedShotId!, selectedLayer.id, {
+                            fx: {
+                              ...selectedLayer.fx,
+                              outerGlow: {
+                                blur: selectedLayer.fx?.outerGlow?.blur ?? 12,
+                                color: e.target.value,
+                                alpha: selectedLayer.fx?.outerGlow?.alpha ?? 0.8,
+                                strength: selectedLayer.fx?.outerGlow?.strength ?? 1
+                              }
+                            }
+                          })
+                          const updated = await window.indieForge.projects.open(projectId!)
+                          setActiveProject(updated)
+                        }}
+                        style={{ width: '100%', padding: '0.2rem', fontSize: '0.7rem' }}
+                      >
+                        <option value="#00ffff">Cyan</option>
+                        <option value="#ff00ff">Magenta</option>
+                        <option value="#ffff00">Yellow</option>
+                        <option value="#ffffff">White</option>
+                        <option value="#ff0000">Red</option>
+                        <option value="#00ff00">Green</option>
+                        <option value="#0000ff">Blue</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+                
+                {/* Clear Effects */}
+                {(selectedLayer.fx?.dropShadow || selectedLayer.fx?.outerGlow) && (
+                  <button
+                    onClick={async () => {
+                      await window.indieForge.pipeline.updateLayer(projectId!, selectedShotId!, selectedLayer.id, { fx: undefined })
+                      const updated = await window.indieForge.projects.open(projectId!)
+                      setActiveProject(updated)
+                    }}
+                    style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem', width: '100%' }}
+                  >
+                    Clear Effects
+                  </button>
+                )}
+              </div>
             </div>
           )}
         </div>
