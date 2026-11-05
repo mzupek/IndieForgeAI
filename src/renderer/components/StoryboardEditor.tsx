@@ -444,76 +444,105 @@ export function StoryboardEditor() {
       ctx.translate(stageX, stageY)
       ctx.rotate((layer.rotation * Math.PI) / 180)
       ctx.scale(layer.flipX ? -1 : 1, 1)
-      ctx.globalAlpha = layer.opacity
       
-      // Apply layer effects (Phase C.2)
-      if (layer.fx) {
-        if (layer.fx.outerGlow) {
-          const glow = layer.fx.outerGlow
-          ctx.shadowBlur = glow.blur
-          ctx.shadowColor = glow.color
-          ctx.globalAlpha = layer.opacity * glow.alpha
-          ctx.shadowOffsetX = 0
-          ctx.shadowOffsetY = 0
-        }
-        if (layer.fx.dropShadow) {
-          const shadow = layer.fx.dropShadow
-          ctx.shadowOffsetX = shadow.offsetX
-          ctx.shadowOffsetY = shadow.offsetY
-          ctx.shadowBlur = shadow.blur
-          ctx.shadowColor = shadow.color
-          ctx.globalAlpha = layer.opacity * shadow.alpha
-        }
-      }
-
       const img = loadedImages.get(layer.id)
-      if (img) {
-        const size = 200 * layer.scale
-        ctx.drawImage(img.element, -size / 2, -size / 2, size, size)
+      const size = img ? 200 * layer.scale : 100 * layer.scale
+      
+      // Phase C.3a: Dual-pass rendering for outerGlow + dropShadow
+      // Pass 1: Outer glow (if present)
+      if (layer.fx?.outerGlow) {
+        const glow = layer.fx.outerGlow
+        ctx.shadowBlur = glow.blur
+        ctx.shadowColor = glow.color
+        ctx.shadowOffsetX = 0
+        ctx.shadowOffsetY = 0
+        ctx.globalAlpha = layer.opacity * glow.alpha
         
-        // Draw again for stronger glow if strength > 1
-        if (layer.fx?.outerGlow?.strength && layer.fx.outerGlow.strength > 1) {
-          for (let i = 1; i < layer.fx.outerGlow.strength; i++) {
-            ctx.drawImage(img.element, -size / 2, -size / 2, size, size)
+        if (img) {
+          ctx.drawImage(img.element, -size / 2, -size / 2, size, size)
+          // Draw again for stronger glow if strength > 1
+          if (glow.strength && glow.strength > 1) {
+            for (let i = 1; i < glow.strength; i++) {
+              ctx.drawImage(img.element, -size / 2, -size / 2, size, size)
+            }
           }
+        } else {
+          ctx.fillStyle = layer.id === selectedLayerId ? '#FFC800' : '#4a4a4a'
+          ctx.fillRect(-size / 2, -size / 2, size, size)
         }
-      } else {
-        const size = 100 * layer.scale
-        ctx.fillStyle = layer.id === selectedLayerId ? '#FFC800' : '#4a4a4a'
-        ctx.fillRect(-size / 2, -size / 2, size, size)
+        
+        // Clear shadow state for next pass
+        ctx.shadowBlur = 0
+        ctx.shadowOffsetX = 0
+        ctx.shadowOffsetY = 0
+        ctx.shadowColor = 'transparent'
       }
       
-      // Reset shadow state
-      ctx.shadowBlur = 0
-      ctx.shadowOffsetX = 0
-      ctx.shadowOffsetY = 0
-      ctx.shadowColor = 'transparent'
+      // Pass 2: Drop shadow (if present)
+      if (layer.fx?.dropShadow) {
+        const shadow = layer.fx.dropShadow
+        ctx.shadowOffsetX = shadow.offsetX
+        ctx.shadowOffsetY = shadow.offsetY
+        ctx.shadowBlur = shadow.blur
+        ctx.shadowColor = shadow.color
+        ctx.globalAlpha = layer.opacity * shadow.alpha
+        
+        if (img) {
+          ctx.drawImage(img.element, -size / 2, -size / 2, size, size)
+        } else {
+          ctx.fillStyle = layer.id === selectedLayerId ? '#FFC800' : '#4a4a4a'
+          ctx.fillRect(-size / 2, -size / 2, size, size)
+        }
+        
+        // Clear shadow state
+        ctx.shadowBlur = 0
+        ctx.shadowOffsetX = 0
+        ctx.shadowOffsetY = 0
+        ctx.shadowColor = 'transparent'
+      }
+      
+      // Pass 3: No effects (if neither glow nor shadow)
+      if (!layer.fx?.outerGlow && !layer.fx?.dropShadow) {
+        ctx.globalAlpha = layer.opacity
+        if (img) {
+          ctx.drawImage(img.element, -size / 2, -size / 2, size, size)
+        } else {
+          ctx.fillStyle = layer.id === selectedLayerId ? '#FFC800' : '#4a4a4a'
+          ctx.fillRect(-size / 2, -size / 2, size, size)
+        }
+      }
       
       ctx.restore()
 
-      // Selection handles (in screen space, after camera transform)
+      // Selection handles (Phase C.3a: account for rotation)
       if (layer.id === selectedLayerId && mode === 'layout' && playbackState === 'stopped') {
         const size = (img ? 200 : 100) * layer.scale
-        const x = stageX
-        const y = stageY
-        
-        ctx.strokeStyle = '#FFC800'
-        ctx.lineWidth = 2 / (getInterpolatedCamera(playbackTime)?.zoom || 1)
-        ctx.strokeRect(x - size / 2, y - size / 2, size, size)
+        const cx = stageX
+        const cy = stageY
+        const rotRad = (layer.rotation * Math.PI) / 180
         
         const handleSize = 10 / (getInterpolatedCamera(playbackTime)?.zoom || 1)
+        ctx.strokeStyle = '#FFC800'
+        ctx.lineWidth = 2 / (getInterpolatedCamera(playbackTime)?.zoom || 1)
         ctx.fillStyle = '#FFC800'
         
-        // Corner handles (scale)
-        ctx.fillRect(x - size / 2 - handleSize / 2, y - size / 2 - handleSize / 2, handleSize, handleSize)
-        ctx.fillRect(x + size / 2 - handleSize / 2, y - size / 2 - handleSize / 2, handleSize, handleSize)
-        ctx.fillRect(x - size / 2 - handleSize / 2, y + size / 2 - handleSize / 2, handleSize, handleSize)
-        ctx.fillRect(x + size / 2 - handleSize / 2, y + size / 2 - handleSize / 2, handleSize, handleSize)
+        // Draw rotated bounding box
+        ctx.save()
+        ctx.translate(cx, cy)
+        ctx.rotate(rotRad)
+        ctx.strokeRect(-size / 2, -size / 2, size, size)
         
-        // Rotation handle
+        // Corner handles (scale) - at rotated corners
+        ctx.fillRect(-size / 2 - handleSize / 2, -size / 2 - handleSize / 2, handleSize, handleSize)
+        ctx.fillRect(size / 2 - handleSize / 2, -size / 2 - handleSize / 2, handleSize, handleSize)
+        ctx.fillRect(-size / 2 - handleSize / 2, size / 2 - handleSize / 2, handleSize, handleSize)
+        ctx.fillRect(size / 2 - handleSize / 2, size / 2 - handleSize / 2, handleSize, handleSize)
+        
+        // Rotation handle - above top edge
         ctx.beginPath()
-        ctx.arc(x, y - size / 2 - 20, 6 / (getInterpolatedCamera(playbackTime)?.zoom || 1), 0, Math.PI * 2)
+        ctx.arc(0, -size / 2 - 20, 6 / (getInterpolatedCamera(playbackTime)?.zoom || 1), 0, Math.PI * 2)
         ctx.fill()
+        ctx.restore()
       }
     }
 
@@ -553,33 +582,55 @@ export function StoryboardEditor() {
       
       const lx = selectedLayer.x
       const ly = selectedLayer.y
+      const rotRad = (selectedLayer.rotation * Math.PI) / 180
       
-      // Check rotation handle
-      const rotHandleY = ly - size / 2 - 20 / canvas.width
-      if (Math.hypot(x - lx, y - rotHandleY) < handleSize / 2) {
+      // Helper: rotate point around layer center
+      const rotatePoint = (px: number, py: number) => {
+        const dx = px - lx
+        const dy = py - ly
+        return {
+          x: lx + dx * Math.cos(rotRad) - dy * Math.sin(rotRad),
+          y: ly + dx * Math.sin(rotRad) + dy * Math.cos(rotRad)
+        }
+      }
+      
+      // Helper: inverse rotate point (world to local)
+      const invRotatePoint = (px: number, py: number) => {
+        const dx = px - lx
+        const dy = py - ly
+        return {
+          x: lx + dx * Math.cos(-rotRad) - dy * Math.sin(-rotRad),
+          y: ly + dx * Math.sin(-rotRad) + dy * Math.cos(-rotRad)
+        }
+      }
+      
+      // Check rotation handle (rotated position above top edge)
+      const rotHandle = rotatePoint(lx, ly - size / 2 - 20 / canvas.width)
+      if (Math.hypot(x - rotHandle.x, y - rotHandle.y) < handleSize / 2) {
         setDragMode('rotate')
         setDragStart({ x, y, clientX: e.clientX, clientY: e.clientY, layerX: lx, layerY: ly, layerRotation: selectedLayer.rotation })
         return
       }
       
-      // Check corner handles (scale)
+      // Check corner handles (rotated corners)
       const corners = [
-        { x: lx - size / 2, y: ly - size / 2 },
-        { x: lx + size / 2, y: ly - size / 2 },
-        { x: lx - size / 2, y: ly + size / 2 },
-        { x: lx + size / 2, y: ly + size / 2 }
+        rotatePoint(lx - size / 2, ly - size / 2),
+        rotatePoint(lx + size / 2, ly - size / 2),
+        rotatePoint(lx - size / 2, ly + size / 2),
+        rotatePoint(lx + size / 2, ly + size / 2)
       ]
       
       for (const corner of corners) {
-        if (Math.abs(x - corner.x) < handleSize / 2 && Math.abs(y - corner.y) < handleSize / 2) {
+        if (Math.hypot(x - corner.x, y - corner.y) < handleSize / 2) {
           setDragMode('scale')
           setDragStart({ x, y, clientX: e.clientX, clientY: e.clientY, layerX: lx, layerY: ly, layerScale: selectedLayer.scale })
           return
         }
       }
       
-      // Check body (move)
-      if (Math.abs(x - lx) <= size / 2 && Math.abs(y - ly) <= size / 2) {
+      // Check body (move) - use inverse rotation to check if click is inside unrotated rect
+      const localPoint = invRotatePoint(x, y)
+      if (Math.abs(localPoint.x - lx) <= size / 2 && Math.abs(localPoint.y - ly) <= size / 2) {
         setDragMode('move')
         setDragStart({ x, y, clientX: e.clientX, clientY: e.clientY, layerX: lx, layerY: ly })
         return
@@ -635,9 +686,10 @@ export function StoryboardEditor() {
       setActiveProject(updated)
       setDragStart({ ...dragStart, clientX: e.clientX, clientY: e.clientY, layerX: updates.x, layerY: updates.y })
     } else if (dragMode === 'scale' && selectedLayer) {
-      const dist = Math.hypot(x - dragStart.layerX, y - dragStart.layerY)
-      const startDist = Math.hypot(dragStart.x - dragStart.layerX, dragStart.y - dragStart.layerY)
-      const scaleFactor = startDist > 0 ? dist / startDist : 1
+      // Phase C.3a: Use pixel distance for accurate scaling
+      const pixelDist = Math.hypot(e.clientX - dragStart.layerX * rect.width, e.clientY - dragStart.layerY * rect.height)
+      const startPixelDist = Math.hypot(dragStart.clientX - dragStart.layerX * rect.width, dragStart.clientY - dragStart.layerY * rect.height)
+      const scaleFactor = startPixelDist > 0 ? pixelDist / startPixelDist : 1
       
       const newScale = Math.max(0.1, Math.min(5, dragStart.layerScale * scaleFactor))
       
@@ -645,9 +697,10 @@ export function StoryboardEditor() {
       const updated = await window.indieForge.projects.open(projectId!)
       setActiveProject(updated)
     } else if (dragMode === 'rotate' && selectedLayer) {
+      // Phase C.3a: Calculate rotation angle from pointer movement
       const angle = Math.atan2(y - dragStart.layerY, x - dragStart.layerX) * (180 / Math.PI)
       const startAngle = Math.atan2(dragStart.y - dragStart.layerY, dragStart.x - dragStart.layerX) * (180 / Math.PI)
-      const rotation = (dragStart.layerRotation + (angle - startAngle)) % 360
+      const rotation = ((dragStart.layerRotation + (angle - startAngle)) % 360 + 360) % 360
       
       await window.indieForge.pipeline.updateLayer(projectId!, selectedShotId!, selectedLayerId!, { rotation })
       const updated = await window.indieForge.projects.open(projectId!)
@@ -1840,6 +1893,82 @@ export function StoryboardEditor() {
           {selectedLayerId && selectedLayer && (
             <div style={{ marginTop: '1rem', padding: '1rem', background: 'var(--bg-secondary)', borderRadius: '4px' }}>
               <h4 style={{ fontSize: '0.9rem', margin: '0 0 0.75rem 0' }}>Layer Controls</h4>
+              
+              {/* Phase C.3a: Scale and Rotation numeric controls */}
+              <div style={{ marginBottom: '0.75rem', paddingBottom: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+                <div style={{ marginBottom: '0.5rem' }}>
+                  <label style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.25rem', color: 'var(--text-secondary)' }}>
+                    Scale: {selectedLayer.scale.toFixed(2)}x
+                  </label>
+                  <div style={{ display: 'flex', gap: '0.25rem', alignItems: 'center' }}>
+                    <input
+                      type="range"
+                      min="0.1"
+                      max="5"
+                      step="0.1"
+                      value={selectedLayer.scale}
+                      onChange={async (e) => {
+                        const value = parseFloat(e.target.value)
+                        await window.indieForge.pipeline.updateLayer(projectId!, selectedShotId!, selectedLayer.id, { scale: value })
+                        const updated = await window.indieForge.projects.open(projectId!)
+                        setActiveProject(updated)
+                      }}
+                      style={{ flex: 1 }}
+                    />
+                    <input
+                      type="number"
+                      min="0.1"
+                      max="5"
+                      step="0.1"
+                      value={selectedLayer.scale}
+                      onChange={async (e) => {
+                        const value = Math.max(0.1, Math.min(5, parseFloat(e.target.value) || 1))
+                        await window.indieForge.pipeline.updateLayer(projectId!, selectedShotId!, selectedLayer.id, { scale: value })
+                        const updated = await window.indieForge.projects.open(projectId!)
+                        setActiveProject(updated)
+                      }}
+                      style={{ width: '60px', padding: '0.2rem', fontSize: '0.75rem' }}
+                    />
+                  </div>
+                </div>
+                
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.25rem', color: 'var(--text-secondary)' }}>
+                    Rotation: {selectedLayer.rotation.toFixed(0)}°
+                  </label>
+                  <div style={{ display: 'flex', gap: '0.25rem', alignItems: 'center' }}>
+                    <input
+                      type="range"
+                      min="0"
+                      max="360"
+                      step="1"
+                      value={selectedLayer.rotation}
+                      onChange={async (e) => {
+                        const value = parseFloat(e.target.value)
+                        await window.indieForge.pipeline.updateLayer(projectId!, selectedShotId!, selectedLayer.id, { rotation: value })
+                        const updated = await window.indieForge.projects.open(projectId!)
+                        setActiveProject(updated)
+                      }}
+                      style={{ flex: 1 }}
+                    />
+                    <input
+                      type="number"
+                      min="0"
+                      max="360"
+                      step="1"
+                      value={selectedLayer.rotation}
+                      onChange={async (e) => {
+                        const value = ((parseFloat(e.target.value) || 0) % 360 + 360) % 360
+                        await window.indieForge.pipeline.updateLayer(projectId!, selectedShotId!, selectedLayer.id, { rotation: value })
+                        const updated = await window.indieForge.projects.open(projectId!)
+                        setActiveProject(updated)
+                      }}
+                      style={{ width: '60px', padding: '0.2rem', fontSize: '0.75rem' }}
+                    />
+                  </div>
+                </div>
+              </div>
+              
               <button type="button" onClick={handleFlipLayer} style={{ width: '100%', marginBottom: '0.5rem', fontSize: '0.85rem' }}>
                 {selectedLayer.flipX ? 'Unflip' : 'Flip'} Horizontal
               </button>
