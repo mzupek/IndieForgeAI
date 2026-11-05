@@ -206,6 +206,9 @@ export function registerStoryboardCommands(program: Command): void {
     .option('--name <name>', 'New name')
     .option('--duration <seconds>', 'Duration in seconds')
     .option('--notes <text>', 'Notes for engineer')
+    .option('--background-image <path>', 'Background image path (forge-file:// or absolute)')
+    .option('--background-clip <clipId>', 'Background clip ID')
+    .option('--clear-background', 'Clear both background image and clip')
     .action(async (options, cmd) => {
       try {
         const mergedOpts = { ...cmd.parent!.parent!.opts(), ...options }
@@ -213,6 +216,12 @@ export function registerStoryboardCommands(program: Command): void {
         if (options.name) updates.name = options.name
         if (options.duration) updates.durationSec = parseFloat(options.duration)
         if (options.notes) updates.notes = options.notes
+        if (options.backgroundImage !== undefined) updates.backgroundImage = options.backgroundImage
+        if (options.backgroundClip !== undefined) updates.backgroundClipId = options.backgroundClip
+        if (options.clearBackground) {
+          updates.backgroundImage = undefined
+          updates.backgroundClipId = undefined
+        }
 
         const shot = await updateShot(options.id, updates, getDataDir(mergedOpts.dataDir))
 

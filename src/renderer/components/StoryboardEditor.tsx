@@ -193,6 +193,7 @@ export function StoryboardEditor() {
   const [draggedMarker, setDraggedMarker] = useState<{ type: 'camera' | 'effect'; index: number } | null>(null)
   
   const [loadedImages, setLoadedImages] = useState<Map<string, LoadedImage>>(new Map())
+  const [backgroundImage, setBackgroundImage] = useState<LoadedImage | null>(null)
   const [showAddCharacter, setShowAddCharacter] = useState(false)
   const [showAddEffect, setShowAddEffect] = useState(false)
   const [editingNotes, setEditingNotes] = useState(false)
@@ -340,6 +341,30 @@ export function StoryboardEditor() {
 
     ctx.fillStyle = '#1a1a1a'
     ctx.fillRect(0, 0, canvas.width, canvas.height)
+
+    // Draw background image if present (before camera transform)
+    if (backgroundImage) {
+      const bgAspect = backgroundImage.width / backgroundImage.height
+      const canvasAspect = canvas.width / canvas.height
+      
+      let drawWidth, drawHeight, drawX, drawY
+      
+      if (bgAspect > canvasAspect) {
+        // Background is wider - fit height
+        drawHeight = canvas.height
+        drawWidth = drawHeight * bgAspect
+        drawX = (canvas.width - drawWidth) / 2
+        drawY = 0
+      } else {
+        // Background is taller - fit width
+        drawWidth = canvas.width
+        drawHeight = drawWidth / bgAspect
+        drawX = 0
+        drawY = (canvas.height - drawHeight) / 2
+      }
+      
+      ctx.drawImage(backgroundImage.element, drawX, drawY, drawWidth, drawHeight)
+    }
 
     // Apply camera transform
     ctx.save()
@@ -1493,6 +1518,89 @@ export function StoryboardEditor() {
       {/* Right sidebar */}
       {selectedShot && (
         <div style={{ width: '280px', borderLeft: '1px solid var(--border)', paddingLeft: '1rem', overflowY: 'auto' }}>
+          {/* Background Section */}
+          <div style={{ marginBottom: '1.5rem', paddingBottom: '1rem', borderBottom: '1px solid var(--border)' }}>
+            <h3 style={{ fontSize: '1rem', margin: '0 0 0.75rem 0' }}>Background</h3>
+            
+            {/* Background Image */}
+            <div style={{ marginBottom: '0.75rem' }}>
+              <div style={{ fontSize: '0.85rem', marginBottom: '0.25rem', fontWeight: 'bold' }}>Image:</div>
+              {selectedShot.backgroundImage ? (
+                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                  <div style={{ flex: 1, fontSize: '0.75rem', padding: '0.5rem', background: 'var(--bg-secondary)', borderRadius: '4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {selectedShot.backgroundImage.split('/').pop()}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await window.indieForge.pipeline.updateShot(projectId!, selectedShotId!, { backgroundImage: undefined })
+                      const updated = await window.indieForge.projects.open(projectId!)
+                      setActiveProject(updated)
+                    }}
+                    style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem', background: 'var(--danger)', color: 'white' }}
+                  >
+                    Clear
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const paths = await window.indieForge.dialog.openFile({ 
+                      filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp'] }],
+                      properties: ['openFile']
+                    })
+                    if (paths && paths.length > 0) {
+                      const forgePath = `forge-file://${projectId!}/${Date.now()}-${paths[0].split('/').pop()}`
+                      await window.indieForge.files.copy(paths[0], forgePath)
+                      await window.indieForge.pipeline.updateShot(projectId!, selectedShotId!, { backgroundImage: forgePath })
+                      const updated = await window.indieForge.projects.open(projectId!)
+                      setActiveProject(updated)
+                    }
+                  }}
+                  style={{ width: '100%', fontSize: '0.85rem', padding: '0.4rem' }}
+                >
+                  + Import Image
+                </button>
+              )}
+            </div>
+
+            {/* Background Clip */}
+            <div>
+              <div style={{ fontSize: '0.85rem', marginBottom: '0.25rem', fontWeight: 'bold' }}>Clip:</div>
+              <select
+                value={selectedShot.backgroundClipId || ''}
+                onChange={async (e) => {
+                  const clipId = e.target.value || undefined
+                  await window.indieForge.pipeline.updateShot(projectId!, selectedShotId!, { backgroundClipId: clipId })
+                  const updated = await window.indieForge.projects.open(projectId!)
+                  setActiveProject(updated)
+                }}
+                style={{
+                  width: '100%',
+                  padding: '0.4rem',
+                  fontSize: '0.85rem',
+                  background: 'var(--bg)',
+                  border: '1px solid var(--border)',
+                  borderRadius: '4px',
+                  color: 'var(--text)'
+                }}
+              >
+                <option value="">None</option>
+                {clips.map(clip => (
+                  <option key={clip.id} value={clip.id}>
+                    {clip.moment || 'clip'} ({clip.durationSec}s)
+                  </option>
+                ))}
+              </select>
+              {selectedShot.backgroundImage && selectedShot.backgroundClipId && (
+                <div style={{ fontSize: '0.7rem', marginTop: '0.25rem', color: 'var(--muted)', fontStyle: 'italic' }}>
+                  Clip plays over static image
+                </div>
+              )}
+            </div>
+          </div>
+
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
             <h3 style={{ fontSize: '1rem', margin: 0 }}>Layers</h3>
             <button 
