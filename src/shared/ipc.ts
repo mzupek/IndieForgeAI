@@ -71,5 +71,18 @@ export const IPC_CHANNELS = {
   EXPORT_VALIDATE: 'export:validate',
   EXPORT_DRY_RUN: 'export:dryRun',
   EXPORT_RUN: 'export:run',
-  PROJECTS_UPDATE_GAME: 'projects:updateGame'
+  PROJECTS_UPDATE_GAME: 'projects:updateGame',
+  STORYBOARD_CREATE: 'storyboard:create',
+  STORYBOARD_UPDATE: 'storyboard:update',
+  STORYBOARD_DELETE: 'storyboard:delete',
+  SHOT_CREATE: 'shot:create',
+  SHOT_UPDATE: 'shot:update',
+  SHOT_DELETE: 'shot:delete',
+  LAYER_ADD: 'layer:add',
+  LAYER_UPDATE: 'layer:update',
+  LAYER_DELETE: 'layer:delete',
+  CAMERA_KEYFRAME_ADD: 'camera:keyframeAdd',
+  CAMERA_KEYFRAME_REMOVE: 'camera:keyframeRemove',
+  EFFECT_MARKER_ADD: 'effect:markerAdd',
+  EFFECT_MARKER_REMOVE: 'effect:markerRemove'
 } as const

@@ -730,6 +730,128 @@ export function registerIpcHandlers(): void {
       return project
     }
   )
+
+  // Storyboard handlers
+  const {
+    createStoryboard,
+    updateStoryboard,
+    removeStoryboard,
+    createShot,
+    updateShot,
+    removeShot,
+    addLayer,
+    updateLayer,
+    removeLayer,
+    addCameraKeyframe,
+    removeCameraKeyframe,
+    addEffectMarker,
+    removeEffectMarker
+  } = require('../core/storage/storyboardService')
+
+  ipcMain.handle(
+    IPC_CHANNELS.STORYBOARD_CREATE,
+    async (_e, projectId: string, gameId: string, input: any) => {
+      const result = await createStoryboard(gameId, input)
+      const project = await loadProject(projectId)
+      return project
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.STORYBOARD_UPDATE,
+    async (_e, projectId: string, storyboardId: string, updates: any) => {
+      await updateStoryboard(storyboardId, updates)
+      return await loadProject(projectId)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.STORYBOARD_DELETE,
+    async (_e, projectId: string, storyboardId: string) => {
+      await removeStoryboard(storyboardId)
+      return await loadProject(projectId)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SHOT_CREATE,
+    async (_e, projectId: string, storyboardId: string, input: any) => {
+      await createShot(storyboardId, input)
+      return await loadProject(projectId)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SHOT_UPDATE,
+    async (_e, projectId: string, shotId: string, updates: any) => {
+      await updateShot(shotId, updates)
+      return await loadProject(projectId)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SHOT_DELETE,
+    async (_e, projectId: string, storyboardId: string, shotId: string) => {
+      await removeShot(storyboardId, shotId)
+      return await loadProject(projectId)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.LAYER_ADD,
+    async (_e, projectId: string, shotId: string, layer: any) => {
+      await addLayer(shotId, layer)
+      return await loadProject(projectId)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.LAYER_UPDATE,
+    async (_e, projectId: string, shotId: string, layerId: string, updates: any) => {
+      await updateLayer(shotId, layerId, updates)
+      return await loadProject(projectId)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.LAYER_DELETE,
+    async (_e, projectId: string, shotId: string, layerId: string) => {
+      await removeLayer(shotId, layerId)
+      return await loadProject(projectId)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.CAMERA_KEYFRAME_ADD,
+    async (_e, projectId: string, shotId: string, keyframe: any) => {
+      await addCameraKeyframe(shotId, keyframe)
+      return await loadProject(projectId)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.CAMERA_KEYFRAME_REMOVE,
+    async (_e, projectId: string, shotId: string, t: number) => {
+      await removeCameraKeyframe(shotId, t)
+      return await loadProject(projectId)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.EFFECT_MARKER_ADD,
+    async (_e, projectId: string, shotId: string, effect: any) => {
+      await addEffectMarker(shotId, effect)
+      return await loadProject(projectId)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.EFFECT_MARKER_REMOVE,
+    async (_e, projectId: string, shotId: string, t: number) => {
+      await removeEffectMarker(shotId, t)
+      return await loadProject(projectId)
+    }
+  )
 }
 
 export async function ensureAppDataDirs(): Promise<void> {

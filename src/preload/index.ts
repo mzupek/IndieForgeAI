@@ -158,7 +158,33 @@ const api: IndieForgeAPI = {
     updatePreset: (presetId, updates) =>
       ipcRenderer.invoke(IPC_CHANNELS.PIPELINE_PRESET_UPDATE, presetId, updates),
     removePreset: (presetId) =>
-      ipcRenderer.invoke(IPC_CHANNELS.PIPELINE_PRESET_REMOVE, presetId)
+      ipcRenderer.invoke(IPC_CHANNELS.PIPELINE_PRESET_REMOVE, presetId),
+    createStoryboard: (projectId, gameId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.STORYBOARD_CREATE, projectId, gameId, input),
+    updateStoryboard: (projectId, storyboardId, updates) =>
+      ipcRenderer.invoke(IPC_CHANNELS.STORYBOARD_UPDATE, projectId, storyboardId, updates),
+    deleteStoryboard: (projectId, storyboardId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.STORYBOARD_DELETE, projectId, storyboardId),
+    createShot: (projectId, storyboardId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_CREATE, projectId, storyboardId, input),
+    updateShot: (projectId, shotId, updates) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_UPDATE, projectId, shotId, updates),
+    deleteShot: (projectId, storyboardId, shotId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_DELETE, projectId, storyboardId, shotId),
+    addLayer: (projectId, shotId, layer) =>
+      ipcRenderer.invoke(IPC_CHANNELS.LAYER_ADD, projectId, shotId, layer),
+    updateLayer: (projectId, shotId, layerId, updates) =>
+      ipcRenderer.invoke(IPC_CHANNELS.LAYER_UPDATE, projectId, shotId, layerId, updates),
+    deleteLayer: (projectId, shotId, layerId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.LAYER_DELETE, projectId, shotId, layerId),
+    addCameraKeyframe: (projectId, shotId, keyframe) =>
+      ipcRenderer.invoke(IPC_CHANNELS.CAMERA_KEYFRAME_ADD, projectId, shotId, keyframe),
+    removeCameraKeyframe: (projectId, shotId, t) =>
+      ipcRenderer.invoke(IPC_CHANNELS.CAMERA_KEYFRAME_REMOVE, projectId, shotId, t),
+    addEffectMarker: (projectId, shotId, effect) =>
+      ipcRenderer.invoke(IPC_CHANNELS.EFFECT_MARKER_ADD, projectId, shotId, effect),
+    removeEffectMarker: (projectId, shotId, t) =>
+      ipcRenderer.invoke(IPC_CHANNELS.EFFECT_MARKER_REMOVE, projectId, shotId, t)
   }
 }
 

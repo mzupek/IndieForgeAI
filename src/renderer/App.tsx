@@ -7,7 +7,7 @@ import { CharacterRoster } from './components/CharacterRoster'
 import { PosesView } from './components/PosesView'
 import { ClipsView } from './components/ClipsView'
 import { PresetsView } from './components/PresetsView'
-import { StoryboardsView } from './components/StoryboardsView'
+import { StoryboardEditor } from './components/StoryboardEditor'
 import { ExportView } from './components/ExportView'
 import {
   LibraryPlaceholder
@@ -103,7 +103,7 @@ function AppRoutes() {
           <Route path="presets" element={<Navigate to="/studio/presets/game-neon-recall" replace />} />
           <Route path="presets/:gameId" element={<PresetsView />} />
           <Route path="storyboards" element={<Navigate to="/studio/storyboards/game-neon-recall" replace />} />
-          <Route path="storyboards/:gameId" element={<StoryboardsView />} />
+          <Route path="storyboards/:gameId" element={<StoryboardEditor />} />
           <Route path="library" element={<LibraryPlaceholder />} />
           <Route path="export" element={<Navigate to="/studio/export/game-neon-recall" replace />} />
           <Route path="export/:gameId" element={<ExportView />} />
