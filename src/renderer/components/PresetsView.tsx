@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useOutletContext } from 'react-router-dom'
 import type { ScenePreset, ScenePresetType, Character } from '@shared/types/assetPipeline'
-import { useProjectStore } from '../store/projectStore'
+import { useProjectStore } from '../state/indieForgeStore'
 import { 
   getDefaultParams, 
   getPresetTypeDisplayName,
