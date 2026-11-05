@@ -63,5 +63,8 @@ export const IPC_CHANNELS = {
   PIPELINE_POSE_GET_METADATA: 'pipeline:poseGetMetadata',
   PIPELINE_CLIP_IMPORT: 'pipeline:clipImport',
   PIPELINE_CLIP_REMOVE: 'pipeline:clipRemove',
-  PIPELINE_CLIP_UPDATE: 'pipeline:clipUpdate'
+  PIPELINE_CLIP_UPDATE: 'pipeline:clipUpdate',
+  PIPELINE_PRESET_CREATE: 'pipeline:presetCreate',
+  PIPELINE_PRESET_UPDATE: 'pipeline:presetUpdate',
+  PIPELINE_PRESET_REMOVE: 'pipeline:presetRemove'
 } as const

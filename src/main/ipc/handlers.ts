@@ -71,6 +71,11 @@ import {
   updateClip
 } from '../storage/clipService'
 import {
+  createPreset,
+  updatePreset,
+  removePreset
+} from '../../core/storage/presetService'
+import {
   applyDesignerAssetPrompt,
   applyDesignerStyleGuide,
   clearDesignerChat,
@@ -652,6 +657,27 @@ export function registerIpcHandlers(): void {
     IPC_CHANNELS.PIPELINE_CLIP_UPDATE,
     async (_e, clipId: string, patch: any) =>
       updateClip(clipId, patch)
+  )
+
+  // Preset handlers
+  ipcMain.handle(
+    IPC_CHANNELS.PIPELINE_PRESET_CREATE,
+    async (_e, type: string, options: any) =>
+      createPreset(type as any, options)
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.PIPELINE_PRESET_UPDATE,
+    async (_e, presetId: string, updates: any) =>
+      updatePreset(presetId, updates)
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.PIPELINE_PRESET_REMOVE,
+    async (_e, presetId: string) => {
+      await removePreset(presetId)
+      return { ok: true as const }
+    }
   )
 }
 

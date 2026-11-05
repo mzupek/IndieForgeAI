@@ -511,6 +511,22 @@ export interface IndieForgeAPI {
     getOpenAIKey: () => Promise<{ configured: boolean }>
     setOpenAIKey: (apiKey: string) => Promise<{ ok: true }>
   }
+  pipeline: {
+    createCharacter: (projectId: string, input: any) => Promise<any>
+    updateCharacter: (projectId: string, characterId: string, patch: any) => Promise<any>
+    deleteCharacter: (projectId: string, characterId: string) => Promise<{ ok: true }>
+    setCharacterReference: (projectId: string, characterId: string, sourcePath: string) => Promise<any>
+    importPose: (projectId: string, characterId: string, slot: string, sourcePath: string, options?: any) => Promise<any>
+    removePose: (projectId: string, poseId: string) => Promise<{ ok: true }>
+    updatePose: (projectId: string, poseId: string, patch: any) => Promise<any>
+    getPoseMetadata: (projectId: string, characterId: string) => Promise<Record<string, any>>
+    importClip: (sourcePath: string, moment: string, options?: any) => Promise<any>
+    removeClip: (clipId: string) => Promise<{ ok: true }>
+    updateClip: (clipId: string, patch: any) => Promise<any>
+    createPreset: (type: string, options?: any) => Promise<any>
+    updatePreset: (presetId: string, updates: any) => Promise<any>
+    removePreset: (presetId: string) => Promise<{ ok: true }>
+  }
 }
 
 declare global {
