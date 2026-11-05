@@ -448,7 +448,7 @@ export function StoryboardEditor() {
       const rotHandleY = ly - size / 2 - 20 / canvas.width
       if (Math.hypot(x - lx, y - rotHandleY) < handleSize / 2) {
         setDragMode('rotate')
-        setDragStart({ x, y, layerX: lx, layerY: ly, layerRotation: selectedLayer.rotation })
+        setDragStart({ x, y, clientX: e.clientX, clientY: e.clientY, layerX: lx, layerY: ly, layerRotation: selectedLayer.rotation })
         return
       }
       
@@ -463,7 +463,7 @@ export function StoryboardEditor() {
       for (const corner of corners) {
         if (Math.abs(x - corner.x) < handleSize / 2 && Math.abs(y - corner.y) < handleSize / 2) {
           setDragMode('scale')
-          setDragStart({ x, y, layerX: lx, layerY: ly, layerScale: selectedLayer.scale })
+          setDragStart({ x, y, clientX: e.clientX, clientY: e.clientY, layerX: lx, layerY: ly, layerScale: selectedLayer.scale })
           return
         }
       }
@@ -471,7 +471,7 @@ export function StoryboardEditor() {
       // Check body (move)
       if (Math.abs(x - lx) <= size / 2 && Math.abs(y - ly) <= size / 2) {
         setDragMode('move')
-        setDragStart({ x, y, layerX: lx, layerY: ly })
+        setDragStart({ x, y, clientX: e.clientX, clientY: e.clientY, layerX: lx, layerY: ly })
         return
       }
     }
@@ -491,7 +491,7 @@ export function StoryboardEditor() {
     } else if (mode === 'camera') {
       // Start drawing framing rect
       setDragMode('framingRect')
-      setDragStart({ x, y })
+      setDragStart({ x, y, clientX: e.clientX, clientY: e.clientY })
     }
   }
 
@@ -504,8 +504,16 @@ export function StoryboardEditor() {
     const y = (e.clientY - rect.top) / rect.height
 
     if (dragMode === 'move' && selectedLayer) {
-      const dx = x - dragStart.x
-      const dy = y - dragStart.y
+      // Calculate delta in pixel space first, then convert to normalized coordinates
+      // This gives precise 1:1 pixel-to-visual movement feel
+      const pixelDx = e.clientX - dragStart.clientX
+      const pixelDy = e.clientY - dragStart.clientY
+      
+      // Apply drag threshold to prevent accidental nudges on clicks
+      if (Math.abs(pixelDx) < 3 && Math.abs(pixelDy) < 3) return
+      
+      const dx = pixelDx / rect.width
+      const dy = pixelDy / rect.height
       
       const updates = {
         x: Math.max(0, Math.min(1, dragStart.layerX + dx)),
@@ -515,7 +523,7 @@ export function StoryboardEditor() {
       await window.indieForge.pipeline.updateLayer(projectId!, selectedShotId!, selectedLayerId!, updates)
       const updated = await window.indieForge.projects.open(projectId!)
       setActiveProject(updated)
-      setDragStart({ ...dragStart, layerX: updates.x, layerY: updates.y })
+      setDragStart({ ...dragStart, clientX: e.clientX, clientY: e.clientY, layerX: updates.x, layerY: updates.y })
     } else if (dragMode === 'scale' && selectedLayer) {
       const dist = Math.hypot(x - dragStart.layerX, y - dragStart.layerY)
       const startDist = Math.hypot(dragStart.x - dragStart.layerX, dragStart.y - dragStart.layerY)
