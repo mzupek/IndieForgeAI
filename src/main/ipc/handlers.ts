@@ -459,8 +459,11 @@ export function registerIpcHandlers(): void {
     if (!filePath || !existsSync(filePath)) {
       throw new Error(`File not found: ${filePath}`)
     }
-    const encodedPath = encodeURIComponent(filePath)
-    return { localUrl: `forge-file:///${encodedPath}` }
+    // Build forge-file://local/<path> with per-segment encoding
+    // Standard scheme requires a host; use "local" as fixed host
+    const pathSegments = filePath.split('/').map(seg => encodeURIComponent(seg))
+    const encodedPath = pathSegments.join('/')
+    return { localUrl: `forge-file://local${encodedPath}` }
   })
 
   ipcMain.handle(IPC_CHANNELS.EXPORT_PROJECT_MANIFEST, async (_e, projectId: string, exportDir: string) => {

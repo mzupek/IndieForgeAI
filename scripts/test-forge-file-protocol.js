@@ -43,25 +43,30 @@ console.log(`  File exists: ${existsSync(testFilePath)}`)
 // Mock getDataDir
 const getDataDir = () => testDir
 
-// Test 1: URL encoding
-const encodedPath = encodeURIComponent(testFilePath)
-const forgeFileUrl = `forge-file:///${encodedPath}`
+// Test 1: URL encoding (per-segment, standard scheme with host)
+const pathSegments = testFilePath.split('/').map(seg => encodeURIComponent(seg))
+const encodedPath = pathSegments.join('/')
+const forgeFileUrl = `forge-file://local${encodedPath}`
 console.log('\nTest 1: URL encoding')
 console.log(`  Original: ${testFilePath}`)
-console.log(`  Encoded: ${encodedPath}`)
+console.log(`  Per-segment encoded: ${encodedPath}`)
 console.log(`  Forge URL: ${forgeFileUrl}`)
 
-// Test 2: URL parsing
+// Test 2: URL parsing (Chromium standard scheme)
 const url = new URL(forgeFileUrl)
 console.log('\nTest 2: URL parsing')
 console.log(`  Protocol: ${url.protocol}`)
 console.log(`  Host: ${url.host}`)
+console.log(`  Hostname: ${url.hostname}`)
 console.log(`  Pathname: ${url.pathname}`)
 
-let decodedPath = decodeURIComponent(url.pathname)
+// Decode pathname segments (URL parser doesn't auto-decode in Node)
+// Split, decode each segment, rejoin
+let decodedPath = url.pathname.split('/').map(seg => decodeURIComponent(seg)).join('/')
 console.log(`  Decoded pathname: ${decodedPath}`)
 
-if (process.platform === 'win32') {
+// On Windows, pathname would be /C:/path, remove leading slash
+if (process.platform === 'win32' && /^\/[A-Za-z]:/.test(decodedPath)) {
   decodedPath = decodedPath.slice(1)
   console.log(`  Windows adjusted: ${decodedPath}`)
 }
@@ -100,7 +105,8 @@ try {
 // Summary
 console.log('\n=== Test Results ===')
 const allPassed = 
-  forgeFileUrl.startsWith('forge-file:///') &&
+  forgeFileUrl.startsWith('forge-file://local/') &&
+  url.hostname === 'local' &&
   url.pathname.startsWith('/') &&
   normalizedPath === testFilePath &&
   existsSync(normalizedPath) &&
@@ -108,8 +114,24 @@ const allPassed =
 
 if (allPassed) {
   console.log('✓ All tests passed')
+  console.log('  - URL format: forge-file://local/<path>')
+  console.log('  - Host validation: hostname === "local"')
+  console.log('  - Path with spaces decoded correctly')
+  console.log('  - Video MIME type correct')
   process.exit(0)
 } else {
   console.error('✗ Some tests failed')
+  if (!forgeFileUrl.startsWith('forge-file://local/')) {
+    console.error('  - URL format incorrect')
+  }
+  if (url.hostname !== 'local') {
+    console.error('  - Host validation failed')
+  }
+  if (!url.pathname.startsWith('/')) {
+    console.error('  - Pathname format incorrect')
+  }
+  if (normalizedPath !== testFilePath) {
+    console.error('  - Path resolution failed')
+  }
   process.exit(1)
 }

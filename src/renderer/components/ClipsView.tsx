@@ -331,6 +331,14 @@ function VideoPlayerModal({
             autoPlay
             loop
             style={{ width: '100%', maxHeight: '600px', borderRadius: '4px', background: '#000' }}
+            onError={(e) => {
+              console.error('Video load error (detail modal):', {
+                src: videoPath,
+                error: e.currentTarget.error,
+                networkState: e.currentTarget.networkState,
+                readyState: e.currentTarget.readyState
+              })
+            }}
           />
         )}
 
@@ -404,6 +412,14 @@ function ClipCard({
             muted
             loop
             style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+            onError={(e) => {
+              console.error('Video load error (card hover):', {
+                src: videoPath,
+                error: e.currentTarget.error,
+                networkState: e.currentTarget.networkState,
+                readyState: e.currentTarget.readyState
+              })
+            }}
           />
         ) : thumbnail ? (
           <img

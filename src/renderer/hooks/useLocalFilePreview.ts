@@ -25,7 +25,8 @@ export function useLocalFilePreview(
         .then(({ localUrl }) => {
           if (!cancelled) setSrc(localUrl)
         })
-        .catch(() => {
+        .catch((err) => {
+          console.error('useLocalFilePreview: getLocalUrl failed for', filePath, err)
           if (!cancelled) setSrc(null)
         })
     } else {
@@ -34,7 +35,8 @@ export function useLocalFilePreview(
         .then(({ dataUrl }) => {
           if (!cancelled) setSrc(dataUrl)
         })
-        .catch(() => {
+        .catch((err) => {
+          console.error('useLocalFilePreview: readPreviewDataUrl failed for', filePath, err)
           if (!cancelled) setSrc(null)
         })
     }

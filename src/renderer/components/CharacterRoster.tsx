@@ -23,7 +23,11 @@ function CharacterCard({
   onDelete: () => void
   onManagePoses: () => void
 }) {
-  const thumbnail = useLocalFilePreview(character.thumbnail)
+  // Fallback: if character.thumbnail is null, use first approved pose
+  const thumbnailPath = character.thumbnail || 
+    poses.find(p => p.characterId === character.id && p.status === 'approved')?.file || 
+    null
+  const thumbnail = useLocalFilePreview(thumbnailPath)
 
   return (
     <div
