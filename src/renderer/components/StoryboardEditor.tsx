@@ -445,16 +445,49 @@ export function StoryboardEditor() {
       ctx.rotate((layer.rotation * Math.PI) / 180)
       ctx.scale(layer.flipX ? -1 : 1, 1)
       ctx.globalAlpha = layer.opacity
+      
+      // Apply layer effects (Phase C.2)
+      if (layer.fx) {
+        if (layer.fx.outerGlow) {
+          const glow = layer.fx.outerGlow
+          ctx.shadowBlur = glow.blur
+          ctx.shadowColor = glow.color
+          ctx.globalAlpha = layer.opacity * glow.alpha
+          ctx.shadowOffsetX = 0
+          ctx.shadowOffsetY = 0
+        }
+        if (layer.fx.dropShadow) {
+          const shadow = layer.fx.dropShadow
+          ctx.shadowOffsetX = shadow.offsetX
+          ctx.shadowOffsetY = shadow.offsetY
+          ctx.shadowBlur = shadow.blur
+          ctx.shadowColor = shadow.color
+          ctx.globalAlpha = layer.opacity * shadow.alpha
+        }
+      }
 
       const img = loadedImages.get(layer.id)
       if (img) {
         const size = 200 * layer.scale
         ctx.drawImage(img.element, -size / 2, -size / 2, size, size)
+        
+        // Draw again for stronger glow if strength > 1
+        if (layer.fx?.outerGlow?.strength && layer.fx.outerGlow.strength > 1) {
+          for (let i = 1; i < layer.fx.outerGlow.strength; i++) {
+            ctx.drawImage(img.element, -size / 2, -size / 2, size, size)
+          }
+        }
       } else {
         const size = 100 * layer.scale
         ctx.fillStyle = layer.id === selectedLayerId ? '#FFC800' : '#4a4a4a'
         ctx.fillRect(-size / 2, -size / 2, size, size)
       }
+      
+      // Reset shadow state
+      ctx.shadowBlur = 0
+      ctx.shadowOffsetX = 0
+      ctx.shadowOffsetY = 0
+      ctx.shadowColor = 'transparent'
       
       ctx.restore()
 

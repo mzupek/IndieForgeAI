@@ -211,6 +211,9 @@ export function registerStoryboardCommands(program: Command): void {
     .option('--background-image <path>', 'Background image path (forge-file:// or absolute)')
     .option('--background-clip <clipId>', 'Background clip ID')
     .option('--clear-background', 'Clear both background image and clip')
+    .option('--bg-dim <value>', 'Background dim (0-1): darken background only')
+    .option('--vignette <value>', 'Vignette strength (0-1): radial darkening')
+    .option('--clear-stage-treatment', 'Clear all stage treatment effects')
     .action(async (options, cmd) => {
       try {
         const mergedOpts = { ...cmd.parent!.parent!.opts(), ...options }

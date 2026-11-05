@@ -288,6 +288,23 @@ export interface StoryboardLayer {
   rotation: number
   flipX: boolean
   opacity: number
+  
+  /** Layer effects (Phase C.2) */
+  fx?: {
+    dropShadow?: {
+      offsetX: number
+      offsetY: number
+      blur: number
+      color: string
+      alpha: number
+    }
+    outerGlow?: {
+      blur: number
+      color: string
+      alpha: number
+      strength?: number
+    }
+  }
 }
 
 /**
