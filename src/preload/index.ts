@@ -185,6 +185,20 @@ const api: IndieForgeAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.EFFECT_MARKER_ADD, projectId, shotId, effect),
     removeEffectMarker: (projectId, shotId, t) =>
       ipcRenderer.invoke(IPC_CHANNELS.EFFECT_MARKER_REMOVE, projectId, shotId, t)
+  },
+  gameDefinitions: {
+    list: () =>
+      ipcRenderer.invoke(IPC_CHANNELS.GAME_DEFINITION_LIST),
+    get: (id) =>
+      ipcRenderer.invoke(IPC_CHANNELS.GAME_DEFINITION_GET, id),
+    getByGame: (gameId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.GAME_DEFINITION_GET_BY_GAME, gameId),
+    create: (gameId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.GAME_DEFINITION_CREATE, gameId),
+    update: (id, updates) =>
+      ipcRenderer.invoke(IPC_CHANNELS.GAME_DEFINITION_UPDATE, id, updates),
+    delete: (id) =>
+      ipcRenderer.invoke(IPC_CHANNELS.GAME_DEFINITION_DELETE, id)
   }
 }
 

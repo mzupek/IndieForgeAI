@@ -547,6 +547,14 @@ export interface IndieForgeAPI {
     addEffectMarker: (projectId: string, shotId: string, effect: any) => Promise<any>
     removeEffectMarker: (projectId: string, shotId: string, time: number) => Promise<any>
   }
+  gameDefinitions: {
+    list: () => Promise<any[]>
+    get: (id: string) => Promise<any | null>
+    getByGame: (gameId: string) => Promise<any | null>
+    create: (gameId: string) => Promise<any>
+    update: (id: string, updates: any) => Promise<any>
+    delete: (id: string) => Promise<{ ok: true }>
+  }
 }
 
 declare global {

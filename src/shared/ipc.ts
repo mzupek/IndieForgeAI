@@ -84,5 +84,11 @@ export const IPC_CHANNELS = {
   CAMERA_KEYFRAME_ADD: 'camera:keyframeAdd',
   CAMERA_KEYFRAME_REMOVE: 'camera:keyframeRemove',
   EFFECT_MARKER_ADD: 'effect:markerAdd',
-  EFFECT_MARKER_REMOVE: 'effect:markerRemove'
+  EFFECT_MARKER_REMOVE: 'effect:markerRemove',
+  GAME_DEFINITION_LIST: 'gameDefinition:list',
+  GAME_DEFINITION_GET: 'gameDefinition:get',
+  GAME_DEFINITION_GET_BY_GAME: 'gameDefinition:getByGame',
+  GAME_DEFINITION_CREATE: 'gameDefinition:create',
+  GAME_DEFINITION_UPDATE: 'gameDefinition:update',
+  GAME_DEFINITION_DELETE: 'gameDefinition:delete'
 } as const
