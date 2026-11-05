@@ -70,7 +70,10 @@ async function setupTestDataDir(): Promise<string> {
       poses: [],
       clips: [],
       scenePresets: [],
-      exportProfiles: []
+      exportProfiles: [],
+      storyboards: [],
+      storyboardShots: [],
+      scenes: []
     }
   }
   
@@ -575,6 +578,157 @@ async function testStoryboardCommands() {
   }
 }
 
+async function testSceneCommands() {
+  console.log('Testing: scene create, list, show, update, attach-storyboard, remove')
+  const testDir = await setupTestDataDir()
+  
+  try {
+    // Create a character first for cast
+    const charResult = runForgeCommand(
+      'character create --game test-game-1 --name "Gate Drone" --role "enemy" --json',
+      testDir
+    )
+    assertEqual(charResult.exitCode, 0, 'Character creation should succeed')
+    const character = JSON.parse(charResult.stdout)
+    
+    // Create a preset for FX
+    const presetResult = runForgeCommand(
+      'preset create --type shake --params \'{"intensity": 15}\' --json',
+      testDir
+    )
+    assertEqual(presetResult.exitCode, 0, 'Preset creation should succeed')
+    const preset = JSON.parse(presetResult.stdout)
+    
+    // Create scene with cast and presets
+    const createResult = runForgeCommand(
+      `scene create --game test-game-1 --name "Gate Drone Battle" --description "Opening encounter" --story-text "Warning: Memory fragment detected." --cast ${character.id} --presets ${preset.id} --json`,
+      testDir
+    )
+    assertEqual(createResult.exitCode, 0, 'Scene create should succeed')
+    const scene = JSON.parse(createResult.stdout)
+    assert(scene.id, 'Scene should have an ID')
+    assertEqual(scene.name, 'Gate Drone Battle', 'Scene should have correct name')
+    assertEqual(scene.cast.length, 1, 'Scene should have 1 cast member')
+    assertEqual(scene.attachedPresets.length, 1, 'Scene should have 1 preset')
+    
+    console.log(`  ✓ Created scene: ${scene.id}`)
+    
+    // List scenes
+    const listResult = runForgeCommand('scene list --game test-game-1 --json', testDir)
+    assertEqual(listResult.exitCode, 0, 'Scene list should succeed')
+    const scenes = JSON.parse(listResult.stdout)
+    assertEqual(scenes.length, 1, 'Should have 1 scene')
+    assertEqual(scenes[0].id, scene.id, 'Listed scene should match')
+    
+    console.log('  ✓ Listed scenes')
+    
+    // Show scene
+    const showResult = runForgeCommand(`scene show --id ${scene.id} --json`, testDir)
+    assertEqual(showResult.exitCode, 0, 'Scene show should succeed')
+    const details = JSON.parse(showResult.stdout)
+    assertEqual(details.scene.name, scene.name, 'Scene details should match')
+    assertEqual(details.characters.length, 1, 'Should have 1 character')
+    assertEqual(details.presets.length, 1, 'Should have 1 preset')
+    
+    console.log('  ✓ Showed scene details')
+    
+    // Update scene
+    const updateResult = runForgeCommand(
+      `scene update --id ${scene.id} --background "Dark memory corridor" --json`,
+      testDir
+    )
+    assertEqual(updateResult.exitCode, 0, 'Scene update should succeed')
+    const updated = JSON.parse(updateResult.stdout)
+    assertEqual(updated.background, 'Dark memory corridor', 'Background should be updated')
+    
+    console.log('  ✓ Updated scene')
+    
+    // Attach storyboard
+    const attachResult = runForgeCommand(
+      `scene attach-storyboard --id ${scene.id} --name "Battle Animatic" --json`,
+      testDir
+    )
+    assertEqual(attachResult.exitCode, 0, 'Attach storyboard should succeed')
+    const attachOutput = JSON.parse(attachResult.stdout)
+    assert(attachOutput.storyboardId, 'Should return storyboard ID')
+    assert(attachOutput.scene.storyboardId, 'Scene should have storyboardId')
+    
+    console.log(`  ✓ Attached storyboard: ${attachOutput.storyboardId}`)
+    
+    // Verify bidirectional link
+    const storyboardShow = runForgeCommand(
+      `storyboard show --id ${attachOutput.storyboardId} --json`,
+      testDir
+    )
+    assertEqual(storyboardShow.exitCode, 0, 'Storyboard show should succeed')
+    const sbDetails = JSON.parse(storyboardShow.stdout)
+    assertEqual(sbDetails.storyboard.sceneId, scene.id, 'Storyboard should link back to scene')
+    
+    console.log('  ✓ Verified bidirectional scene ↔ storyboard link')
+    
+    // Create scene-linked storyboard via storyboard create --scene
+    const scene2Result = runForgeCommand(
+      'scene create --game test-game-1 --name "Second Scene" --json',
+      testDir
+    )
+    const scene2 = JSON.parse(scene2Result.stdout)
+    
+    const sbCreateResult = runForgeCommand(
+      `storyboard create --game test-game-1 --name "Second Board" --scene ${scene2.id} --json`,
+      testDir
+    )
+    assertEqual(sbCreateResult.exitCode, 0, 'Storyboard create with --scene should succeed')
+    const sb2 = JSON.parse(sbCreateResult.stdout)
+    
+    // Verify link was established
+    const scene2Show = runForgeCommand(`scene show --id ${scene2.id} --json`, testDir)
+    const scene2Details = JSON.parse(scene2Show.stdout)
+    assertEqual(scene2Details.scene.storyboardId, sb2.id, 'Scene should be linked to new storyboard')
+    
+    console.log('  ✓ Created storyboard with --scene flag')
+    
+    // Remove scene without removing storyboard
+    const removeResult = runForgeCommand(
+      `scene remove --id ${scene2.id} --json`,
+      testDir
+    )
+    assertEqual(removeResult.exitCode, 0, 'Scene remove should succeed')
+    const removeOutput = JSON.parse(removeResult.stdout)
+    assertEqual(removeOutput.success, true, 'Should confirm removal')
+    
+    // Verify scene is gone but storyboard remains
+    const scenesAfter = JSON.parse(
+      runForgeCommand('scene list --game test-game-1 --json', testDir).stdout
+    )
+    assertEqual(scenesAfter.length, 1, 'Should have 1 scene left')
+    
+    const sbListAfter = JSON.parse(
+      runForgeCommand('storyboard list --game test-game-1 --json', testDir).stdout
+    )
+    assertEqual(sbListAfter.length, 2, 'Both storyboards should still exist')
+    
+    console.log('  ✓ Removed scene (kept storyboard)')
+    
+    // Remove scene with --remove-storyboard flag
+    const removeWithSbResult = runForgeCommand(
+      `scene remove --id ${scene.id} --remove-storyboard --json`,
+      testDir
+    )
+    assertEqual(removeWithSbResult.exitCode, 0, 'Scene remove with storyboard should succeed')
+    
+    const sbListFinal = JSON.parse(
+      runForgeCommand('storyboard list --game test-game-1 --json', testDir).stdout
+    )
+    assertEqual(sbListFinal.length, 1, 'Should have removed the storyboard too')
+    
+    console.log('  ✓ Removed scene with attached storyboard')
+    
+    console.log('✓ Scene commands test passed')
+  } finally {
+    await cleanupTestDataDir(testDir)
+  }
+}
+
 export async function runIntegrationTests() {
   console.log('Running Forge CLI Integration Tests...\n')
   console.log('These tests run the actual "npm run forge" command\n')
@@ -590,6 +744,7 @@ export async function runIntegrationTests() {
     await testPresetCommands()
     await testExportMigration()
     await testStoryboardCommands()
+    await testSceneCommands()
     
     console.log('\n✓ All integration tests passed!')
     return true

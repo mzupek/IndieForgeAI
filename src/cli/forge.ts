@@ -13,6 +13,7 @@ import * as exportCmd from './commands/export'
 import * as validate from './commands/validate'
 import * as status from './commands/status'
 import { registerStoryboardCommands } from './commands/storyboard'
+import { registerSceneCommands } from './commands/scene'
 
 const program = new Command()
 
@@ -256,5 +257,8 @@ program
 
 // Storyboard commands (storyboard, shot, layer, camera, effect)
 registerStoryboardCommands(program)
+
+// Scene commands (Phase C)
+registerSceneCommands(program)
 
 program.parse()

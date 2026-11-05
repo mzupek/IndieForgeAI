@@ -31,11 +31,11 @@ export function registerStoryboardCommands(program: Command): void {
     .command('list')
     .description('List storyboards for a game')
     .requiredOption('--game <gameId>', 'Game ID')
-    .option('--json', 'Output as JSON')
-    .action(async (options) => {
+    .action(async (options, cmd) => {
       try {
-        const storyboards = await listStoryboards(options.game, getDataDir())
-        if (options.json) {
+        const mergedOpts = { ...cmd.parent!.parent!.opts(), ...options }
+        const storyboards = await listStoryboards(options.game, getDataDir(mergedOpts.dataDir))
+        if (mergedOpts.json) {
           console.log(JSON.stringify(storyboards, null, 2))
         } else {
           if (storyboards.length === 0) {
@@ -62,19 +62,19 @@ export function registerStoryboardCommands(program: Command): void {
     .command('show')
     .description('Show storyboard details')
     .requiredOption('--id <storyboardId>', 'Storyboard ID')
-    .option('--json', 'Output as JSON')
-    .action(async (options) => {
+    .action(async (options, cmd) => {
       try {
-        const storyboard = await getStoryboard(options.id, getDataDir())
+        const mergedOpts = { ...cmd.parent!.parent!.opts(), ...options }
+        const storyboard = await getStoryboard(options.id, getDataDir(mergedOpts.dataDir))
         if (!storyboard) {
           console.error(`Storyboard not found: ${options.id}`)
           process.exit(1)
         }
 
-        const pipeline = await getAssetPipeline(getDataDir())
+        const pipeline = await getAssetPipeline(getDataDir(mergedOpts.dataDir))
         const shots = pipeline.storyboardShots.filter((s) => storyboard.shotIds.includes(s.id))
 
-        if (options.json) {
+        if (mergedOpts.json) {
           console.log(JSON.stringify({ storyboard, shots }, null, 2))
         } else {
           console.log(`Storyboard: ${storyboard.name} (${storyboard.id})`)
@@ -97,23 +97,47 @@ export function registerStoryboardCommands(program: Command): void {
 
   storyboardCmd
     .command('create')
-    .description('Create a new storyboard')
+    .description('Create a new storyboard (optionally linked to a scene)')
     .requiredOption('--game <gameId>', 'Game ID')
     .requiredOption('--name <name>', 'Storyboard name')
     .option('--description <desc>', 'Description')
-    .option('--json', 'Output as JSON')
-    .action(async (options) => {
+    .option('--scene <sceneId>', 'Scene ID to attach this storyboard to')
+    .option('--force', 'Force attach even if scene already has a storyboard')
+    .action(async (options, cmd) => {
       try {
+        const mergedOpts = { ...cmd.parent!.parent!.opts(), ...options }
+        
+        // Check if scene already has storyboard
+        if (options.scene && !options.force) {
+          const { getScene } = await import('../../core/storage/sceneService')
+          const scene = await getScene(options.scene, getDataDir(mergedOpts.dataDir))
+          if (scene?.storyboardId) {
+            console.error(`Error: Scene already has a storyboard (${scene.storyboardId})`)
+            console.error('Use --force to override')
+            process.exit(1)
+          }
+        }
+
         const storyboard = await createStoryboard(options.game, {
           name: options.name,
           description: options.description,
-          dataDirOverride: getDataDir()
+          dataDirOverride: getDataDir(mergedOpts.dataDir)
         })
 
-        if (options.json) {
+        // Link to scene if provided
+        if (options.scene) {
+          const { updateScene } = await import('../../core/storage/sceneService')
+          await updateStoryboard(storyboard.id, { sceneId: options.scene }, getDataDir(mergedOpts.dataDir))
+          await updateScene(options.scene, { storyboardId: storyboard.id }, getDataDir(mergedOpts.dataDir))
+        }
+
+        if (mergedOpts.json) {
           console.log(JSON.stringify(storyboard, null, 2))
         } else {
           console.log(`✓ Created storyboard: ${storyboard.name} (${storyboard.id})`)
+          if (options.scene) {
+            console.log(`  Linked to scene: ${options.scene}`)
+          }
         }
       } catch (err) {
         console.error('Error:', err instanceof Error ? err.message : err)
@@ -125,12 +149,12 @@ export function registerStoryboardCommands(program: Command): void {
     .command('remove')
     .description('Remove a storyboard and all its shots')
     .requiredOption('--id <storyboardId>', 'Storyboard ID')
-    .option('--json', 'Output as JSON')
-    .action(async (options) => {
+    .action(async (options, cmd) => {
       try {
-        await removeStoryboard(options.id, getDataDir())
+        const mergedOpts = { ...cmd.parent!.parent!.opts(), ...options }
+        await removeStoryboard(options.id, getDataDir(mergedOpts.dataDir))
 
-        if (options.json) {
+        if (mergedOpts.json) {
           console.log(JSON.stringify({ removed: true }, null, 2))
         } else {
           console.log(`✓ Removed storyboard: ${options.id}`)
@@ -152,19 +176,19 @@ export function registerStoryboardCommands(program: Command): void {
     .option('--duration <seconds>', 'Duration in seconds', '3.0')
     .option('--aspect <ratio>', 'Aspect ratio (e.g., 16:9, 4:3)', '16:9')
     .option('--notes <text>', 'Notes for engineer')
-    .option('--json', 'Output as JSON')
-    .action(async (options) => {
+    .action(async (options, cmd) => {
       try {
+        const mergedOpts = { ...cmd.parent!.parent!.opts(), ...options }
         const [w, h] = options.aspect.split(':').map(Number)
         const shot = await createShot(options.storyboard, {
           name: options.name,
           durationSec: parseFloat(options.duration),
           aspectRatio: { width: w, height: h },
           notes: options.notes,
-          dataDirOverride: getDataDir()
+          dataDirOverride: getDataDir(mergedOpts.dataDir)
         })
 
-        if (options.json) {
+        if (mergedOpts.json) {
           console.log(JSON.stringify(shot, null, 2))
         } else {
           console.log(`✓ Added shot: ${shot.name} (${shot.id})`)
@@ -182,17 +206,17 @@ export function registerStoryboardCommands(program: Command): void {
     .option('--name <name>', 'New name')
     .option('--duration <seconds>', 'Duration in seconds')
     .option('--notes <text>', 'Notes for engineer')
-    .option('--json', 'Output as JSON')
-    .action(async (options) => {
+    .action(async (options, cmd) => {
       try {
+        const mergedOpts = { ...cmd.parent!.parent!.opts(), ...options }
         const updates: any = {}
         if (options.name) updates.name = options.name
         if (options.duration) updates.durationSec = parseFloat(options.duration)
         if (options.notes) updates.notes = options.notes
 
-        const shot = await updateShot(options.id, updates, getDataDir())
+        const shot = await updateShot(options.id, updates, getDataDir(mergedOpts.dataDir))
 
-        if (options.json) {
+        if (mergedOpts.json) {
           console.log(JSON.stringify(shot, null, 2))
         } else {
           console.log(`✓ Updated shot: ${shot.name} (${shot.id})`)
@@ -208,12 +232,12 @@ export function registerStoryboardCommands(program: Command): void {
     .description('Remove a shot from a storyboard')
     .requiredOption('--storyboard <storyboardId>', 'Storyboard ID')
     .requiredOption('--id <shotId>', 'Shot ID')
-    .option('--json', 'Output as JSON')
-    .action(async (options) => {
+    .action(async (options, cmd) => {
       try {
-        await removeShot(options.storyboard, options.id, getDataDir())
+        const mergedOpts = { ...cmd.parent!.parent!.opts(), ...options }
+        await removeShot(options.storyboard, options.id, getDataDir(mergedOpts.dataDir))
 
-        if (options.json) {
+        if (mergedOpts.json) {
           console.log(JSON.stringify({ removed: true }, null, 2))
         } else {
           console.log(`✓ Removed shot: ${options.id}`)
@@ -243,8 +267,9 @@ export function registerStoryboardCommands(program: Command): void {
     .option('--flip-x', 'Flip horizontally')
     .option('--opacity <value>', 'Opacity (0-1)', '1.0')
     .option('--json', 'Output as JSON')
-    .action(async (options) => {
+    .action(async (options, cmd) => {
       try {
+        const mergedOpts = { ...cmd.parent!.parent!.opts(), ...options }
         const layer: Omit<StoryboardLayer, 'id'> = {
           zOrder: parseInt(options.z),
           characterId: options.character,
@@ -259,9 +284,9 @@ export function registerStoryboardCommands(program: Command): void {
           opacity: parseFloat(options.opacity)
         }
 
-        const added = await addLayer(options.shot, layer, getDataDir())
+        const added = await addLayer(options.shot, layer, getDataDir(mergedOpts.dataDir))
 
-        if (options.json) {
+        if (mergedOpts.json) {
           console.log(JSON.stringify(added, null, 2))
         } else {
           console.log(`✓ Added layer: ${added.id}`)
@@ -286,8 +311,9 @@ export function registerStoryboardCommands(program: Command): void {
     .option('--flip-x <bool>', 'Flip horizontally (true/false)')
     .option('--opacity <value>', 'Opacity (0-1)')
     .option('--json', 'Output as JSON')
-    .action(async (options) => {
+    .action(async (options, cmd) => {
       try {
+        const mergedOpts = { ...cmd.parent!.parent!.opts(), ...options }
         const updates: any = {}
         if (options.z !== undefined) updates.zOrder = parseInt(options.z)
         if (options.pose) updates.poseId = options.pose
@@ -298,9 +324,9 @@ export function registerStoryboardCommands(program: Command): void {
         if (options.flipX !== undefined) updates.flipX = options.flipX === 'true'
         if (options.opacity !== undefined) updates.opacity = parseFloat(options.opacity)
 
-        const layer = await updateLayer(options.shot, options.id, updates, getDataDir())
+        const layer = await updateLayer(options.shot, options.id, updates, getDataDir(mergedOpts.dataDir))
 
-        if (options.json) {
+        if (mergedOpts.json) {
           console.log(JSON.stringify(layer, null, 2))
         } else {
           console.log(`✓ Updated layer: ${layer.id}`)
@@ -317,11 +343,12 @@ export function registerStoryboardCommands(program: Command): void {
     .requiredOption('--shot <shotId>', 'Shot ID')
     .requiredOption('--id <layerId>', 'Layer ID')
     .option('--json', 'Output as JSON')
-    .action(async (options) => {
+    .action(async (options, cmd) => {
       try {
-        await removeLayer(options.shot, options.id, getDataDir())
+        const mergedOpts = { ...cmd.parent!.parent!.opts(), ...options }
+        await removeLayer(options.shot, options.id, getDataDir(mergedOpts.dataDir))
 
-        if (options.json) {
+        if (mergedOpts.json) {
           console.log(JSON.stringify({ removed: true }, null, 2))
         } else {
           console.log(`✓ Removed layer: ${options.id}`)
@@ -349,8 +376,9 @@ export function registerStoryboardCommands(program: Command): void {
     .option('--frame-w <width>', 'Framing rect width')
     .option('--frame-h <height>', 'Framing rect height')
     .option('--json', 'Output as JSON')
-    .action(async (options) => {
+    .action(async (options, cmd) => {
       try {
+        const mergedOpts = { ...cmd.parent!.parent!.opts(), ...options }
         const keyframe: CameraKeyframe = {
           t: parseFloat(options.time),
           target: options.targetLayer
@@ -368,9 +396,9 @@ export function registerStoryboardCommands(program: Command): void {
           }
         }
 
-        await addCameraKeyframe(options.shot, keyframe, getDataDir())
+        await addCameraKeyframe(options.shot, keyframe, getDataDir(mergedOpts.dataDir))
 
-        if (options.json) {
+        if (mergedOpts.json) {
           console.log(JSON.stringify({ added: true, keyframe }, null, 2))
         } else {
           console.log(`✓ Added camera keyframe at t=${keyframe.t}s`)
@@ -387,11 +415,12 @@ export function registerStoryboardCommands(program: Command): void {
     .requiredOption('--shot <shotId>', 'Shot ID')
     .requiredOption('--time <seconds>', 'Time in seconds')
     .option('--json', 'Output as JSON')
-    .action(async (options) => {
+    .action(async (options, cmd) => {
       try {
-        await removeCameraKeyframe(options.shot, parseFloat(options.time), getDataDir())
+        const mergedOpts = { ...cmd.parent!.parent!.opts(), ...options }
+        await removeCameraKeyframe(options.shot, parseFloat(options.time), getDataDir(mergedOpts.dataDir))
 
-        if (options.json) {
+        if (mergedOpts.json) {
           console.log(JSON.stringify({ removed: true }, null, 2))
         } else {
           console.log(`✓ Removed camera keyframe at t=${options.time}s`)
@@ -415,8 +444,9 @@ export function registerStoryboardCommands(program: Command): void {
     .option('--type <effectType>', 'Inline effect type (versus, zoom_punch, shake, flash, freeze)')
     .option('--params <json>', 'Inline params as JSON')
     .option('--json', 'Output as JSON')
-    .action(async (options) => {
+    .action(async (options, cmd) => {
       try {
+        const mergedOpts = { ...cmd.parent!.parent!.opts(), ...options }
         const effect: EffectMarker = {
           t: parseFloat(options.time),
           moment: options.moment,
@@ -425,9 +455,9 @@ export function registerStoryboardCommands(program: Command): void {
           inlineParams: options.params ? JSON.parse(options.params) : undefined
         }
 
-        await addEffectMarker(options.shot, effect, getDataDir())
+        await addEffectMarker(options.shot, effect, getDataDir(mergedOpts.dataDir))
 
-        if (options.json) {
+        if (mergedOpts.json) {
           console.log(JSON.stringify({ added: true, effect }, null, 2))
         } else {
           console.log(`✓ Added effect at t=${effect.t}s`)
@@ -444,11 +474,12 @@ export function registerStoryboardCommands(program: Command): void {
     .requiredOption('--shot <shotId>', 'Shot ID')
     .requiredOption('--time <seconds>', 'Time in seconds')
     .option('--json', 'Output as JSON')
-    .action(async (options) => {
+    .action(async (options, cmd) => {
       try {
-        await removeEffectMarker(options.shot, parseFloat(options.time), getDataDir())
+        const mergedOpts = { ...cmd.parent!.parent!.opts(), ...options }
+        await removeEffectMarker(options.shot, parseFloat(options.time), getDataDir(mergedOpts.dataDir))
 
-        if (options.json) {
+        if (mergedOpts.json) {
           console.log(JSON.stringify({ removed: true }, null, 2))
         } else {
           console.log(`✓ Removed effect at t=${options.time}s`)

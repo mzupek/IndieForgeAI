@@ -50,6 +50,28 @@ cp .env.example .env
 npm run dev
 ```
 
+## CLI Agent Scaffold Path
+
+Engineering agents can scaffold MVP scenes + storyboards via CLI; humans polish assets in UI:
+
+```bash
+# 1. Create scene with cast
+forge scene create --game game-neon-recall --name "Gate Drone Battle" \
+  --description "Player encounters Gate Drone" \
+  --story-text "Warning: Memory fragment detected." \
+  --json > scene.json
+
+SCENE_ID=$(jq -r .id scene.json)
+
+# 2. Attach storyboard
+forge scene attach-storyboard --id $SCENE_ID --name "Battle Animatic" --json
+
+# 3. Add shots, layers, effects (forge storyboard shot create...)
+# Human then imports poses/clips in UI and polishes
+```
+
+See `forge scene --help` and `forge storyboard --help` for full CLI.
+
 ## Workflow
 
 1. **New Project** — pick Ring'Em Up (Godot) or Neon Recall (Unity) template, or blank + engine.

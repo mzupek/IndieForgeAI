@@ -232,7 +232,7 @@ export async function createSceneStoryboard(
     dataDirOverride?: string
   }
 ): Promise<{ scene: Scene; storyboardId: string }> {
-  const pipeline = await getAssetPipeline(input.dataDirOverride)
+  let pipeline = await getAssetPipeline(input.dataDirOverride)
   
   const scene = pipeline.scenes.find((s) => s.id === sceneId)
   if (!scene) {
@@ -249,9 +249,15 @@ export async function createSceneStoryboard(
     }
   )
   
+  // Reload pipeline to get the newly created storyboard
+  pipeline = await getAssetPipeline(input.dataDirOverride)
+  
   // Link storyboard to scene
-  scene.storyboardId = storyboard.id
-  scene.updatedAt = new Date().toISOString()
+  const sceneIndex = pipeline.scenes.findIndex((s) => s.id === sceneId)
+  if (sceneIndex !== -1) {
+    pipeline.scenes[sceneIndex].storyboardId = storyboard.id
+    pipeline.scenes[sceneIndex].updatedAt = new Date().toISOString()
+  }
   
   // Also update storyboard to reference scene
   const storyboardIndex = pipeline.storyboards.findIndex((sb) => sb.id === storyboard.id)
