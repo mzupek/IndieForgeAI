@@ -9,6 +9,7 @@ import * as character from './commands/character'
 import * as pose from './commands/pose'
 import * as clips from './commands/clips'
 import * as preset from './commands/preset'
+import * as exportCmd from './commands/export'
 import * as validate from './commands/validate'
 import * as status from './commands/status'
 
@@ -213,6 +214,25 @@ presetCmd
   .argument('<preset-id>', 'Preset ID')
   .action(async (presetId, options) => {
     await preset.remove(presetId, { ...program.opts(), ...options })
+  })
+
+// Export commands
+const exportCommand = program.command('export').description('Export game assets')
+
+exportCommand
+  .command('schema')
+  .description('Print the export manifest JSON Schema')
+  .action(async (options) => {
+    await exportCmd.schema({ ...program.opts(), ...options })
+  })
+
+exportCommand
+  .argument('<game-id>', 'Game ID to export')
+  .description('Export game assets to target directory')
+  .option('--dry-run', 'Show what would be exported without copying files')
+  .option('--target <path>', 'Override target export directory')
+  .action(async (gameId, options) => {
+    await exportCmd.run(gameId, { ...program.opts(), ...options })
   })
 
 // Validate command

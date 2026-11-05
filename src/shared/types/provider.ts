@@ -85,6 +85,7 @@ export interface IndieForgeAPI {
     delete: (projectId: string) => Promise<{ ok: true }>
     duplicate: (projectId: string, newName?: string) => Promise<IndieForgeProject>
     seedSample: (kind?: 'ring-em-up' | 'neon-recall') => Promise<IndieForgeProject>
+    updateGame: (projectId: string, gameId: string, patch: any) => Promise<IndieForgeProject>
   }
   ai: {
     planProject: (projectId: string) => Promise<AIAssetPlan>
@@ -510,6 +511,11 @@ export interface IndieForgeAPI {
   config: {
     getOpenAIKey: () => Promise<{ configured: boolean }>
     setOpenAIKey: (apiKey: string) => Promise<{ ok: true }>
+  }
+  export: {
+    validate: (gameId: string) => Promise<any>
+    dryRun: (gameId: string, targetDir?: string) => Promise<any>
+    run: (gameId: string, targetDir?: string) => Promise<any>
   }
   pipeline: {
     createCharacter: (projectId: string, input: any) => Promise<any>

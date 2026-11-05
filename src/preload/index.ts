@@ -12,7 +12,9 @@ const api: IndieForgeAPI = {
     duplicate: (projectId, newName) =>
       ipcRenderer.invoke(IPC_CHANNELS.PROJECTS_DUPLICATE, projectId, newName),
     seedSample: (kind?: 'ring-em-up' | 'neon-recall') =>
-      ipcRenderer.invoke(IPC_CHANNELS.PROJECTS_SEED_SAMPLE, kind)
+      ipcRenderer.invoke(IPC_CHANNELS.PROJECTS_SEED_SAMPLE, kind),
+    updateGame: (projectId, gameId, patch) =>
+      ipcRenderer.invoke(IPC_CHANNELS.PROJECTS_UPDATE_GAME, projectId, gameId, patch)
   },
   ai: {
     planProject: (projectId) => ipcRenderer.invoke(IPC_CHANNELS.AI_PLAN_PROJECT, projectId),
@@ -120,6 +122,14 @@ const api: IndieForgeAPI = {
   config: {
     getOpenAIKey: () => ipcRenderer.invoke(IPC_CHANNELS.CONFIG_GET_OPENAI_KEY),
     setOpenAIKey: (apiKey) => ipcRenderer.invoke(IPC_CHANNELS.CONFIG_SET_OPENAI_KEY, apiKey)
+  },
+  export: {
+    validate: (gameId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.EXPORT_VALIDATE, gameId),
+    dryRun: (gameId, targetDir) =>
+      ipcRenderer.invoke(IPC_CHANNELS.EXPORT_DRY_RUN, gameId, targetDir),
+    run: (gameId, targetDir) =>
+      ipcRenderer.invoke(IPC_CHANNELS.EXPORT_RUN, gameId, targetDir)
   },
   pipeline: {
     createCharacter: (projectId, input) =>
