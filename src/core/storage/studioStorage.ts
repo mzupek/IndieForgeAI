@@ -38,6 +38,8 @@ function createEmptyStudioData(): StudioData {
       poses: [],
       clips: [],
       scenePresets: [],
+      storyboards: [],
+      storyboardShots: [],
       exportProfiles: []
     },
     createdAt: now,
@@ -137,7 +139,17 @@ export async function loadStudio(dataDirOverride?: string): Promise<StudioData> 
   return withLock(lockPath, async () => {
     try {
       const data = await readFile(filePath, 'utf-8')
-      return JSON.parse(data) as StudioData
+      const studio = JSON.parse(data) as StudioData
+      
+      // Migrate: ensure storyboard fields exist
+      if (!studio.assetPipeline.storyboards) {
+        studio.assetPipeline.storyboards = []
+      }
+      if (!studio.assetPipeline.storyboardShots) {
+        studio.assetPipeline.storyboardShots = []
+      }
+      
+      return studio
     } catch (err: any) {
       if (err.code === 'ENOENT') {
         // Studio file doesn't exist - migrate from projects or create new

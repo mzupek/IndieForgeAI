@@ -1,0 +1,419 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://adventurelensgames.com/schemas/export-manifest-v2.json",
+  "title": "Adventure Lens Games Export Manifest v2",
+  "description": "Schema for exported game assets from Indie Forge AI asset pipeline with storyboard support",
+  "type": "object",
+  "required": ["schemaVersion", "exportedAt", "game", "characters", "clips", "presets"],
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "description": "Schema version for compatibility checking",
+      "const": 2
+    },
+    "exportedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp when this manifest was exported"
+    },
+    "game": {
+      "type": "object",
+      "required": ["id", "name", "engine"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Game identifier"
+        },
+        "name": {
+          "type": "string",
+          "description": "Human-readable game name"
+        },
+        "engine": {
+          "type": "string",
+          "enum": ["unity", "godot"],
+          "description": "Game engine"
+        }
+      }
+    },
+    "characters": {
+      "type": "array",
+      "description": "Characters with approved poses",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "role", "tags", "poses"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Character identifier"
+          },
+          "name": {
+            "type": "string",
+            "description": "Character name"
+          },
+          "role": {
+            "type": "string",
+            "description": "Character role (protagonist, antagonist, etc.)"
+          },
+          "styleNotes": {
+            "type": "string",
+            "description": "Style notes for the character"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Character tags"
+          },
+          "poses": {
+            "type": "array",
+            "description": "Approved poses for this character",
+            "items": {
+              "type": "object",
+              "required": ["slot", "file", "width", "height", "status"],
+              "properties": {
+                "slot": {
+                  "type": "string",
+                  "enum": ["ready", "success", "hurt", "win", "defeat"],
+                  "description": "Pose slot"
+                },
+                "file": {
+                  "type": "string",
+                  "description": "Relative path to pose image file in export directory"
+                },
+                "width": {
+                  "type": "integer",
+                  "const": 1024,
+                  "description": "Image width (must be 1024 for approved poses)"
+                },
+                "height": {
+                  "type": "integer",
+                  "const": 1024,
+                  "description": "Image height (must be 1024 for approved poses)"
+                },
+                "status": {
+                  "type": "string",
+                  "const": "approved",
+                  "description": "Pose status (only approved poses are exported)"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "clips": {
+      "type": "array",
+      "description": "Clips for cutscenes and moments",
+      "items": {
+        "type": "object",
+        "required": ["id", "moment", "durationSec", "file", "thumbnail", "tags"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Clip identifier"
+          },
+          "moment": {
+            "type": "string",
+            "enum": ["intro", "hit", "finisher", "defeat", "story_beat"],
+            "description": "Clip moment type"
+          },
+          "characterId": {
+            "type": "string",
+            "description": "Associated character ID (if any)"
+          },
+          "durationSec": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Duration in seconds"
+          },
+          "file": {
+            "type": "string",
+            "description": "Relative path to video file in export directory"
+          },
+          "thumbnail": {
+            "type": "string",
+            "description": "Relative path to thumbnail image in export directory"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Clip tags"
+          }
+        }
+      }
+    },
+    "presets": {
+      "type": "array",
+      "description": "Scene and camera presets (reusable effect templates)",
+      "items": {
+        "type": "object",
+        "required": ["id", "type", "params", "tags"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Preset identifier"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["versus", "zoom_punch", "shake", "flash", "freeze"],
+            "description": "Preset type"
+          },
+          "params": {
+            "type": "object",
+            "description": "Preset parameters (schema varies by type)"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Preset tags"
+          }
+        }
+      }
+    },
+    "storyboards": {
+      "type": "array",
+      "description": "Storyboards (scenes with ordered shots and cinematography)",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "shots"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Storyboard identifier"
+          },
+          "name": {
+            "type": "string",
+            "description": "Storyboard name"
+          },
+          "description": {
+            "type": "string",
+            "description": "Storyboard description"
+          },
+          "contactSheet": {
+            "type": "string",
+            "description": "Relative path to contact sheet PNG in export directory"
+          },
+          "shots": {
+            "type": "array",
+            "description": "Ordered shots in this storyboard",
+            "items": {
+              "type": "object",
+              "required": ["id", "name", "durationSec", "aspectRatio", "layers", "cameraTrack", "effectsTrack"],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "Shot identifier"
+                },
+                "name": {
+                  "type": "string",
+                  "description": "Shot name"
+                },
+                "durationSec": {
+                  "type": "number",
+                  "minimum": 0,
+                  "description": "Shot duration in seconds"
+                },
+                "aspectRatio": {
+                  "type": "object",
+                  "required": ["width", "height"],
+                  "properties": {
+                    "width": {
+                      "type": "integer",
+                      "description": "Aspect ratio width"
+                    },
+                    "height": {
+                      "type": "integer",
+                      "description": "Aspect ratio height"
+                    }
+                  }
+                },
+                "backgroundImage": {
+                  "type": "string",
+                  "description": "Relative path to background image"
+                },
+                "backgroundClipId": {
+                  "type": "string",
+                  "description": "Background clip reference"
+                },
+                "layers": {
+                  "type": "array",
+                  "description": "Composited layers on stage",
+                  "items": {
+                    "type": "object",
+                    "required": ["id", "zOrder", "x", "y", "scale", "rotation", "flipX", "opacity"],
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "zOrder": {
+                        "type": "integer",
+                        "description": "Layer depth (higher = closer to camera)"
+                      },
+                      "characterId": {
+                        "type": "string",
+                        "description": "Character reference"
+                      },
+                      "poseId": {
+                        "type": "string",
+                        "description": "Pose reference"
+                      },
+                      "poseFile": {
+                        "type": "string",
+                        "description": "Resolved pose file path"
+                      },
+                      "clipId": {
+                        "type": "string",
+                        "description": "Clip reference"
+                      },
+                      "clipFile": {
+                        "type": "string",
+                        "description": "Resolved clip file path"
+                      },
+                      "imagePath": {
+                        "type": "string",
+                        "description": "Image file path"
+                      },
+                      "x": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1,
+                        "description": "Normalized X position"
+                      },
+                      "y": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1,
+                        "description": "Normalized Y position"
+                      },
+                      "scale": {
+                        "type": "number",
+                        "description": "Scale factor"
+                      },
+                      "rotation": {
+                        "type": "number",
+                        "description": "Rotation in degrees"
+                      },
+                      "flipX": {
+                        "type": "boolean",
+                        "description": "Flip horizontally"
+                      },
+                      "opacity": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1,
+                        "description": "Opacity"
+                      }
+                    }
+                  }
+                },
+                "cameraTrack": {
+                  "type": "array",
+                  "description": "Camera animation keyframes",
+                  "items": {
+                    "type": "object",
+                    "required": ["t", "target", "zoom"],
+                    "properties": {
+                      "t": {
+                        "type": "number",
+                        "minimum": 0,
+                        "description": "Time in seconds"
+                      },
+                      "target": {
+                        "oneOf": [
+                          {
+                            "type": "string",
+                            "description": "Target layer ID"
+                          },
+                          {
+                            "type": "object",
+                            "required": ["x", "y"],
+                            "properties": {
+                              "x": {
+                                "type": "number"
+                              },
+                              "y": {
+                                "type": "number"
+                              }
+                            }
+                          }
+                        ]
+                      },
+                      "zoom": {
+                        "type": "number",
+                        "description": "Zoom level (1.0 = normal)"
+                      },
+                      "framingRect": {
+                        "type": "object",
+                        "required": ["x", "y", "width", "height"],
+                        "properties": {
+                          "x": {
+                            "type": "number"
+                          },
+                          "y": {
+                            "type": "number"
+                          },
+                          "width": {
+                            "type": "number"
+                          },
+                          "height": {
+                            "type": "number"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "effectsTrack": {
+                  "type": "array",
+                  "description": "Effect markers timeline",
+                  "items": {
+                    "type": "object",
+                    "required": ["t"],
+                    "properties": {
+                      "t": {
+                        "type": "number",
+                        "minimum": 0,
+                        "description": "Time in seconds"
+                      },
+                      "moment": {
+                        "type": "string",
+                        "enum": ["intro", "hit", "finisher", "defeat", "story_beat"],
+                        "description": "Optional clip moment"
+                      },
+                      "presetId": {
+                        "type": "string",
+                        "description": "Reference to preset"
+                      },
+                      "inlineType": {
+                        "type": "string",
+                        "enum": ["versus", "zoom_punch", "shake", "flash", "freeze"],
+                        "description": "Inline effect type"
+                      },
+                      "inlineParams": {
+                        "type": "object",
+                        "description": "Inline effect parameters"
+                      }
+                    }
+                  }
+                },
+                "notes": {
+                  "type": "string",
+                  "description": "Engineer notes for this shot"
+                },
+                "thumbnail": {
+                  "type": "string",
+                  "description": "Relative path to shot thumbnail PNG"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

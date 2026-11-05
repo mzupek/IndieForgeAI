@@ -135,6 +135,107 @@ export interface ExportProfile {
 }
 
 /**
+ * Layer in a storyboard shot - can be a character pose, clip, or image
+ */
+export interface StoryboardLayer {
+  id: string
+  /** Order in z-stack (higher = closer to camera) */
+  zOrder: number
+  
+  /** Layer content - one of these must be set */
+  characterId?: string
+  poseId?: string
+  clipId?: string
+  imagePath?: string
+  
+  /** Transform in normalized stage coordinates [0,1] */
+  x: number
+  y: number
+  scale: number
+  rotation: number
+  flipX: boolean
+  opacity: number
+}
+
+/**
+ * Camera keyframe for shot cinematography
+ */
+export interface CameraKeyframe {
+  /** Time in seconds within the shot */
+  t: number
+  /** Target layer ID or explicit point {x, y} */
+  target: string | { x: number; y: number }
+  /** Zoom level (1.0 = normal, 2.0 = 2x zoom) */
+  zoom: number
+  /** Framing rectangle in normalized coordinates */
+  framingRect?: { x: number; y: number; width: number; height: number }
+}
+
+/**
+ * Effect marker for timeline - references preset or inline definition
+ */
+export interface EffectMarker {
+  /** Time in seconds within the shot */
+  t: number
+  /** Optional clip moment this effect is tied to */
+  moment?: ClipMoment
+  /** Reference to existing scene preset ID */
+  presetId?: string
+  /** Or inline effect definition */
+  inlineType?: ScenePresetType
+  inlineParams?: Record<string, unknown>
+}
+
+/**
+ * Shot in a storyboard - fixed aspect ratio stage with layers and timeline
+ */
+export interface StoryboardShot {
+  id: string
+  /** Display name for shot */
+  name: string
+  /** Shot duration in seconds */
+  durationSec: number
+  /** Stage aspect ratio (default 16:9) */
+  aspectRatio: { width: number; height: number }
+  
+  /** Optional background */
+  backgroundImage?: string
+  backgroundClipId?: string
+  
+  /** Layers composited on stage */
+  layers: StoryboardLayer[]
+  
+  /** Camera animation track */
+  cameraTrack: CameraKeyframe[]
+  
+  /** Effects timeline */
+  effectsTrack: EffectMarker[]
+  
+  /** Notes for engineer */
+  notes?: string
+  
+  /** Thumbnail path for preview */
+  thumbnail?: string
+  
+  createdAt: string
+  updatedAt: string
+}
+
+/**
+ * Storyboard (scene) - ordered sequence of shots
+ */
+export interface Storyboard {
+  id: string
+  gameId: string
+  name: string
+  description?: string
+  /** Ordered list of shot IDs */
+  shotIds: string[]
+  createdAt: string
+  updatedAt: string
+}
+
+/**
  * Main project structure for Adventure Lens Games pipeline
  * This extends/replaces the old IndieForgeProject structure
  */
@@ -148,6 +249,8 @@ export interface AssetPipelineProject {
   poses: Pose[]
   clips: Clip[]
   scenePresets: ScenePreset[]
+  storyboards: Storyboard[]
+  storyboardShots: StoryboardShot[]
   exportProfiles: ExportProfile[]
   createdAt: string
   updatedAt: string

@@ -1,9 +1,9 @@
 /**
  * Export manifest schema for Adventure Lens Games
- * Version 1.0
+ * Version 2.0 - adds storyboard support
  */
 
-export const EXPORT_MANIFEST_SCHEMA_VERSION = 1
+export const EXPORT_MANIFEST_SCHEMA_VERSION = 2
 
 export interface ExportManifestPose {
   /** Pose slot (ready, success, hurt, win, defeat) */
@@ -55,6 +55,60 @@ export interface ExportManifestPreset {
   tags: string[]
 }
 
+export interface ExportManifestLayer {
+  id: string
+  zOrder: number
+  characterId?: string
+  poseId?: string
+  poseFile?: string
+  clipId?: string
+  clipFile?: string
+  imagePath?: string
+  x: number
+  y: number
+  scale: number
+  rotation: number
+  flipX: boolean
+  opacity: number
+}
+
+export interface ExportManifestCameraKeyframe {
+  t: number
+  target: string | { x: number; y: number }
+  zoom: number
+  framingRect?: { x: number; y: number; width: number; height: number }
+}
+
+export interface ExportManifestEffectMarker {
+  t: number
+  moment?: 'intro' | 'hit' | 'finisher' | 'defeat' | 'story_beat'
+  presetId?: string
+  inlineType?: 'versus' | 'zoom_punch' | 'shake' | 'flash' | 'freeze'
+  inlineParams?: Record<string, unknown>
+}
+
+export interface ExportManifestShot {
+  id: string
+  name: string
+  durationSec: number
+  aspectRatio: { width: number; height: number }
+  backgroundImage?: string
+  backgroundClipId?: string
+  layers: ExportManifestLayer[]
+  cameraTrack: ExportManifestCameraKeyframe[]
+  effectsTrack: ExportManifestEffectMarker[]
+  notes?: string
+  thumbnail?: string
+}
+
+export interface ExportManifestStoryboard {
+  id: string
+  name: string
+  description?: string
+  contactSheet?: string
+  shots: ExportManifestShot[]
+}
+
 export interface ExportManifest {
   /** Schema version for compatibility checking */
   schemaVersion: number
@@ -72,6 +126,8 @@ export interface ExportManifest {
   clips: ExportManifestClip[]
   /** Scene and camera presets */
   presets: ExportManifestPreset[]
+  /** Storyboards (v2+) */
+  storyboards?: ExportManifestStoryboard[]
 }
 
 /**
