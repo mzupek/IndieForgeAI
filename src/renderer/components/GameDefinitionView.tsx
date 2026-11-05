@@ -18,7 +18,7 @@ import { useProjectStore } from '../state/indieForgeStore'
 
 export function GameDefinitionView() {
   const { gameId } = useParams<{ gameId: string }>()
-  const { assetPipeline } = useProjectStore()
+  const { activeProject, setActiveProject } = useProjectStore()
   
   const [definition, setDefinition] = useState<GameDefinition | null>(null)
   const [loading, setLoading] = useState(true)
@@ -29,11 +29,11 @@ export function GameDefinitionView() {
   
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   
-  const game = assetPipeline.games.find(g => g.id === gameId)
-  const characters = assetPipeline.characters.filter(c => c.gameId === gameId)
-  const poses = assetPipeline.poses
-  const clips = assetPipeline.clips
-  const presets = assetPipeline.scenePresets
+  const game = activeProject?.assetPipeline?.games.find(g => g.id === gameId)
+  const characters = activeProject?.assetPipeline?.characters.filter(c => c.gameId === gameId) ?? []
+  const poses = activeProject?.assetPipeline?.poses ?? []
+  const clips = activeProject?.assetPipeline?.clips ?? []
+  const presets = activeProject?.assetPipeline?.scenePresets ?? []
 
   useEffect(() => {
     loadDefinition()
@@ -189,6 +189,22 @@ export function GameDefinitionView() {
     a.click()
     document.body.removeChild(a)
     URL.revokeObjectURL(url)
+  }
+
+  if (!activeProject) {
+    return (
+      <div style={{ padding: '2rem', textAlign: 'center' }}>
+        <p style={{ color: 'var(--muted)' }}>Loading project...</p>
+      </div>
+    )
+  }
+
+  if (!activeProject.assetPipeline) {
+    return (
+      <div style={{ padding: '2rem', textAlign: 'center' }}>
+        <p style={{ color: 'var(--error)' }}>Asset pipeline not found</p>
+      </div>
+    )
   }
 
   if (loading) {
