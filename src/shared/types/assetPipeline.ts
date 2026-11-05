@@ -15,6 +15,108 @@ export type ClipMoment = 'intro' | 'hit' | 'finisher' | 'defeat' | 'story_beat'
 
 export type ScenePresetType = 'versus' | 'zoom_punch' | 'shake' | 'flash' | 'freeze'
 
+export type GameDefinitionStage = 'MVP' | 'Beta' | 'Testing' | 'Release'
+
+export type MVPBoardItemType = 'asset' | 'system' | 'content' | 'tuning'
+
+export type MVPBoardStatus = 'needed' | 'partial' | 'done' | 'cut'
+
+/**
+ * MVP board item for tracking game definition progress
+ */
+export interface MVPBoardItem {
+  id: string
+  item: string
+  type: MVPBoardItemType
+  status: MVPBoardStatus
+  notes?: string
+}
+
+/**
+ * Theme slot for UI/visual customization
+ */
+export interface ThemeSlot {
+  id: string
+  name: string
+  /** Reference to asset (character, clip, preset) or path */
+  reference?: string
+  description?: string
+}
+
+/**
+ * Interaction stub for gameplay mechanics
+ */
+export interface InteractionStub {
+  id: string
+  name: string
+  description: string
+  /** Tagged references to related assets */
+  assetRefs: string[]
+}
+
+/**
+ * Tuning profile for game balance/difficulty
+ */
+export interface TuningProfile {
+  id: string
+  name: string
+  params: Record<string, number | string | boolean>
+  notes?: string
+}
+
+/**
+ * Resource tag for linking Game Definition to studio assets
+ * Format: [[type:id|label]] e.g. [[character:abc-123|Hero]] or [[pose:xyz-789|Hero Ready]]
+ * Parseable by agents; human-friendly in markdown
+ */
+export interface ResourceTag {
+  type: 'game' | 'character' | 'pose' | 'clip' | 'preset'
+  id: string
+  label: string
+}
+
+/**
+ * Game Definition - living design document for a game
+ * Phase B: structured app-owned data with markdown face
+ */
+export interface GameDefinition {
+  id: string
+  gameId: string
+  stage: GameDefinitionStage
+  /** Core design pillars */
+  pillars: string[]
+  /** Puzzle/gameplay core description */
+  puzzleCore: string
+  /** Story synopsis */
+  storySynopsis: string
+  /** Linked cast (character IDs) */
+  cast: string[]
+  /** Linked assets (pose, clip, preset IDs) */
+  linkedAssets: {
+    poses: string[]
+    clips: string[]
+    presets: string[]
+  }
+  /** Theme/UI slots (splash, home, HUD, buttons, fonts, palette) */
+  themeSlots: ThemeSlot[]
+  /** Interaction stubs */
+  interactions: InteractionStub[]
+  /** Tuning profiles */
+  tuningProfiles: TuningProfile[]
+  /** Keep/cut/invent notes */
+  keepCutInvent: {
+    keep: string[]
+    cut: string[]
+    invent: string[]
+  }
+  /** MVP board rows */
+  mvpBoard: MVPBoardItem[]
+  /** Markdown source (human-editable bible) */
+  markdownSource: string
+  createdAt: string
+  updatedAt: string
+}
+
 /**
  * Character reference sheet metadata for style consistency
  */
@@ -252,6 +354,7 @@ export interface AssetPipelineProject {
   storyboards: Storyboard[]
   storyboardShots: StoryboardShot[]
   exportProfiles: ExportProfile[]
+  gameDefinitions: GameDefinition[]
   createdAt: string
   updatedAt: string
 }

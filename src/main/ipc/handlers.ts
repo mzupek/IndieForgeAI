@@ -96,6 +96,14 @@ import {
   removeEffectMarker
 } from '../../core/storage/storyboardService'
 import {
+  listGameDefinitions,
+  getGameDefinition,
+  getGameDefinitionByGameId,
+  createGameDefinition,
+  updateGameDefinition,
+  deleteGameDefinition
+} from '../../core/storage/gameDefinitionService'
+import {
   applyDesignerAssetPrompt,
   applyDesignerStyleGuide,
   clearDesignerChat,
@@ -852,6 +860,40 @@ export function registerIpcHandlers(): void {
     async (_e, projectId: string, shotId: string, t: number) => {
       await removeEffectMarker(shotId, t)
       return await loadProject(projectId)
+    }
+  )
+
+  // Game Definition handlers
+  ipcMain.handle(
+    IPC_CHANNELS.GAME_DEFINITION_LIST,
+    async () => listGameDefinitions()
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.GAME_DEFINITION_GET,
+    async (_e, id: string) => getGameDefinition(id)
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.GAME_DEFINITION_GET_BY_GAME,
+    async (_e, gameId: string) => getGameDefinitionByGameId(gameId)
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.GAME_DEFINITION_CREATE,
+    async (_e, gameId: string) => createGameDefinition(gameId)
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.GAME_DEFINITION_UPDATE,
+    async (_e, id: string, updates: any) => updateGameDefinition(id, updates)
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.GAME_DEFINITION_DELETE,
+    async (_e, id: string) => {
+      await deleteGameDefinition(id)
+      return { ok: true as const }
     }
   )
 }

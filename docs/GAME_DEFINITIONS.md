@@ -1,0 +1,126 @@
+# Game Definitions — Phase B
+
+## Overview
+
+Game Definitions are structured, living design documents that capture the complete current state of a game in development. They combine:
+
+- **Structured data** (JSON in the studio store) — source of truth owned by the app
+- **Markdown face** — human-editable, shareable bible format
+- **Resource tags** — link to real studio assets (Characters, Poses, Clips, Presets)
+
+## Data Model
+
+A Game Definition includes:
+
+### Core Fields
+- **Stage**: MVP | Beta | Testing | Release
+- **Pillars**: Core design principles (list of strings)
+- **Puzzle Core**: Gameplay loop and mechanics description
+- **Story Synopsis**: Brief story overview
+- **Cast**: Linked character IDs from the studio
+
+### Linked Assets
+- **Poses**: IDs of character poses used in the game
+- **Clips**: IDs of video clips (intro, hit, finisher, defeat, story beats)
+- **Presets**: IDs of scene/camera presets (versus, zoom_punch, shake, flash, freeze)
+
+### Design Sections
+- **Theme Slots**: UI/visual customization slots (splash, home, HUD, buttons, fonts, palette)
+- **Interactions**: Gameplay mechanic stubs with linked asset references
+- **Tuning Profiles**: Balance/difficulty parameters with notes
+
+### Keep/Cut/Invent
+- **Keep**: Features/patterns to preserve
+- **Cut**: Items deferred from MVP scope
+- **Invent**: New items needed as MVP glue (not greenfield content)
+
+### MVP Board
+Tracking table with columns:
+- **Item**: Description
+- **Type**: asset | system | content | tuning
+- **Status**: needed | partial | done | cut
+- **Notes**: Optional context
+
+### Markdown Source
+The human-facing bible, editable in the Markdown Editor tab. Can include resource tags.
+
+## Resource Tag Syntax
+
+Game Definitions support a durable, agent-parseable tag format for linking to studio assets:
+
+```
+[[type:id|label]]
+```
+
+### Examples
+
+- Character: `[[character:974cc4f0-643d-4b5a-a6c5-b7f5e0bb2762|Hero]]`
+- Pose: `[[pose:abc-123-xyz|Hero Ready]]`
+- Clip: `[[clip:ef59207f-d87d-463b-abcb-7276bb7f9599|Gate Drone Hit]]`
+- Preset: `[[preset:zoom-punch-001|Zoom Punch 1.15x]]`
+
+### Supported Types
+
+- `character` — Studio character entity
+- `pose` — Character pose (ready, success, hurt, win, defeat)
+- `clip` — Video clip (intro, hit, finisher, defeat, story_beat)
+- `preset` — Scene/camera preset (versus, zoom_punch, shake, flash, freeze)
+- `game` — Reference to another game
+
+### How It Works
+
+1. **Structured Tab**: Select cast members and linked assets via checkboxes/forms
+2. **Markdown Editor**: 
+   - Write or edit the markdown bible
+   - Use the sidebar to insert resource tags with one click
+   - Tags resolve to real studio IDs, not free-text paths
+3. **Export**: Download the markdown for sharing or version control
+
+### Agent Integration
+
+The resource tag format is designed for engineering agents to:
+- Parse the markdown and resolve asset IDs
+- Fetch actual asset metadata (file paths, dimensions, status)
+- Generate export manifests or Unity/Godot import scripts
+- Re-read updated definitions after human edits
+
+## Seeding
+
+### Neon Recall
+The first Game Definition for `game-neon-recall` auto-seeds from `seed/neon_recall_current_state.md` when first accessed. This captures the verified state from Matt's Unity project as of 2026-11-04.
+
+### Other Games
+Start with an empty template. Fill in pillars, puzzle core, story synopsis, cast, and MVP board manually or import from existing docs.
+
+## Persistence
+
+Game Definitions live in `studio.json` under `assetPipeline.gameDefinitions[]`. Each definition:
+- Has a unique `id` (UUID)
+- Links to a `gameId` (e.g., `game-neon-recall`)
+- Stores structured fields + full markdown source
+- Tracks `createdAt` and `updatedAt` timestamps
+
+## UI Access
+
+Navigate to **Game Definitions** in the studio sidebar, then select a game. Two tabs:
+
+1. **Structured**: Forms and tables for all structured fields
+2. **Markdown Editor**: Full markdown bible with resource tag insertion sidebar
+
+Save structured changes auto-saves. Markdown must be explicitly saved via the "Save Markdown" button.
+
+## CLI Export (Future)
+
+Phase E will add `forge definition export <game-id>` for full package exports. Phase B provides manual markdown export only.
+
+## Phase Dependencies
+
+- **Phase A** (Characters/Poses/Clips/Presets): Definitions link to these assets
+- **Phase 4.5** (Storyboards): Parallel; definitions do not depend on storyboards
+- **Phase C** (Scenes spine): Not implemented; definitions reference scenes conceptually
+- **Phase D** (MVP board as separate product): Definitions include an embedded MVP board
+- **Phase E** (Full CLI package): Builds on Phase B definitions
+
+## No Cold Lock
+
+Per Matt's approval on 2026-11-04, Phase A keep/cut/invent is **not locked cold**. Definitions are editable, and humans can revise scope/content as needed. Engineering agents re-read definitions on each run.

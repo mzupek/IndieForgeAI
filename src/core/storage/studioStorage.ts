@@ -40,7 +40,8 @@ function createEmptyStudioData(): StudioData {
       scenePresets: [],
       storyboards: [],
       storyboardShots: [],
-      exportProfiles: []
+      exportProfiles: [],
+      gameDefinitions: []
     },
     createdAt: now,
     updatedAt: now
@@ -147,6 +148,11 @@ export async function loadStudio(dataDirOverride?: string): Promise<StudioData> 
       }
       if (!studio.assetPipeline.storyboardShots) {
         studio.assetPipeline.storyboardShots = []
+      }
+      
+      // Migrate: ensure gameDefinitions field exists
+      if (!studio.assetPipeline.gameDefinitions) {
+        studio.assetPipeline.gameDefinitions = []
       }
       
       return studio
