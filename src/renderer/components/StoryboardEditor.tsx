@@ -36,12 +36,14 @@ function CameraInspector({
   keyframe,
   layers,
   onSave,
-  onClose
+  onClose,
+  onDelete
 }: {
   keyframe: CameraKeyframe
   layers: StoryboardLayer[]
   onSave: (updated: CameraKeyframe) => void
   onClose: () => void
+  onDelete: () => void
 }) {
   const [zoom, setZoom] = useState(keyframe.zoom)
   const [targetType, setTargetType] = useState<'layer' | 'point'>(
@@ -154,9 +156,17 @@ function CameraInspector({
           Save
         </button>
         <button type="button" onClick={onClose} style={{ flex: 1 }} className="secondary">
-          Cancel
+          Close
         </button>
       </div>
+      
+      <button 
+        type="button" 
+        onClick={onDelete} 
+        style={{ width: '100%', marginTop: '0.5rem', background: 'var(--danger)', color: 'white' }}
+      >
+        Delete Keyframe
+      </button>
     </div>
   )
 }
@@ -336,6 +346,7 @@ export function StoryboardEditor() {
   const [editingEffect, setEditingEffect] = useState(false)
   const [selectedCameraIndex, setSelectedCameraIndex] = useState<number | null>(null)
   const [editingCamera, setEditingCamera] = useState(false)
+  const [cameraManuallySelected, setCameraManuallySelected] = useState(false)
   
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const animationFrameRef = useRef<number | null>(null)
@@ -679,18 +690,32 @@ export function StoryboardEditor() {
 
     ctx.restore()
 
-    // Draw framing rect overlay in camera mode
+    // Draw framing rect overlay in camera mode (persistent - Matt's fix)
     if (mode === 'camera' && playbackState === 'stopped') {
       const cam = getInterpolatedCamera(playbackTime)
-      if (cam?.framingRect) {
+      if (cam) {
+        // Use explicit framingRect if present, otherwise calculate from zoom
+        let rect = cam.framingRect
+        if (!rect) {
+          // Calculate viewport from zoom: higher zoom = smaller viewport
+          const viewWidth = 1 / cam.zoom
+          const viewHeight = 1 / cam.zoom
+          rect = {
+            x: cam.target.x - viewWidth / 2,
+            y: cam.target.y - viewHeight / 2,
+            width: viewWidth,
+            height: viewHeight
+          }
+        }
+        
         ctx.strokeStyle = '#00AAFF'
         ctx.lineWidth = 3
         ctx.setLineDash([5, 5])
         ctx.strokeRect(
-          cam.framingRect.x * canvas.width,
-          cam.framingRect.y * canvas.height,
-          cam.framingRect.width * canvas.width,
-          cam.framingRect.height * canvas.height
+          rect.x * canvas.width,
+          rect.y * canvas.height,
+          rect.width * canvas.width,
+          rect.height * canvas.height
         )
         ctx.setLineDash([])
       }
@@ -840,7 +865,7 @@ export function StoryboardEditor() {
   }
 
   const handlePointerUp = async (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (dragMode === 'framingRect' && dragStart) {
+    if (dragMode === 'framingRect' && dragStart && selectedShot) {
       const canvas = canvasRef.current!
       const rect = canvas.getBoundingClientRect()
       const x = (e.clientX - rect.left) / rect.width
@@ -853,15 +878,23 @@ export function StoryboardEditor() {
       
       if (width > 0.05 && height > 0.05) {
         const keyframe: CameraKeyframe = {
-          t: playbackTime,
+          t: selectedCameraIndex !== null && selectedShot.cameraTrack[selectedCameraIndex]
+            ? selectedShot.cameraTrack[selectedCameraIndex].t
+            : playbackTime,
           target: { x: rectX + width / 2, y: rectY + height / 2 },
           zoom: 1.0 / Math.max(width, height),
           framingRect: { x: rectX, y: rectY, width, height }
         }
         
-        await window.indieForge.pipeline.addCameraKeyframe(projectId!, selectedShotId!, keyframe)
-        const updated = await window.indieForge.projects.open(projectId!)
-        setActiveProject(updated)
+        // Update existing keyframe if one is selected, otherwise add new
+        if (selectedCameraIndex !== null && 
+            Math.abs(selectedShot.cameraTrack[selectedCameraIndex].t - keyframe.t) < 0.01) {
+          await handleUpdateCameraKeyframe(selectedCameraIndex, keyframe)
+        } else {
+          await window.indieForge.pipeline.addCameraKeyframe(projectId!, selectedShotId!, keyframe)
+          const updated = await window.indieForge.projects.open(projectId!)
+          setActiveProject(updated)
+        }
       }
     }
 
@@ -1246,9 +1279,9 @@ export function StoryboardEditor() {
     }
   }, [])
   
-  // Auto-select camera keyframe when playhead is on one (Phase C.3b)
+  // Auto-select camera keyframe when playhead is on one (Phase C.3b - fixed for Matt)
   useEffect(() => {
-    if (!selectedShot || playbackState === 'playing') return
+    if (!selectedShot || playbackState === 'playing' || cameraManuallySelected) return
     
     const onKeyframe = selectedShot.cameraTrack.findIndex(kf => 
       Math.abs(kf.t - playbackTime) < 0.05
@@ -1257,16 +1290,32 @@ export function StoryboardEditor() {
     if (onKeyframe >= 0 && !editingCamera) {
       setSelectedCameraIndex(onKeyframe)
       setEditingCamera(true)
-    } else if (onKeyframe < 0 && editingCamera && selectedCameraIndex !== null) {
-      // Playhead moved away from keyframe
-      const stillOnSelected = selectedShot.cameraTrack[selectedCameraIndex] && 
-        Math.abs(selectedShot.cameraTrack[selectedCameraIndex].t - playbackTime) < 0.05
-      if (!stillOnSelected) {
-        setEditingCamera(false)
-        setSelectedCameraIndex(null)
+      setCameraManuallySelected(false)
+    } else if (onKeyframe < 0 && editingCamera && !cameraManuallySelected) {
+      // Only auto-close if not manually selected
+      setEditingCamera(false)
+      setSelectedCameraIndex(null)
+    }
+  }, [playbackTime, selectedShot, playbackState, editingCamera, cameraManuallySelected])
+  
+  // Keyboard support for deleting selected camera keyframe
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.key === 'Delete' || e.key === 'Backspace') && 
+          selectedCameraIndex !== null && 
+          editingCamera &&
+          mode === 'camera') {
+        // Don't delete if user is typing in an input
+        if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
+        
+        e.preventDefault()
+        handleDeleteCameraKeyframe(selectedCameraIndex)
       }
     }
-  }, [playbackTime, selectedShot, playbackState, editingCamera, selectedCameraIndex])
+    
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [selectedCameraIndex, editingCamera, mode])
 
   if (!activeProject || !gameId) {
     return <p style={{ color: 'var(--muted)' }}>Loading...</p>
@@ -1577,7 +1626,7 @@ export function StoryboardEditor() {
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
         {selectedShot ? (
           <>
-            <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem', alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: '1rem', marginBottom: '0.5rem', alignItems: 'center' }}>
               <h3 style={{ margin: 0 }}>{selectedShot.name}</h3>
               <div style={{ display: 'flex', gap: '0.5rem' }}>
                 <button
@@ -1610,6 +1659,19 @@ export function StoryboardEditor() {
                 </button>
               </div>
             </div>
+            
+            {mode === 'camera' && (
+              <div style={{ 
+                marginBottom: '0.5rem', 
+                padding: '0.5rem', 
+                background: 'rgba(0, 170, 255, 0.1)', 
+                borderLeft: '3px solid #00AAFF',
+                fontSize: '0.85rem',
+                color: 'var(--text-secondary)'
+              }}>
+                💡 <strong>Camera</strong> zooms the whole shot. <strong>Layer Scale</strong> (right panel) sizes each character individually.
+              </div>
+            )}
 
             <div style={{ flex: 1, background: 'var(--bg-secondary)', borderRadius: '8px', padding: '1rem' }}>
               <canvas
@@ -1694,6 +1756,7 @@ export function StoryboardEditor() {
                       onClick={() => {
                         setSelectedCameraIndex(idx)
                         setEditingCamera(true)
+                        setCameraManuallySelected(true)
                       }}
                       onContextMenu={(e) => {
                         e.preventDefault()
@@ -1812,7 +1875,9 @@ export function StoryboardEditor() {
                   onClose={() => {
                     setEditingCamera(false)
                     setSelectedCameraIndex(null)
+                    setCameraManuallySelected(false)
                   }}
+                  onDelete={() => handleDeleteCameraKeyframe(selectedCameraIndex)}
                 />
               )}
             </div>
