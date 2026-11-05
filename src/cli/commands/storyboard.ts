@@ -20,6 +20,8 @@ import {
 import type { CameraKeyframe, EffectMarker, StoryboardLayer } from '@shared/types/assetPipeline'
 import { getAssetPipeline } from '../../core/storage/studioStorage'
 import { getDataDir } from '../../core/storage/dataDir'
+import { copyFile, mkdir } from 'fs/promises'
+import { join, basename } from 'path'
 
 export function registerStoryboardCommands(program: Command): void {
   const storyboardCmd = program
@@ -216,7 +218,23 @@ export function registerStoryboardCommands(program: Command): void {
         if (options.name) updates.name = options.name
         if (options.duration) updates.durationSec = parseFloat(options.duration)
         if (options.notes) updates.notes = options.notes
-        if (options.backgroundImage !== undefined) updates.backgroundImage = options.backgroundImage
+        
+        // Handle background image: copy into studio storage
+        if (options.backgroundImage !== undefined) {
+          const sourcePath = options.backgroundImage
+          const backgroundsDir = join(getDataDir(mergedOpts.dataDir), 'backgrounds')
+          await mkdir(backgroundsDir, { recursive: true })
+          
+          const filename = `${Date.now()}-${basename(sourcePath)}`
+          const destPath = join(backgroundsDir, filename)
+          
+          await copyFile(sourcePath, destPath)
+          
+          // Store relative path that protocol handler can serve
+          updates.backgroundImage = `backgrounds/${filename}`
+          console.log(`Copied background to studio: ${destPath}`)
+        }
+        
         if (options.backgroundClip !== undefined) updates.backgroundClipId = options.backgroundClip
         if (options.clearBackground) {
           updates.backgroundImage = undefined

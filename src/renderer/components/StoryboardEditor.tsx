@@ -1578,9 +1578,8 @@ export function StoryboardEditor() {
                       properties: ['openFile']
                     })
                     if (paths && paths.length > 0) {
-                      const forgePath = `forge-file://${projectId!}/${Date.now()}-${paths[0].split('/').pop()}`
-                      await window.indieForge.files.copy(paths[0], forgePath)
-                      await window.indieForge.pipeline.updateShot(projectId!, selectedShotId!, { backgroundImage: forgePath })
+                      // Pass absolute path; updateShot will copy it into studio storage
+                      await window.indieForge.pipeline.updateShot(projectId!, selectedShotId!, { backgroundImage: paths[0] })
                       const updated = await window.indieForge.projects.open(projectId!)
                       setActiveProject(updated)
                     }

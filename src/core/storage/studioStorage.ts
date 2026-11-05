@@ -163,6 +163,55 @@ export async function loadStudio(dataDirOverride?: string): Promise<StudioData> 
         await saveStudioInternal(studio, dataDirOverride)
       }
       
+      // Migrate: copy absolute background image paths into studio storage
+      let needsSave = false
+      if (studio.assetPipeline.storyboardShots) {
+        const { existsSync } = await import('fs')
+        const { copyFile, mkdir: mkdirAsync } = await import('fs/promises')
+        const { join: joinPath, basename: getBasename } = await import('path')
+        
+        for (const shot of studio.assetPipeline.storyboardShots) {
+          if (shot.backgroundImage && typeof shot.backgroundImage === 'string') {
+            const bgPath = shot.backgroundImage
+            
+            // Check if it's an absolute path (not a relative studio path)
+            if (bgPath.startsWith('/') || /^[A-Za-z]:/.test(bgPath)) {
+              try {
+                // Only migrate if file exists
+                if (existsSync(bgPath)) {
+                  const dataDir = getDataDir(dataDirOverride)
+                  const backgroundsDir = joinPath(dataDir, 'backgrounds')
+                  await mkdirAsync(backgroundsDir, { recursive: true })
+                  
+                  const filename = `${Date.now()}-${getBasename(bgPath)}`
+                  const destPath = joinPath(backgroundsDir, filename)
+                  
+                  await copyFile(bgPath, destPath)
+                  console.log(`[Migration] Copied background from ${bgPath} to ${destPath}`)
+                  
+                  // Update to relative path: backgrounds/filename
+                  shot.backgroundImage = `backgrounds/${filename}`
+                  needsSave = true
+                } else {
+                  console.warn(`[Migration] Background image not found, clearing: ${bgPath}`)
+                  shot.backgroundImage = undefined
+                  needsSave = true
+                }
+              } catch (err) {
+                console.error(`[Migration] Failed to copy background image ${bgPath}:`, err)
+                // Clear the path if copy fails
+                shot.backgroundImage = undefined
+                needsSave = true
+              }
+            }
+          }
+        }
+      }
+      
+      if (needsSave) {
+        await saveStudioInternal(studio, dataDirOverride)
+      }
+      
       return studio
     } catch (err: any) {
       if (err.code === 'ENOENT') {

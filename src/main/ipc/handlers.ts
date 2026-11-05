@@ -806,6 +806,38 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.SHOT_UPDATE,
     async (_e, projectId: string, shotId: string, updates: any) => {
+      // Handle background image copy if it's an absolute path outside dataDir
+      if (updates.backgroundImage && typeof updates.backgroundImage === 'string') {
+        const bgPath = updates.backgroundImage
+        
+        // If it's an absolute path (not already a relative studio path), copy it
+        if (bgPath.startsWith('/') || /^[A-Za-z]:/.test(bgPath)) {
+          try {
+            const { getDataDir } = await import('../../core/storage/dataDir')
+            const dataDir = getDataDir()
+            const backgroundsDir = join(dataDir, 'backgrounds')
+            
+            await mkdir(backgroundsDir, { recursive: true })
+            
+            const filename = `${Date.now()}-${basename(bgPath)}`
+            const destPath = join(backgroundsDir, filename)
+            
+            if (existsSync(bgPath)) {
+              await copyFile(bgPath, destPath)
+              console.log(`Copied background from ${bgPath} to ${destPath}`)
+              
+              // Store as relative path within dataDir: backgrounds/filename
+              updates.backgroundImage = `backgrounds/${filename}`
+            } else {
+              console.warn(`Background image not found: ${bgPath}, storing path as-is`)
+            }
+          } catch (err) {
+            console.error('Failed to copy background image:', err)
+            // Continue with original path if copy fails
+          }
+        }
+      }
+      
       await updateShot(shotId, updates)
       return await loadProject(projectId)
     }
