@@ -70,6 +70,16 @@ export function ExportView() {
   const handleUpdateTarget = async () => {
     if (!selectedGameId || !projectId) return
     
+    // Validate path is absolute
+    const expandedPath = targetPath.startsWith('~') 
+      ? targetPath 
+      : targetPath
+    
+    if (!expandedPath.startsWith('/') && !expandedPath.startsWith('~')) {
+      alert('Export target must be an absolute path (starting with / or ~)')
+      return
+    }
+    
     try {
       await window.indieForge.projects.updateGame(projectId, selectedGameId, {
         exportTarget: targetPath

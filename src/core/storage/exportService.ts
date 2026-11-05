@@ -1,6 +1,6 @@
 import { createHash } from 'crypto'
 import { copyFile, mkdir, readFile, stat, writeFile } from 'fs/promises'
-import { basename, join, relative } from 'path'
+import { basename, join, relative, isAbsolute, resolve } from 'path'
 import { existsSync } from 'fs'
 import type {
   ExportManifest,
@@ -11,30 +11,93 @@ import type {
   ExportManifestPreset
 } from '@shared/types/exportManifest'
 import { EXPORT_MANIFEST_SCHEMA_VERSION } from '@shared/types/exportManifest'
-import { getAssetPipeline } from './studioStorage'
+import { getAssetPipeline, saveStudio } from './studioStorage'
 import type { Game } from '@shared/types/assetPipeline'
 import { homedir } from 'os'
 
 /**
+ * Expand ~ to home directory
+ */
+function expandHome(path: string): string {
+  if (path.startsWith('~/') || path === '~') {
+    return join(homedir(), path.slice(1))
+  }
+  return path
+}
+
+/**
+ * Get default export target for a game based on ID and engine
+ */
+function getDefaultExportTarget(game: Game): string {
+  const homeDir = homedir()
+  
+  // Default paths for known games
+  if (game.id === 'game-neon-recall') {
+    return join(homeDir, 'Documents/Agencies/1182/Neon_Recall')
+  } else if (game.id === 'game-ring-em-up' || game.id === 'game-ringemup') {
+    return join(homeDir, 'Documents/Agencies/1182/RingEmUp')
+  }
+  
+  // Fallback: Documents/<GameName>
+  return join(homeDir, 'Documents', game.name.replace(/[^a-zA-Z0-9]/g, ''))
+}
+
+/**
+ * Ensure game has a valid absolute export target, migrating if needed
+ */
+async function ensureExportTarget(gameId: string, dataDirOverride?: string): Promise<string> {
+  const { updateAssetPipeline } = require('./studioStorage')
+  const pipeline = await getAssetPipeline(dataDirOverride)
+  const game = pipeline.games.find(g => g.id === gameId)
+  
+  if (!game) {
+    throw new Error(`Game not found: ${gameId}`)
+  }
+  
+  let target = game.exportTarget
+  
+  // If no exportTarget or it's relative, set default and save
+  if (!target || !isAbsolute(expandHome(target))) {
+    target = getDefaultExportTarget(game)
+    
+    // Update the game in the pipeline
+    game.exportTarget = target
+    game.updatedAt = new Date().toISOString()
+    
+    // Save the migration
+    await updateAssetPipeline(pipeline, dataDirOverride)
+  }
+  
+  return expandHome(target)
+}
+
+/**
  * Get the export target directory for a game
  */
-function getExportTargetDir(game: Game): string {
-  // Use exportTarget if set, otherwise fall back to exportRoot
-  const target = game.exportTarget || game.exportRoot
+async function getExportTargetDir(gameId: string, dataDirOverride?: string): Promise<string> {
+  const target = await ensureExportTarget(gameId, dataDirOverride)
   
-  // Expand ~ to home directory
-  const expandedTarget = target.startsWith('~') 
-    ? join(homedir(), target.slice(1))
-    : target
+  // Validate it's absolute
+  if (!isAbsolute(target)) {
+    throw new Error(`Export target must be an absolute path: ${target}`)
+  }
+  
+  // Get game to determine engine
+  const pipeline = await getAssetPipeline(dataDirOverride)
+  const game = pipeline.games.find(g => g.id === gameId)
+  
+  if (!game) {
+    throw new Error(`Game not found: ${gameId}`)
+  }
   
   // Add engine-specific subfolder
   if (game.engine === 'unity') {
-    return join(expandedTarget, 'Assets', 'IndieForge', game.id)
+    return join(target, 'Assets', 'IndieForge', gameId)
   } else if (game.engine === 'godot') {
-    return join(expandedTarget, 'assets', 'indie_forge', game.id)
+    return join(target, 'assets', 'indie_forge', gameId)
   }
   
-  return expandedTarget
+  return target
 }
 
 /**
@@ -218,7 +281,15 @@ export async function dryRunExport(
     throw new Error(`Game not found: ${gameId}`)
   }
   
-  const targetDir = targetDirOverride || getExportTargetDir(game)
+  // Validate targetDirOverride if provided
+  if (targetDirOverride) {
+    const expandedTarget = expandHome(targetDirOverride)
+    if (!isAbsolute(expandedTarget)) {
+      throw new Error(`Export target must be an absolute path: ${targetDirOverride}`)
+    }
+  }
+  
+  const targetDir = targetDirOverride ? expandHome(targetDirOverride) : await getExportTargetDir(gameId, dataDirOverride)
   const filesToCopy: ExportDryRun['filesToCopy'] = []
   let totalSize = 0
   
@@ -315,7 +386,15 @@ export async function exportGame(
     throw new Error(`Export validation failed: ${validation.errors.join(', ')}`)
   }
   
-  const targetDir = targetDirOverride || getExportTargetDir(game)
+  // Validate targetDirOverride if provided
+  if (targetDirOverride) {
+    const expandedTarget = expandHome(targetDirOverride)
+    if (!isAbsolute(expandedTarget)) {
+      throw new Error(`Export target must be an absolute path: ${targetDirOverride}`)
+    }
+  }
+  
+  const targetDir = targetDirOverride ? expandHome(targetDirOverride) : await getExportTargetDir(gameId, dataDirOverride)
   
   // Create target directories
   await mkdir(join(targetDir, 'poses'), { recursive: true })
