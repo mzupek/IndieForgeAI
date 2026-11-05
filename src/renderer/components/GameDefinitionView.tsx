@@ -1,5 +1,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import type {
   GameDefinition,
   GameDefinitionStage,
@@ -23,9 +25,9 @@ export function GameDefinitionView() {
   const [definition, setDefinition] = useState<GameDefinition | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [activeTab, setActiveTab] = useState<'structured' | 'markdown'>('structured')
+  const [activeTab, setActiveTab] = useState<'preview' | 'editor'>('preview')
   const [markdownSource, setMarkdownSource] = useState('')
-  const [selectedCast, setSelectedCast] = useState<string[]>([])
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
   
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   
@@ -40,11 +42,11 @@ export function GameDefinitionView() {
   }, [gameId])
 
   useEffect(() => {
-    if (definition) {
-      setMarkdownSource(definition.markdownSource || generateMarkdown())
-      setSelectedCast(definition.cast || [])
+    if (definition && definition.markdownSource) {
+      setMarkdownSource(definition.markdownSource)
+      setHasUnsavedChanges(false)
     }
-  }, [definition])
+  }, [definition?.id])
 
   async function loadDefinition() {
     if (!gameId) return
@@ -65,97 +67,36 @@ export function GameDefinitionView() {
     }
   }
 
-  async function saveDefinition(updates: Partial<GameDefinition>) {
+  async function saveMarkdown() {
     if (!definition) return
     
     setSaving(true)
     try {
       const updated = await window.indieForge.gameDefinitions.update(
         definition.id,
-        updates
+        { markdownSource }
       )
       setDefinition(updated)
+      setHasUnsavedChanges(false)
     } catch (err) {
       console.error('Failed to save game definition:', err)
+      alert('Failed to save: ' + (err instanceof Error ? err.message : String(err)))
     } finally {
       setSaving(false)
     }
   }
 
-  function generateMarkdown(): string {
-    if (!definition) return ''
-    
-    const sections: string[] = []
-    
-    sections.push(`# ${game?.name || gameId} — Game Definition`)
-    sections.push(`\n**Status:** Stage ${definition.stage}\n`)
-    
-    if (definition.pillars.length > 0) {
-      sections.push('## Core Pillars\n')
-      definition.pillars.forEach(pillar => {
-        sections.push(`- ${pillar}`)
-      })
-      sections.push('')
-    }
-    
-    if (definition.puzzleCore) {
-      sections.push('## Puzzle Core\n')
-      sections.push(definition.puzzleCore)
-      sections.push('')
-    }
-    
-    if (definition.storySynopsis) {
-      sections.push('## Story Synopsis\n')
-      sections.push(definition.storySynopsis)
-      sections.push('')
-    }
-    
-    if (definition.cast.length > 0) {
-      sections.push('## Cast\n')
-      definition.cast.forEach(characterId => {
-        const char = characters.find(c => c.id === characterId)
-        if (char) {
-          sections.push(`- [[character:${characterId}|${char.name}]] (${char.role})`)
-        }
-      })
-      sections.push('')
-    }
-    
-    if (definition.keepCutInvent.keep.length > 0) {
-      sections.push('## KEEP\n')
-      definition.keepCutInvent.keep.forEach(item => {
-        sections.push(`- ${item}`)
-      })
-      sections.push('')
-    }
-    
-    if (definition.keepCutInvent.cut.length > 0) {
-      sections.push('## CUT / defer from MVP\n')
-      definition.keepCutInvent.cut.forEach(item => {
-        sections.push(`- ${item}`)
-      })
-      sections.push('')
-    }
-    
-    if (definition.keepCutInvent.invent.length > 0) {
-      sections.push('## INVENT only as MVP glue\n')
-      definition.keepCutInvent.invent.forEach(item => {
-        sections.push(`- ${item}`)
-      })
-      sections.push('')
-    }
-    
-    if (definition.mvpBoard.length > 0) {
-      sections.push('## MVP Board\n')
-      sections.push('| Item | Type | Status | Notes |')
-      sections.push('|------|------|--------|-------|')
-      definition.mvpBoard.forEach(item => {
-        sections.push(`| ${item.item} | ${item.type} | ${item.status} | ${item.notes || ''} |`)
-      })
-      sections.push('')
-    }
-    
-    return sections.join('\n')
+  function handleMarkdownChange(value: string) {
+    setMarkdownSource(value)
+    setHasUnsavedChanges(true)
+  }
+
+  function renderResourceTag(content: string): string {
+    // Replace [[type:id|label]] with styled version
+    return content.replace(
+      /\[\[(\w+):([a-zA-Z0-9-]+)\|([^\]]+)\]\]/g,
+      '<span style="background: var(--bg-secondary); padding: 0.125rem 0.375rem; border-radius: 3px; border: 1px solid var(--border); font-family: monospace; font-size: 0.85rem;">$3</span>'
+    )
   }
 
   function insertResourceTag(type: 'character' | 'pose' | 'clip' | 'preset', id: string, label: string) {
@@ -168,7 +109,7 @@ export function GameDefinitionView() {
     const text = markdownSource
     const newText = text.substring(0, start) + tag + text.substring(end)
     
-    setMarkdownSource(newText)
+    handleMarkdownChange(newText)
     
     setTimeout(() => {
       textarea.focus()
@@ -189,6 +130,15 @@ export function GameDefinitionView() {
     a.click()
     document.body.removeChild(a)
     URL.revokeObjectURL(url)
+  }
+
+  // Custom renderer for resource tags
+  function preprocessMarkdown(content: string): string {
+    // Replace [[type:id|label]] with just the label wrapped in a code tag for styling
+    return content.replace(
+      /\[\[(\w+):([a-zA-Z0-9-]+)\|([^\]]+)\]\]/g,
+      '`$3`'
+    )
   }
 
   if (!activeProject) {
@@ -235,361 +185,49 @@ export function GameDefinitionView() {
       <div style={{ marginBottom: '1.5rem', display: 'flex', gap: '0.5rem', borderBottom: '1px solid var(--border)' }}>
         <button
           type="button"
-          className={activeTab === 'structured' ? 'primary' : 'secondary'}
-          onClick={() => setActiveTab('structured')}
+          className={activeTab === 'preview' ? 'primary' : 'secondary'}
+          onClick={() => setActiveTab('preview')}
           style={{ 
             borderRadius: '4px 4px 0 0',
-            borderBottom: activeTab === 'structured' ? '2px solid var(--primary)' : 'none'
+            borderBottom: activeTab === 'preview' ? '2px solid var(--primary)' : 'none'
           }}
         >
-          Structured
+          Preview
         </button>
         <button
           type="button"
-          className={activeTab === 'markdown' ? 'primary' : 'secondary'}
-          onClick={() => setActiveTab('markdown')}
+          className={activeTab === 'editor' ? 'primary' : 'secondary'}
+          onClick={() => setActiveTab('editor')}
           style={{ 
             borderRadius: '4px 4px 0 0',
-            borderBottom: activeTab === 'markdown' ? '2px solid var(--primary)' : 'none'
+            borderBottom: activeTab === 'editor' ? '2px solid var(--primary)' : 'none'
           }}
         >
           Markdown Editor
         </button>
       </div>
 
-      {activeTab === 'structured' && (
-        <div>
-          <section style={{ marginBottom: '2rem' }}>
-            <h2>Basic Info</h2>
-            <div style={{ display: 'grid', gap: '1rem', gridTemplateColumns: '200px 1fr' }}>
-              <label>
-                <strong>Stage:</strong>
-              </label>
-              <select
-                value={definition.stage}
-                onChange={(e) => saveDefinition({ stage: e.target.value as GameDefinitionStage })}
-                style={{ maxWidth: '200px' }}
-              >
-                <option value="MVP">MVP</option>
-                <option value="Beta">Beta</option>
-                <option value="Testing">Testing</option>
-                <option value="Release">Release</option>
-              </select>
-            </div>
-          </section>
-
-          <section style={{ marginBottom: '2rem' }}>
-            <h2>Core Pillars</h2>
-            {definition.pillars.map((pillar, idx) => (
-              <div key={idx} style={{ marginBottom: '0.5rem', display: 'flex', gap: '0.5rem' }}>
-                <input
-                  type="text"
-                  value={pillar}
-                  onChange={(e) => {
-                    const newPillars = [...definition.pillars]
-                    newPillars[idx] = e.target.value
-                    saveDefinition({ pillars: newPillars })
-                  }}
-                  style={{ flex: 1 }}
-                />
-                <button
-                  type="button"
-                  className="secondary"
-                  onClick={() => {
-                    const newPillars = definition.pillars.filter((_, i) => i !== idx)
-                    saveDefinition({ pillars: newPillars })
-                  }}
-                >
-                  Remove
-                </button>
-              </div>
-            ))}
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => {
-                saveDefinition({ pillars: [...definition.pillars, ''] })
-              }}
-            >
-              + Add Pillar
-            </button>
-          </section>
-
-          <section style={{ marginBottom: '2rem' }}>
-            <h2>Puzzle Core</h2>
-            <textarea
-              value={definition.puzzleCore}
-              onChange={(e) => saveDefinition({ puzzleCore: e.target.value })}
-              placeholder="Describe the core gameplay loop and mechanics..."
-              rows={6}
-              style={{ width: '100%' }}
-            />
-          </section>
-
-          <section style={{ marginBottom: '2rem' }}>
-            <h2>Story Synopsis</h2>
-            <textarea
-              value={definition.storySynopsis}
-              onChange={(e) => saveDefinition({ storySynopsis: e.target.value })}
-              placeholder="Brief story overview..."
-              rows={6}
-              style={{ width: '100%' }}
-            />
-          </section>
-
-          <section style={{ marginBottom: '2rem' }}>
-            <h2>Cast</h2>
-            <div style={{ marginBottom: '1rem' }}>
-              {characters.map(char => (
-                <label key={char.id} style={{ display: 'block', marginBottom: '0.5rem' }}>
-                  <input
-                    type="checkbox"
-                    checked={selectedCast.includes(char.id)}
-                    onChange={(e) => {
-                      const newCast = e.target.checked
-                        ? [...selectedCast, char.id]
-                        : selectedCast.filter(id => id !== char.id)
-                      setSelectedCast(newCast)
-                      saveDefinition({ cast: newCast })
-                    }}
-                  />
-                  {' '}{char.name} ({char.role})
-                </label>
-              ))}
-            </div>
-          </section>
-
-          <section style={{ marginBottom: '2rem' }}>
-            <h2>Keep / Cut / Invent</h2>
-            
-            <h3>KEEP</h3>
-            {definition.keepCutInvent.keep.map((item, idx) => (
-              <div key={idx} style={{ marginBottom: '0.5rem', display: 'flex', gap: '0.5rem' }}>
-                <input
-                  type="text"
-                  value={item}
-                  onChange={(e) => {
-                    const newKeep = [...definition.keepCutInvent.keep]
-                    newKeep[idx] = e.target.value
-                    saveDefinition({ keepCutInvent: { ...definition.keepCutInvent, keep: newKeep } })
-                  }}
-                  style={{ flex: 1 }}
-                />
-                <button
-                  type="button"
-                  className="secondary"
-                  onClick={() => {
-                    const newKeep = definition.keepCutInvent.keep.filter((_, i) => i !== idx)
-                    saveDefinition({ keepCutInvent: { ...definition.keepCutInvent, keep: newKeep } })
-                  }}
-                >
-                  Remove
-                </button>
-              </div>
-            ))}
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => {
-                saveDefinition({ 
-                  keepCutInvent: { 
-                    ...definition.keepCutInvent, 
-                    keep: [...definition.keepCutInvent.keep, ''] 
-                  } 
-                })
-              }}
-            >
-              + Add Keep Item
-            </button>
-
-            <h3 style={{ marginTop: '1rem' }}>CUT / defer from MVP</h3>
-            {definition.keepCutInvent.cut.map((item, idx) => (
-              <div key={idx} style={{ marginBottom: '0.5rem', display: 'flex', gap: '0.5rem' }}>
-                <input
-                  type="text"
-                  value={item}
-                  onChange={(e) => {
-                    const newCut = [...definition.keepCutInvent.cut]
-                    newCut[idx] = e.target.value
-                    saveDefinition({ keepCutInvent: { ...definition.keepCutInvent, cut: newCut } })
-                  }}
-                  style={{ flex: 1 }}
-                />
-                <button
-                  type="button"
-                  className="secondary"
-                  onClick={() => {
-                    const newCut = definition.keepCutInvent.cut.filter((_, i) => i !== idx)
-                    saveDefinition({ keepCutInvent: { ...definition.keepCutInvent, cut: newCut } })
-                  }}
-                >
-                  Remove
-                </button>
-              </div>
-            ))}
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => {
-                saveDefinition({ 
-                  keepCutInvent: { 
-                    ...definition.keepCutInvent, 
-                    cut: [...definition.keepCutInvent.cut, ''] 
-                  } 
-                })
-              }}
-            >
-              + Add Cut Item
-            </button>
-
-            <h3 style={{ marginTop: '1rem' }}>INVENT only as MVP glue</h3>
-            {definition.keepCutInvent.invent.map((item, idx) => (
-              <div key={idx} style={{ marginBottom: '0.5rem', display: 'flex', gap: '0.5rem' }}>
-                <input
-                  type="text"
-                  value={item}
-                  onChange={(e) => {
-                    const newInvent = [...definition.keepCutInvent.invent]
-                    newInvent[idx] = e.target.value
-                    saveDefinition({ keepCutInvent: { ...definition.keepCutInvent, invent: newInvent } })
-                  }}
-                  style={{ flex: 1 }}
-                />
-                <button
-                  type="button"
-                  className="secondary"
-                  onClick={() => {
-                    const newInvent = definition.keepCutInvent.invent.filter((_, i) => i !== idx)
-                    saveDefinition({ keepCutInvent: { ...definition.keepCutInvent, invent: newInvent } })
-                  }}
-                >
-                  Remove
-                </button>
-              </div>
-            ))}
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => {
-                saveDefinition({ 
-                  keepCutInvent: { 
-                    ...definition.keepCutInvent, 
-                    invent: [...definition.keepCutInvent.invent, ''] 
-                  } 
-                })
-              }}
-            >
-              + Add Invent Item
-            </button>
-          </section>
-
-          <section style={{ marginBottom: '2rem' }}>
-            <h2>MVP Board</h2>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr>
-                  <th style={{ textAlign: 'left', padding: '0.5rem', borderBottom: '1px solid var(--border)' }}>Item</th>
-                  <th style={{ textAlign: 'left', padding: '0.5rem', borderBottom: '1px solid var(--border)' }}>Type</th>
-                  <th style={{ textAlign: 'left', padding: '0.5rem', borderBottom: '1px solid var(--border)' }}>Status</th>
-                  <th style={{ textAlign: 'left', padding: '0.5rem', borderBottom: '1px solid var(--border)' }}>Notes</th>
-                  <th style={{ textAlign: 'left', padding: '0.5rem', borderBottom: '1px solid var(--border)' }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {definition.mvpBoard.map((item, idx) => (
-                  <tr key={item.id}>
-                    <td style={{ padding: '0.5rem', borderBottom: '1px solid var(--border)' }}>
-                      <input
-                        type="text"
-                        value={item.item}
-                        onChange={(e) => {
-                          const newBoard = [...definition.mvpBoard]
-                          newBoard[idx] = { ...item, item: e.target.value }
-                          saveDefinition({ mvpBoard: newBoard })
-                        }}
-                        style={{ width: '100%' }}
-                      />
-                    </td>
-                    <td style={{ padding: '0.5rem', borderBottom: '1px solid var(--border)' }}>
-                      <select
-                        value={item.type}
-                        onChange={(e) => {
-                          const newBoard = [...definition.mvpBoard]
-                          newBoard[idx] = { ...item, type: e.target.value as MVPBoardItemType }
-                          saveDefinition({ mvpBoard: newBoard })
-                        }}
-                      >
-                        <option value="asset">asset</option>
-                        <option value="system">system</option>
-                        <option value="content">content</option>
-                        <option value="tuning">tuning</option>
-                      </select>
-                    </td>
-                    <td style={{ padding: '0.5rem', borderBottom: '1px solid var(--border)' }}>
-                      <select
-                        value={item.status}
-                        onChange={(e) => {
-                          const newBoard = [...definition.mvpBoard]
-                          newBoard[idx] = { ...item, status: e.target.value as MVPBoardStatus }
-                          saveDefinition({ mvpBoard: newBoard })
-                        }}
-                      >
-                        <option value="needed">needed</option>
-                        <option value="partial">partial</option>
-                        <option value="done">done</option>
-                        <option value="cut">cut</option>
-                      </select>
-                    </td>
-                    <td style={{ padding: '0.5rem', borderBottom: '1px solid var(--border)' }}>
-                      <input
-                        type="text"
-                        value={item.notes || ''}
-                        onChange={(e) => {
-                          const newBoard = [...definition.mvpBoard]
-                          newBoard[idx] = { ...item, notes: e.target.value }
-                          saveDefinition({ mvpBoard: newBoard })
-                        }}
-                        style={{ width: '100%' }}
-                      />
-                    </td>
-                    <td style={{ padding: '0.5rem', borderBottom: '1px solid var(--border)' }}>
-                      <button
-                        type="button"
-                        className="secondary"
-                        onClick={() => {
-                          const newBoard = definition.mvpBoard.filter((_, i) => i !== idx)
-                          saveDefinition({ mvpBoard: newBoard })
-                        }}
-                      >
-                        Remove
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => {
-                const newItem: MVPBoardItem = {
-                  id: `mvp-${Date.now()}`,
-                  item: '',
-                  type: 'asset',
-                  status: 'needed',
-                  notes: ''
-                }
-                saveDefinition({ mvpBoard: [...definition.mvpBoard, newItem] })
-              }}
-              style={{ marginTop: '0.5rem' }}
-            >
-              + Add MVP Board Item
-            </button>
-          </section>
+      {activeTab === 'preview' && (
+        <div style={{ 
+          padding: '2rem', 
+          background: 'var(--bg-secondary)', 
+          borderRadius: '8px',
+          border: '1px solid var(--border)',
+          maxWidth: '900px',
+          margin: '0 auto'
+        }}>
+          <div className="markdown-preview" style={{
+            lineHeight: '1.6',
+            color: 'var(--fg)'
+          }}>
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {preprocessMarkdown(markdownSource || '_(No content yet — switch to Markdown Editor to add text)_')}
+            </ReactMarkdown>
+          </div>
         </div>
       )}
 
-      {activeTab === 'markdown' && (
+      {activeTab === 'editor' && (
         <div>
           <div style={{ marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div>
@@ -599,20 +237,18 @@ export function GameDefinitionView() {
               <p style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>
                 Examples: <code>[[character:abc-123|Hero]]</code> <code>[[pose:xyz-789|Hero Ready]]</code>
               </p>
+              {hasUnsavedChanges && (
+                <p style={{ color: 'var(--warning)', fontSize: '0.85rem', marginTop: '0.5rem' }}>
+                  ⚠ Unsaved changes
+                </p>
+              )}
             </div>
             <div style={{ display: 'flex', gap: '0.5rem' }}>
               <button
                 type="button"
-                className="secondary"
-                onClick={() => setMarkdownSource(generateMarkdown())}
-              >
-                Regenerate from Structured
-              </button>
-              <button
-                type="button"
                 className="primary"
-                onClick={() => saveDefinition({ markdownSource })}
-                disabled={saving}
+                onClick={saveMarkdown}
+                disabled={saving || !hasUnsavedChanges}
               >
                 {saving ? 'Saving...' : 'Save Markdown'}
               </button>
@@ -631,7 +267,7 @@ export function GameDefinitionView() {
               <textarea
                 ref={textareaRef}
                 value={markdownSource}
-                onChange={(e) => setMarkdownSource(e.target.value)}
+                onChange={(e) => handleMarkdownChange(e.target.value)}
                 placeholder="Write your game definition markdown here..."
                 rows={30}
                 style={{ 
@@ -674,7 +310,7 @@ export function GameDefinitionView() {
 
               <details open style={{ marginTop: '1rem' }}>
                 <summary style={{ cursor: 'pointer', fontWeight: 'bold', marginBottom: '0.5rem' }}>Poses</summary>
-                {poses.filter(p => selectedCast.includes(p.characterId)).map(pose => {
+                {poses.map(pose => {
                   const char = characters.find(c => c.id === pose.characterId)
                   return (
                     <button
@@ -698,7 +334,7 @@ export function GameDefinitionView() {
 
               <details open style={{ marginTop: '1rem' }}>
                 <summary style={{ cursor: 'pointer', fontWeight: 'bold', marginBottom: '0.5rem' }}>Clips</summary>
-                {clips.filter(c => c.characterId && selectedCast.includes(c.characterId)).map(clip => {
+                {clips.filter(c => c.characterId).map(clip => {
                   const char = characters.find(c => c.id === clip.characterId)
                   return (
                     <button
