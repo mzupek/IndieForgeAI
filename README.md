@@ -64,13 +64,32 @@ forge scene create --game game-neon-recall --name "Gate Drone Battle" \
 SCENE_ID=$(jq -r .id scene.json)
 
 # 2. Attach storyboard
-forge scene attach-storyboard --id $SCENE_ID --name "Battle Animatic" --json
+forge scene attach-storyboard --id $SCENE_ID --name "Battle Animatic" --json > board.json
+BOARD_ID=$(jq -r .storyboardId board.json)
 
-# 3. Add shots, layers, effects (forge storyboard shot create...)
+# 3. Add shots with layers, camera, effects
+SHOT_ID=$(forge shot add --storyboard $BOARD_ID --name "Establish" --duration 2.5 --json | jq -r .id)
+
+# Add pose layer (character + pose)
+forge layer add --shot $SHOT_ID --z 1 --character char-drone-001 --pose pose-ready-001 \
+  --x 0.5 --y 0.4 --scale 1.0
+
+# Add camera keyframe (framing example)
+forge camera add --shot $SHOT_ID --time 0.0 --target char-drone-001 --zoom 1.5
+
+# Add effect at hit moment
+forge effect add --shot $SHOT_ID --time 1.2 --moment hit --preset shake-impact-001
+
 # Human then imports poses/clips in UI and polishes
 ```
 
-See `forge scene --help` and `forge storyboard --help` for full CLI.
+### Quick Reference
+- **game/games** - Both `forge game list` and `forge games list` work
+- **Moments** - `intro`, `hit`, `finisher`, `defeat`, `miss`, `story_beat`
+- **Layers** - Use `--pose` for character poses, `--clip` for animations, `--image` for statics
+- **Camera** - Target layers by ID or explicit `{x, y}` point; zoom 1.0 = normal, 2.0 = 2x
+
+See `forge scene --help`, `forge storyboard --help`, `forge shot --help` for full CLI.
 
 ## Workflow
 

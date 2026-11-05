@@ -11,7 +11,7 @@ export type PoseStatus = 'draft' | 'polished' | 'approved'
 
 export type PoseSource = 'import' | 'ai'
 
-export type ClipMoment = 'intro' | 'hit' | 'finisher' | 'defeat' | 'story_beat'
+export type ClipMoment = 'intro' | 'hit' | 'finisher' | 'defeat' | 'miss' | 'story_beat'
 
 export type ScenePresetType = 'versus' | 'zoom_punch' | 'shake' | 'flash' | 'freeze'
 

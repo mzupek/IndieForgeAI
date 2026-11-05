@@ -129,6 +129,26 @@ async function testGamesListCommand() {
   }
 }
 
+async function testGameAliasCommand() {
+  console.log('Testing: game alias (forge game list works)')
+  const testDir = await setupTestDataDir()
+  
+  try {
+    // Test that 'game' (singular) works as alias for 'games'
+    const result = runForgeCommand('game list --json', testDir)
+    
+    assertEqual(result.exitCode, 0, 'game list should exit with code 0')
+    
+    const games = JSON.parse(result.stdout)
+    assert(Array.isArray(games), 'Should return an array')
+    assertEqual(games.length, 2, 'Should have 2 games')
+    
+    console.log('✓ Game alias command test passed')
+  } finally {
+    await cleanupTestDataDir(testDir)
+  }
+}
+
 async function testStatusCommand() {
   console.log('Testing: npm run forge -- status --json')
   const testDir = await setupTestDataDir()
@@ -538,10 +558,17 @@ async function testHelpCommand() {
 }
 
 async function testStoryboardCommands() {
-  console.log('Testing: storyboard create, shot add, layer add')
+  console.log('Testing: storyboard create, shot add, layer add, effects with miss moment')
   const testDir = await setupTestDataDir()
   
   try {
+    // Create character and pose for layer test
+    const charResult = runForgeCommand(
+      'character create --game test-game-1 --name "Gate Drone" --role "enemy" --json',
+      testDir
+    )
+    const character = JSON.parse(charResult.stdout)
+    
     // Create storyboard
     const createResult = runForgeCommand(
       'storyboard create --game test-game-1 --name "Gate Drone Battle" --description "Opening cutscene" --json',
@@ -564,6 +591,30 @@ async function testStoryboardCommands() {
       testDir
     )
     assertEqual(shotResult.exitCode, 0, 'Add shot should succeed')
+    const shot = JSON.parse(shotResult.stdout)
+    
+    // Add pose layer (test --pose flag)
+    const layerResult = runForgeCommand(
+      `layer add --shot ${shot.id} --z 1 --character ${character.id} --pose pose-ready --x 0.5 --y 0.4 --json`,
+      testDir
+    )
+    assertEqual(layerResult.exitCode, 0, 'Add pose layer should succeed')
+    const layer = JSON.parse(layerResult.stdout)
+    assertEqual(layer.characterId, character.id, 'Layer should have character ID')
+    assertEqual(layer.poseId, 'pose-ready', 'Layer should have pose ID')
+    
+    console.log('  ✓ Pose layer added successfully')
+    
+    // Add effect with miss moment
+    const effectResult = runForgeCommand(
+      `effect add --shot ${shot.id} --time 1.5 --moment miss --type shake --params '{"intensity": 15}' --json`,
+      testDir
+    )
+    assertEqual(effectResult.exitCode, 0, 'Add effect with miss moment should succeed')
+    const effect = JSON.parse(effectResult.stdout)
+    assertEqual(effect.effect.moment, 'miss', 'Effect should have miss moment')
+    
+    console.log('  ✓ Effect with miss moment added successfully')
     
     // Show storyboard
     const showResult = runForgeCommand(`storyboard show --id ${storyboard.id} --json`, testDir)
@@ -736,6 +787,7 @@ export async function runIntegrationTests() {
   try {
     await testHelpCommand()
     await testGamesListCommand()
+    await testGameAliasCommand()
     await testStatusCommand()
     await testCharacterCommands()
     await testValidateCommand()

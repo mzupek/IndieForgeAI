@@ -24,8 +24,8 @@ program
   .option('--data-dir <path>', 'Override data directory (also: FORGE_DATA_DIR env var)')
   .option('--json', 'Output in JSON format')
 
-// Games commands
-const gamesCmd = program.command('games').description('Manage games')
+// Games commands (games or game - both work)
+const gamesCmd = program.command('games').alias('game').description('Manage games')
 gamesCmd
   .command('list')
   .description('List all games across all projects')
@@ -126,7 +126,7 @@ clipCmd
   .description('Import clip(s) - auto-maps moment by filename')
   .argument('<files...>', 'Video files (mp4/webm)')
   .requiredOption('--game <id>', 'Game ID')
-  .option('--moment <moment>', 'Clip moment (intro|hit|finisher|defeat|story_beat)')
+  .option('--moment <moment>', 'Clip moment (intro|hit|finisher|defeat|miss|story_beat)')
   .option('--character <id>', 'Character ID')
   .option('--tags <tags>', 'Comma-separated tags')
   .action(async (files, options) => {
