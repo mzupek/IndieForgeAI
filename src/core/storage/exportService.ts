@@ -12,8 +12,9 @@ import type {
   ExportManifestStoryboard
 } from '@shared/types/exportManifest'
 import { EXPORT_MANIFEST_SCHEMA_VERSION } from '@shared/types/exportManifest'
-import { getAssetPipeline, saveStudio } from './studioStorage'
+import { getAssetPipeline, saveStudio, updateAssetPipeline } from './studioStorage'
 import type { Game } from '@shared/types/assetPipeline'
+import { generateStoryboardThumbnails } from '../export/storyboardThumbnails'
 import { homedir } from 'os'
 
 /**
@@ -47,7 +48,6 @@ function getDefaultExportTarget(game: Game): string {
  * Ensure game has a valid absolute export target, migrating if needed
  */
 async function ensureExportTarget(gameId: string, dataDirOverride?: string): Promise<string> {
-  const { updateAssetPipeline } = require('./studioStorage')
   const pipeline = await getAssetPipeline(dataDirOverride)
   const game = pipeline.games.find(g => g.id === gameId)
   
@@ -506,7 +506,6 @@ export async function exportGame(
   }
   
   // Generate storyboard thumbnails
-  const { generateStoryboardThumbnails } = require('../export/storyboardThumbnails')
   await generateStoryboardThumbnails(pipeline, gameId, targetDir)
   
   // Generate and write manifest

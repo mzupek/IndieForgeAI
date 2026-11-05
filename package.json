@@ -12,7 +12,8 @@
     "build:cli": "node scripts/build-cli.js",
     "forge": "node out/cli/forge.js",
     "preview": "electron-vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:smoke": "node scripts/smoke-test-main.js"
   },
   "dependencies": {
     "@types/fluent-ffmpeg": "^2.1.28",

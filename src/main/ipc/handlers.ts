@@ -81,6 +81,21 @@ import {
   exportGame
 } from '../../core/storage/exportService'
 import {
+  createStoryboard,
+  updateStoryboard,
+  removeStoryboard,
+  createShot,
+  updateShot,
+  removeShot,
+  addLayer,
+  updateLayer,
+  removeLayer,
+  addCameraKeyframe,
+  removeCameraKeyframe,
+  addEffectMarker,
+  removeEffectMarker
+} from '../../core/storage/storyboardService'
+import {
   applyDesignerAssetPrompt,
   applyDesignerStyleGuide,
   clearDesignerChat,
@@ -732,22 +747,6 @@ export function registerIpcHandlers(): void {
   )
 
   // Storyboard handlers
-  const {
-    createStoryboard,
-    updateStoryboard,
-    removeStoryboard,
-    createShot,
-    updateShot,
-    removeShot,
-    addLayer,
-    updateLayer,
-    removeLayer,
-    addCameraKeyframe,
-    removeCameraKeyframe,
-    addEffectMarker,
-    removeEffectMarker
-  } = require('../core/storage/storyboardService')
-
   ipcMain.handle(
     IPC_CHANNELS.STORYBOARD_CREATE,
     async (_e, projectId: string, gameId: string, input: any) => {
