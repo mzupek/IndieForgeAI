@@ -1065,17 +1065,16 @@ export function StoryboardEditor() {
         const updated = [...selectedShot.cameraTrack]
         updated[draggedMarker.index] = { ...updated[draggedMarker.index], t: newTime }
         
-        // Update local state immediately for visual feedback
+        // Update local state immediately for visual feedback - MUST preserve all nested properties
         setActiveProject(prev => {
-          if (!prev) return prev
-          const newShots = prev.assetPipeline?.shots?.map(s => 
-            s.id === selectedShotId ? { ...s, cameraTrack: updated } : s
-          )
+          if (!prev || !prev.assetPipeline) return prev
           return {
             ...prev,
             assetPipeline: {
-              ...prev.assetPipeline!,
-              shots: newShots
+              ...prev.assetPipeline,
+              storyboardShots: prev.assetPipeline.storyboardShots?.map(s => 
+                s.id === selectedShotId ? { ...s, cameraTrack: updated } : s
+              )
             }
           }
         })
@@ -1083,17 +1082,16 @@ export function StoryboardEditor() {
         const updated = [...selectedShot.effectsTrack]
         updated[draggedMarker.index] = { ...updated[draggedMarker.index], t: newTime }
         
-        // Update local state immediately for visual feedback
+        // Update local state immediately for visual feedback - MUST preserve all nested properties
         setActiveProject(prev => {
-          if (!prev) return prev
-          const newShots = prev.assetPipeline?.shots?.map(s => 
-            s.id === selectedShotId ? { ...s, effectsTrack: updated } : s
-          )
+          if (!prev || !prev.assetPipeline) return prev
           return {
             ...prev,
             assetPipeline: {
-              ...prev.assetPipeline!,
-              shots: newShots
+              ...prev.assetPipeline,
+              storyboardShots: prev.assetPipeline.storyboardShots?.map(s => 
+                s.id === selectedShotId ? { ...s, effectsTrack: updated } : s
+              )
             }
           }
         })
