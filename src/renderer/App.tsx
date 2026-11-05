@@ -23,7 +23,7 @@ function StudioLayout({ children }: { children: React.ReactNode }) {
     { path: '/studio/characters', label: 'Characters', phase: 1 },
     { path: '/studio/poses', label: 'Poses', phase: 2, live: true },
     { path: '/studio/clips', label: 'Clips', phase: 3, live: true },
-    { path: '/studio/presets', label: 'Scene & Camera Presets', phase: 4, live: true },
+    { path: '/studio/presets', label: 'FX Presets', phase: 4, live: true },
     { path: '/studio/scenes', label: 'Scenes', phase: 'C', live: true },
     { path: '/studio/storyboards', label: 'Storyboards', phase: 4.5, live: true },
     { path: '/studio/definitions', label: 'Game Definitions', phase: 'B', live: true },

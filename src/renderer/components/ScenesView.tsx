@@ -6,6 +6,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import type { Scene, Character, ScenePreset } from '@shared/types/assetPipeline'
+import { useProjectStore } from '../state/indieForgeStore'
 
 interface SceneCardProps {
   scene: Scene
@@ -362,16 +363,13 @@ function SceneEditDialog({
 export function ScenesView() {
   const { gameId } = useParams<{ gameId: string }>()
   const navigate = useNavigate()
+  const { activeProject } = useProjectStore()
   const [scenes, setScenes] = useState<Scene[]>([])
   const [characters, setCharacters] = useState<Character[]>([])
   const [presets, setPresets] = useState<ScenePreset[]>([])
   const [loading, setLoading] = useState(true)
   const [editingScene, setEditingScene] = useState<Scene | undefined>(undefined)
   const [showCreateDialog, setShowCreateDialog] = useState(false)
-
-  const activeProject = window.indieForge ? 
-    (window as any).indieForge._activeProject || null : 
-    null
 
   const loadScenes = async () => {
     if (!gameId) return
@@ -430,18 +428,18 @@ export function ScenesView() {
     }
   }
 
-  if (!activeProject) {
-    return (
-      <div style={{ padding: '2rem' }}>
-        <p style={{ color: 'var(--error)' }}>No active project. Please open a project first.</p>
-      </div>
-    )
-  }
-
   if (loading) {
     return (
       <div style={{ padding: '2rem' }}>
         <p>Loading scenes...</p>
+      </div>
+    )
+  }
+
+  if (!activeProject?.assetPipeline) {
+    return (
+      <div style={{ padding: '2rem' }}>
+        <p style={{ color: 'var(--error)' }}>No active project. Please open a project first.</p>
       </div>
     )
   }
@@ -452,7 +450,7 @@ export function ScenesView() {
         <div>
           <h2 style={{ margin: 0 }}>Scenes</h2>
           <p style={{ margin: '0.5rem 0 0 0', color: 'var(--muted)' }}>
-            Phase C: Scenes as the spine — narrative moments with attached storyboards
+            Narrative moments with cast, story, and attached storyboards. Attach FX presets (juice recipes) and open storyboards from here.
           </p>
         </div>
         <button type="button" onClick={() => setShowCreateDialog(true)}>

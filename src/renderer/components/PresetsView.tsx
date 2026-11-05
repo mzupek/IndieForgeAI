@@ -64,9 +64,9 @@ export function PresetsView() {
   return (
     <div style={{ padding: '2rem', height: '100%', overflow: 'auto' }}>
       <div style={{ marginBottom: '2rem' }}>
-        <h2 style={{ margin: '0 0 0.5rem 0' }}>Scene & Camera Presets</h2>
+        <h2 style={{ margin: '0 0 0.5rem 0' }}>FX Presets</h2>
         <p style={{ margin: 0, color: 'var(--muted)' }}>
-          Reusable camera framings and visual effects for cutscenes and moments
+          Reusable effect recipes (shake, flash, freeze, zoom punch, versus layout) — attach to scenes for juice
         </p>
       </div>
 
