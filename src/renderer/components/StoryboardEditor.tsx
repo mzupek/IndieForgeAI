@@ -246,6 +246,33 @@ export function StoryboardEditor() {
     }
   }, [selectedShot, editingNotes])
 
+  // Load background image
+  useEffect(() => {
+    if (!selectedShot?.backgroundImage) {
+      setBackgroundImage(null)
+      return
+    }
+
+    const loadBg = async () => {
+      try {
+        const { localUrl } = await window.indieForge.files.getLocalUrl(selectedShot.backgroundImage!)
+        const img = new Image()
+        img.onload = () => {
+          setBackgroundImage({ element: img, url: localUrl, width: img.width, height: img.height })
+        }
+        img.onerror = () => {
+          console.error('Failed to load background image:', selectedShot.backgroundImage)
+          setBackgroundImage(null)
+        }
+        img.src = localUrl
+      } catch (err) {
+        console.error('Error loading background image:', err)
+        setBackgroundImage(null)
+      }
+    }
+    loadBg()
+  }, [selectedShot?.backgroundImage])
+
   // Load images
   useEffect(() => {
     if (!selectedShot) return
