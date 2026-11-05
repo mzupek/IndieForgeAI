@@ -553,7 +553,7 @@ export function StoryboardEditor() {
     })
   }, [selectedShot, presets])
 
-  // Render canvas
+  // Render canvas - runs whenever playbackTime, layers, camera, or effects change
   useEffect(() => {
     if (!canvasRef.current || !selectedShot) return
 
@@ -561,6 +561,7 @@ export function StoryboardEditor() {
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
+    // Clear canvas
     ctx.fillStyle = '#1a1a1a'
     ctx.fillRect(0, 0, canvas.width, canvas.height)
 
@@ -1005,38 +1006,48 @@ export function StoryboardEditor() {
   const handleTimelinePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!selectedShot) return
     
+    // Prevent text selection and native drag
+    e.preventDefault()
+    
     const rect = e.currentTarget.getBoundingClientRect()
     const x = (e.clientX - rect.left) / rect.width
     const clickTime = x * selectedShot.durationSec
     
-    // Check camera markers
+    // Check camera markers (wider hit area)
     for (let i = 0; i < selectedShot.cameraTrack.length; i++) {
       const kf = selectedShot.cameraTrack[i]
       const markerX = kf.t / selectedShot.durationSec
-      if (Math.abs(x - markerX) < 0.02) {
+      if (Math.abs(x - markerX) < 0.03) {
         setDraggedMarker({ type: 'camera', index: i })
+        setDragMode('marker' as any)
         e.currentTarget.setPointerCapture(e.pointerId)
         return
       }
     }
     
-    // Check effect markers
+    // Check effect markers (wider hit area)
     for (let i = 0; i < selectedShot.effectsTrack.length; i++) {
       const ef = selectedShot.effectsTrack[i]
       const markerX = ef.t / selectedShot.durationSec
-      if (Math.abs(x - markerX) < 0.02) {
+      if (Math.abs(x - markerX) < 0.03) {
         setDraggedMarker({ type: 'effect', index: i })
+        setDragMode('marker' as any)
         e.currentTarget.setPointerCapture(e.pointerId)
         return
       }
     }
     
-    // Seek playhead
+    // Start playhead scrubbing
+    setDragMode('playhead' as any)
     setPlaybackTime(clickTime)
+    e.currentTarget.setPointerCapture(e.pointerId)
   }
 
-  const handleTimelinePointerMove = async (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!selectedShot) return
+  const handleTimelinePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!selectedShot || !dragMode) return
+    
+    // Prevent text selection during drag
+    e.preventDefault()
     
     const rect = e.currentTarget.getBoundingClientRect()
     const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
@@ -1048,31 +1059,72 @@ export function StoryboardEditor() {
       return
     }
     
-    // Handle marker dragging
-    if (!draggedMarker) return
-    
-    if (draggedMarker.type === 'camera') {
-      const updated = [...selectedShot.cameraTrack]
-      updated[draggedMarker.index] = { ...updated[draggedMarker.index], t: newTime }
-      
-      await window.indieForge.pipeline.updateShot(projectId!, selectedShotId!, { cameraTrack: updated })
-      const proj = await window.indieForge.projects.open(projectId!)
-      setActiveProject(proj)
-    } else {
-      const updated = [...selectedShot.effectsTrack]
-      updated[draggedMarker.index] = { ...updated[draggedMarker.index], t: newTime }
-      
-      await window.indieForge.pipeline.updateShot(projectId!, selectedShotId!, { effectsTrack: updated })
-      const proj = await window.indieForge.projects.open(projectId!)
-      setActiveProject(proj)
+    // Handle marker dragging - update local state immediately for smooth preview
+    if (dragMode === 'marker' as any && draggedMarker) {
+      if (draggedMarker.type === 'camera') {
+        const updated = [...selectedShot.cameraTrack]
+        updated[draggedMarker.index] = { ...updated[draggedMarker.index], t: newTime }
+        
+        // Update local state immediately for visual feedback
+        setActiveProject(prev => {
+          if (!prev) return prev
+          const newShots = prev.assetPipeline?.shots?.map(s => 
+            s.id === selectedShotId ? { ...s, cameraTrack: updated } : s
+          )
+          return {
+            ...prev,
+            assetPipeline: {
+              ...prev.assetPipeline!,
+              shots: newShots
+            }
+          }
+        })
+      } else {
+        const updated = [...selectedShot.effectsTrack]
+        updated[draggedMarker.index] = { ...updated[draggedMarker.index], t: newTime }
+        
+        // Update local state immediately for visual feedback
+        setActiveProject(prev => {
+          if (!prev) return prev
+          const newShots = prev.assetPipeline?.shots?.map(s => 
+            s.id === selectedShotId ? { ...s, effectsTrack: updated } : s
+          )
+          return {
+            ...prev,
+            assetPipeline: {
+              ...prev.assetPipeline!,
+              shots: newShots
+            }
+          }
+        })
+      }
     }
   }
 
-  const handleTimelinePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (dragMode === 'playhead' as any) {
-      setDragMode(null)
+  const handleTimelinePointerUp = async (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!selectedShot) return
+    
+    // Persist marker changes to disk
+    if (dragMode === 'marker' as any && draggedMarker) {
+      if (draggedMarker.type === 'camera') {
+        await window.indieForge.pipeline.updateShot(projectId!, selectedShotId!, { 
+          cameraTrack: selectedShot.cameraTrack 
+        })
+      } else {
+        await window.indieForge.pipeline.updateShot(projectId!, selectedShotId!, { 
+          effectsTrack: selectedShot.effectsTrack 
+        })
+      }
+      
+      // Reload to ensure consistency
+      const proj = await window.indieForge.projects.open(projectId!)
+      setActiveProject(proj)
     }
+    
+    // Clean up drag state
+    setDragMode(null)
     setDraggedMarker(null)
+    
     if (e.currentTarget.hasPointerCapture(e.pointerId)) {
       e.currentTarget.releasePointerCapture(e.pointerId)
     }
@@ -1910,7 +1962,15 @@ export function StoryboardEditor() {
               </div>
               
               <div 
-                style={{ position: 'relative', height: '90px', background: 'var(--bg)', borderRadius: '4px', cursor: 'pointer' }}
+                style={{ 
+                  position: 'relative', 
+                  height: '90px', 
+                  background: 'var(--bg)', 
+                  borderRadius: '4px', 
+                  cursor: 'pointer',
+                  userSelect: 'none',
+                  WebkitUserSelect: 'none'
+                }}
                 onPointerDown={handleTimelinePointerDown}
                 onPointerMove={handleTimelinePointerMove}
                 onPointerUp={handleTimelinePointerUp}
@@ -1926,16 +1986,8 @@ export function StoryboardEditor() {
                 {/* Track Divider - pointerEvents none to not block marker clicks */}
                 <div style={{ position: 'absolute', left: 0, right: 0, top: '45px', height: '1px', background: 'rgba(255,255,255,0.1)', pointerEvents: 'none' }} />
                 
-                {/* Playhead - draggable for scrubbing */}
+                {/* Playhead - visual indicator, clicks handled by timeline */}
                 <div
-                  onPointerDown={(e) => {
-                    // Don't stopPropagation - let timeline handle the move
-                    setDragMode('playhead' as any)
-                    // Immediately update time on mousedown
-                    const rect = e.currentTarget.parentElement!.getBoundingClientRect()
-                    const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
-                    setPlaybackTime(x * selectedShot.durationSec)
-                  }}
                   style={{
                     position: 'absolute',
                     left: `${(playbackTime / selectedShot.durationSec) * 100}%`,
@@ -1944,7 +1996,8 @@ export function StoryboardEditor() {
                     width: '12px',
                     transform: 'translateX(-6px)',
                     cursor: 'ew-resize',
-                    zIndex: 10
+                    zIndex: 10,
+                    pointerEvents: 'none'
                   }}
                 >
                   <div style={{
@@ -1979,11 +2032,11 @@ export function StoryboardEditor() {
                     <div
                       key={idx}
                       onPointerDown={(e) => {
-                        e.stopPropagation()
+                        // Don't stopPropagation - let timeline handle dragging
+                        // Just select this marker
                         setSelectedCameraIndex(idx)
                         setEditingCamera(true)
                         setCameraManuallySelected(true)
-                        setPlaybackTime(kf.t)
                       }}
                       onContextMenu={(e) => {
                         e.preventDefault()
@@ -1994,12 +2047,12 @@ export function StoryboardEditor() {
                         position: 'absolute',
                         left: `${(kf.t / selectedShot.durationSec) * 100}%`,
                         top: '15px',
-                        width: '16px',
-                        height: '16px',
+                        width: '20px',
+                        height: '20px',
                         background: selectedCameraIndex === idx ? '#FFD700' : '#00AAFF',
                         borderRadius: '50%',
                         transform: 'translateX(-50%)',
-                        cursor: 'pointer',
+                        cursor: 'move',
                         border: selectedCameraIndex === idx ? '3px solid #FFF' : '2px solid #fff',
                         boxShadow: selectedCameraIndex === idx ? '0 0 8px rgba(255, 215, 0, 0.6)' : '0 2px 4px rgba(0,0,0,0.3)',
                         zIndex: selectedCameraIndex === idx ? 11 : 5
@@ -2017,10 +2070,10 @@ export function StoryboardEditor() {
                     <div
                       key={idx}
                       onPointerDown={(e) => {
-                        e.stopPropagation()
+                        // Don't stopPropagation - let timeline handle dragging
+                        // Just select this marker
                         setSelectedEffectIndex(idx)
                         setEditingEffect(true)
-                        setPlaybackTime(ef.t)
                       }}
                       onContextMenu={(e) => {
                         e.preventDefault()
@@ -2031,17 +2084,17 @@ export function StoryboardEditor() {
                         position: 'absolute',
                         left: `${(ef.t / selectedShot.durationSec) * 100}%`,
                         bottom: '15px',
-                        width: '16px',
-                        height: '16px',
+                        width: '20px',
+                        height: '20px',
                         background: selectedEffectIndex === idx ? '#FFD700' : '#FF6B6B',
                         borderRadius: '50%',
                         transform: 'translateX(-50%)',
-                        cursor: 'pointer',
+                        cursor: 'move',
                         border: selectedEffectIndex === idx ? '3px solid #FFF' : '2px solid #fff',
                         boxShadow: selectedEffectIndex === idx ? '0 0 8px rgba(255, 215, 0, 0.6)' : '0 2px 4px rgba(0,0,0,0.3)',
                         zIndex: selectedEffectIndex === idx ? 11 : 5
                       }}
-                      title={`${label} @ ${ef.t.toFixed(1)}s (click to edit, right-click to delete)`}
+                      title={`${label} @ ${ef.t.toFixed(1)}s (drag to move, right-click to delete)`}
                     />
                   )
                 })}
