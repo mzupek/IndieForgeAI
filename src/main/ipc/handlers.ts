@@ -467,21 +467,67 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle(IPC_CHANNELS.FILES_READ_PREVIEW_DATA_URL, async (_e, filePath: string) => {
-    if (!filePath || !existsSync(filePath)) {
+    if (!filePath) {
+      throw new Error('File path is required')
+    }
+    
+    // Resolve relative paths against dataDir
+    const { getDataDir } = await import('../../core/storage/dataDir')
+    const { normalize } = await import('path')
+    let resolvedPath = filePath
+    
+    // If path is relative (doesn't start with / or drive letter), resolve against dataDir
+    if (!filePath.startsWith('/') && !/^[A-Za-z]:/.test(filePath)) {
+      resolvedPath = normalize(join(getDataDir(), filePath))
+    } else {
+      resolvedPath = normalize(filePath)
+    }
+    
+    // Enforce security: resolved path must be under dataDir
+    const dataDir = normalize(getDataDir())
+    if (!resolvedPath.startsWith(dataDir)) {
+      throw new Error(`File path outside data directory: ${filePath}`)
+    }
+    
+    if (!existsSync(resolvedPath)) {
       throw new Error(`File not found: ${filePath}`)
     }
-    const data = await readFile(filePath)
-    const mime = getPreviewMimeType(filePath)
+    
+    const data = await readFile(resolvedPath)
+    const mime = getPreviewMimeType(resolvedPath)
     return { dataUrl: `data:${mime};base64,${data.toString('base64')}` }
   })
 
   ipcMain.handle(IPC_CHANNELS.FILES_GET_LOCAL_URL, async (_e, filePath: string) => {
-    if (!filePath || !existsSync(filePath)) {
+    if (!filePath) {
+      throw new Error('File path is required')
+    }
+    
+    // Resolve relative paths against dataDir
+    const { getDataDir } = await import('../../core/storage/dataDir')
+    const { normalize } = await import('path')
+    let resolvedPath = filePath
+    
+    // If path is relative (doesn't start with / or drive letter), resolve against dataDir
+    if (!filePath.startsWith('/') && !/^[A-Za-z]:/.test(filePath)) {
+      resolvedPath = normalize(join(getDataDir(), filePath))
+    } else {
+      resolvedPath = normalize(filePath)
+    }
+    
+    // Enforce security: resolved path must be under dataDir
+    const dataDir = normalize(getDataDir())
+    if (!resolvedPath.startsWith(dataDir)) {
+      throw new Error(`File path outside data directory: ${filePath}`)
+    }
+    
+    if (!existsSync(resolvedPath)) {
       throw new Error(`File not found: ${filePath}`)
     }
-    // Build forge-file://local/<path> with per-segment encoding
+    
+    // Build forge-file://local/<absolute-path> with per-segment encoding
     // Standard scheme requires a host; use "local" as fixed host
-    const pathSegments = filePath.split('/').map(seg => encodeURIComponent(seg))
+    const pathSegments = resolvedPath.split('/').map(seg => encodeURIComponent(seg))
     const encodedPath = pathSegments.join('/')
     return { localUrl: `forge-file://local${encodedPath}` }
   })
