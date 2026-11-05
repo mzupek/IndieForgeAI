@@ -15,9 +15,10 @@ Indie Forge does **not** try to replace Aseprite, Godot, or Unity — or ship fi
 
 - Project profile: `engine` + `craftPath`
 - **Game Definitions** (Phase B): living design docs with structured data + markdown
-- **Scenes** (Phase C): narrative moments with cast, story, attached storyboards, FX presets
+- **Scenes** (Phase C): narrative moments with cast, story, attached storyboards, FX recipe refs
 - Characters, Poses (1024×1024 PNG), Clips (video)
-- **Storyboards** (Phase 4.5): shot-by-shot animatics attached to scenes
+- **Storyboards** (Phase 4.5): shot-by-shot animatics with effect markers (juice in context)
+- FX recipe library (behind-the-scenes; created/edited from storyboard timeline)
 - **Craft Studio** (pixel silhouette / paint / guide photo)
 - **Motion Studio** (rig, key poses, Motion Blueprint JSON — no art)
 - **Animation Studio** (Craft guide + Motion Blueprint skeleton frames → Aseprite)

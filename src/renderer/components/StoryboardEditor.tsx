@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useOutletContext } from 'react-router-dom'
 import { useProjectStore } from '../state/indieForgeStore'
 import type {
@@ -32,6 +32,151 @@ function easeInOutCubic(t: number): number {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
 }
 
+function EffectInspector({
+  effect,
+  presets,
+  onSave,
+  onClose
+}: {
+  effect: EffectMarker
+  presets: ScenePreset[]
+  onSave: (params: Record<string, unknown>) => void
+  onClose: () => void
+}) {
+  const preset = effect.presetId ? presets.find(p => p.id === effect.presetId) : null
+  if (!preset) {
+    return (
+      <div style={{ marginTop: '0.5rem', padding: '0.75rem', background: 'var(--bg)', borderRadius: '4px', border: '2px solid var(--forge-gold)' }}>
+        <p style={{ color: 'var(--error)' }}>Effect preset not found</p>
+        <button type="button" onClick={onClose} style={{ width: '100%', marginTop: '0.5rem' }}>Close</button>
+      </div>
+    )
+  }
+
+  const [params, setParams] = useState(preset.params)
+
+  const handleSave = () => {
+    onSave(params)
+  }
+
+  return (
+    <div style={{ marginTop: '0.5rem', padding: '0.75rem', background: 'var(--bg)', borderRadius: '4px', border: '2px solid var(--forge-gold)' }}>
+      <div style={{ fontWeight: 'bold', marginBottom: '0.5rem', fontSize: '0.9rem' }}>
+        Edit Effect: {preset.type} @ {effect.t.toFixed(1)}s
+      </div>
+      
+      {preset.type === 'shake' && (
+        <>
+          <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.85rem' }}>
+            Intensity:
+            <input
+              type="number"
+              value={params.intensity as number || 10}
+              onChange={(e) => setParams({ ...params, intensity: Number(e.target.value) })}
+              style={{ width: '100%', marginTop: '0.25rem' }}
+            />
+          </label>
+          <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.85rem' }}>
+            Duration (ms):
+            <input
+              type="number"
+              value={params.durationMs as number || 300}
+              onChange={(e) => setParams({ ...params, durationMs: Number(e.target.value) })}
+              style={{ width: '100%', marginTop: '0.25rem' }}
+            />
+          </label>
+        </>
+      )}
+      
+      {preset.type === 'flash' && (
+        <>
+          <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.85rem' }}>
+            Color:
+            <input
+              type="text"
+              value={params.color as string || 'white'}
+              onChange={(e) => setParams({ ...params, color: e.target.value })}
+              style={{ width: '100%', marginTop: '0.25rem' }}
+            />
+          </label>
+          <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.85rem' }}>
+            Duration (ms):
+            <input
+              type="number"
+              value={params.durationMs as number || 200}
+              onChange={(e) => setParams({ ...params, durationMs: Number(e.target.value) })}
+              style={{ width: '100%', marginTop: '0.25rem' }}
+            />
+          </label>
+        </>
+      )}
+      
+      {preset.type === 'freeze' && (
+        <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.85rem' }}>
+          Duration (ms):
+          <input
+            type="number"
+            value={params.durationMs as number || 500}
+            onChange={(e) => setParams({ ...params, durationMs: Number(e.target.value) })}
+            style={{ width: '100%', marginTop: '0.25rem' }}
+          />
+        </label>
+      )}
+      
+      {preset.type === 'zoom_punch' && (
+        <>
+          <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.85rem' }}>
+            Scale:
+            <input
+              type="number"
+              step="0.05"
+              value={params.scale as number || 1.15}
+              onChange={(e) => setParams({ ...params, scale: Number(e.target.value) })}
+              style={{ width: '100%', marginTop: '0.25rem' }}
+            />
+          </label>
+          <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.85rem' }}>
+            Duration (ms):
+            <input
+              type="number"
+              value={params.durationMs as number || 300}
+              onChange={(e) => setParams({ ...params, durationMs: Number(e.target.value) })}
+              style={{ width: '100%', marginTop: '0.25rem' }}
+            />
+          </label>
+        </>
+      )}
+      
+      {preset.type === 'versus' && (
+        <>
+          <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.85rem' }}>
+            Zoom:
+            <input
+              type="number"
+              step="0.1"
+              value={params.zoom as number || 1.0}
+              onChange={(e) => setParams({ ...params, zoom: Number(e.target.value) })}
+              style={{ width: '100%', marginTop: '0.25rem' }}
+            />
+          </label>
+          <p style={{ fontSize: '0.75rem', color: 'var(--muted)', margin: '0.5rem 0' }}>
+            Note: Character setup not editable in inspector
+          </p>
+        </>
+      )}
+      
+      <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem' }}>
+        <button type="button" onClick={handleSave} style={{ flex: 1 }}>
+          Save
+        </button>
+        <button type="button" onClick={onClose} style={{ flex: 1 }} className="secondary">
+          Cancel
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export function StoryboardEditor() {
   const { projectId, gameId } = useOutletContext<{ projectId: string; gameId: string }>()
   const { activeProject, setActiveProject } = useProjectStore()
@@ -57,6 +202,8 @@ export function StoryboardEditor() {
   const [creatingShot, setCreatingShot] = useState(false)
   const [newShotName, setNewShotName] = useState('')
   const [linkingScene, setLinkingScene] = useState<string | null>(null)
+  const [selectedEffectIndex, setSelectedEffectIndex] = useState<number | null>(null)
+  const [editingEffect, setEditingEffect] = useState(false)
   
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const animationFrameRef = useRef<number | null>(null)
@@ -499,16 +646,54 @@ export function StoryboardEditor() {
 
   const handleAddEffect = async (presetId?: string, inlineType?: ScenePresetType) => {
     if (!selectedShot) return
+
+    let finalPresetId = presetId
     
+    // If inline type, create a quick preset
+    if (inlineType && !presetId) {
+      try {
+        const newPreset = await window.indieForge.pipeline.createPreset(inlineType, {})
+        finalPresetId = newPreset.id
+        const updated = await window.indieForge.projects.open(projectId!)
+        setActiveProject(updated)
+      } catch (err) {
+        console.error('Failed to create preset:', err)
+        alert('Failed to create effect preset')
+        return
+      }
+    }
+
     const effect: EffectMarker = {
       t: playbackTime,
-      ...(presetId ? { presetId } : { inlineType, inlineParams: {} })
+      presetId: finalPresetId
     }
     
     await window.indieForge.pipeline.addEffectMarker(projectId!, selectedShotId!, effect)
     const updated = await window.indieForge.projects.open(projectId!)
     setActiveProject(updated)
     setShowAddEffect(false)
+  }
+
+  const handleUpdateEffectParams = async (effectIndex: number, params: Record<string, unknown>) => {
+    if (!selectedShot || effectIndex < 0 || effectIndex >= selectedShot.effectsTrack.length) return
+    
+    const effect = selectedShot.effectsTrack[effectIndex]
+    if (!effect.presetId) return
+    
+    try {
+      const preset = presets.find(p => p.id === effect.presetId)
+      if (!preset) return
+      
+      // Replace params for this type (don't merge)
+      await window.indieForge.pipeline.updatePreset(effect.presetId, { params })
+      const updated = await window.indieForge.projects.open(projectId!)
+      setActiveProject(updated)
+      setSelectedEffectIndex(null)
+      setEditingEffect(false)
+    } catch (err) {
+      console.error('Failed to update effect:', err)
+      alert(err instanceof Error ? err.message : 'Failed to update effect')
+    }
   }
 
   const handleDeleteMarker = async (type: 'camera' | 'effect', index: number) => {
@@ -1160,36 +1345,44 @@ export function StoryboardEditor() {
                 ))}
                 
                 {/* Effect markers */}
-                {selectedShot.effectsTrack.map((ef, idx) => (
-                  <div
-                    key={idx}
-                    onContextMenu={(e) => {
-                      e.preventDefault()
-                      handleDeleteMarker('effect', idx)
-                    }}
-                    style={{
-                      position: 'absolute',
-                      left: `${(ef.t / selectedShot.durationSec) * 100}%`,
-                      bottom: '10px',
-                      width: '14px',
-                      height: '14px',
-                      background: '#FF6B6B',
-                      borderRadius: '50%',
-                      transform: 'translateX(-50%)',
-                      cursor: 'grab',
-                      border: '2px solid #fff',
-                      boxShadow: '0 2px 4px rgba(0,0,0,0.3)'
-                    }}
-                    title={`Effect @ ${ef.t.toFixed(1)}s (right-click to delete)`}
-                  />
-                ))}
+                {selectedShot.effectsTrack.map((ef, idx) => {
+                  const preset = ef.presetId ? presets.find(p => p.id === ef.presetId) : null
+                  const label = preset ? preset.type : 'effect'
+                  return (
+                    <div
+                      key={idx}
+                      onClick={() => {
+                        setSelectedEffectIndex(idx)
+                        setEditingEffect(true)
+                      }}
+                      onContextMenu={(e) => {
+                        e.preventDefault()
+                        handleDeleteMarker('effect', idx)
+                      }}
+                      style={{
+                        position: 'absolute',
+                        left: `${(ef.t / selectedShot.durationSec) * 100}%`,
+                        bottom: '10px',
+                        width: '14px',
+                        height: '14px',
+                        background: selectedEffectIndex === idx ? '#FFD700' : '#FF6B6B',
+                        borderRadius: '50%',
+                        transform: 'translateX(-50%)',
+                        cursor: 'pointer',
+                        border: '2px solid #fff',
+                        boxShadow: '0 2px 4px rgba(0,0,0,0.3)'
+                      }}
+                      title={`${label} @ ${ef.t.toFixed(1)}s (click to edit, right-click to delete)`}
+                    />
+                  )
+                })}
               </div>
               
               {showAddEffect && (
                 <div style={{ marginTop: '0.5rem', padding: '0.75rem', background: 'var(--bg)', borderRadius: '4px', border: '2px solid var(--forge-gold)' }}>
                   <div style={{ fontWeight: 'bold', marginBottom: '0.5rem', fontSize: '0.9rem' }}>Add Effect at {playbackTime.toFixed(1)}s</div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem', marginBottom: '0.5rem' }}>
-                    {(['shake', 'flash', 'freeze', 'zoom_punch'] as ScenePresetType[]).map(type => (
+                    {(['shake', 'flash', 'freeze', 'zoom_punch', 'versus'] as ScenePresetType[]).map(type => (
                       <button
                         key={type}
                         type="button"
@@ -1202,23 +1395,40 @@ export function StoryboardEditor() {
                   </div>
                   {presets.length > 0 && (
                     <>
-                      <div style={{ fontSize: '0.85rem', marginBottom: '0.25rem' }}>Or use preset:</div>
-                      {presets.slice(0, 3).map(preset => (
-                        <button
-                          key={preset.id}
-                          type="button"
-                          onClick={() => handleAddEffect(preset.id)}
-                          style={{ width: '100%', marginBottom: '0.25rem', fontSize: '0.8rem', textAlign: 'left' }}
-                        >
-                          {preset.type}
-                        </button>
-                      ))}
+                      <div style={{ fontSize: '0.85rem', marginBottom: '0.25rem' }}>Or use existing recipe:</div>
+                      <div style={{ maxHeight: '150px', overflowY: 'auto', marginBottom: '0.5rem' }}>
+                        {presets.map(preset => {
+                          const tag = preset.tags.length > 0 ? preset.tags[0] : preset.type
+                          return (
+                            <button
+                              key={preset.id}
+                              type="button"
+                              onClick={() => handleAddEffect(preset.id)}
+                              style={{ width: '100%', marginBottom: '0.25rem', fontSize: '0.8rem', textAlign: 'left', padding: '0.5rem' }}
+                            >
+                              {tag} ({preset.type})
+                            </button>
+                          )
+                        })}
+                      </div>
                     </>
                   )}
                   <button type="button" onClick={() => setShowAddEffect(false)} style={{ width: '100%', marginTop: '0.5rem', fontSize: '0.85rem' }}>
                     Cancel
                   </button>
                 </div>
+              )}
+              
+              {editingEffect && selectedEffectIndex !== null && selectedShot && selectedShot.effectsTrack[selectedEffectIndex] && (
+                <EffectInspector
+                  effect={selectedShot.effectsTrack[selectedEffectIndex]}
+                  presets={presets}
+                  onSave={(params) => handleUpdateEffectParams(selectedEffectIndex, params)}
+                  onClose={() => {
+                    setEditingEffect(false)
+                    setSelectedEffectIndex(null)
+                  }}
+                />
               )}
             </div>
 

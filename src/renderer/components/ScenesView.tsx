@@ -8,6 +8,34 @@ import { useParams, useNavigate } from 'react-router-dom'
 import type { Scene, Character, ScenePreset } from '@shared/types/assetPipeline'
 import { useProjectStore } from '../state/indieForgeStore'
 
+function getPresetLabel(preset: ScenePreset): string {
+  const params = preset.params
+  let summary = ''
+  
+  switch (preset.type) {
+    case 'shake':
+      summary = `intensity ${params.intensity || 10} · ${params.durationMs || 300}ms`
+      break
+    case 'flash':
+      summary = `${params.color || 'white'} · ${params.durationMs || 200}ms`
+      break
+    case 'freeze':
+      summary = `${params.durationMs || 500}ms`
+      break
+    case 'zoom_punch':
+      summary = `zoom ${params.scale || 1.15}x · ${params.durationMs || 300}ms`
+      break
+    case 'versus':
+      summary = `zoom ${params.zoom || 1.0}x`
+      break
+  }
+  
+  if (preset.tags.length > 0) {
+    return `${preset.type} - ${preset.tags[0]} (${summary})`
+  }
+  return `${preset.type} (${summary})`
+}
+
 interface SceneCardProps {
   scene: Scene
   characters: Character[]
@@ -27,6 +55,10 @@ function SceneCard({
 }: SceneCardProps) {
   const castCharacters = characters.filter(c => scene.cast.includes(c.id))
   const attachedPresets = presets.filter(p => scene.attachedPresets.includes(p.id))
+  const presetLabels = attachedPresets.map(p => {
+    const tag = p.tags.length > 0 ? p.tags[0] : p.type
+    return tag
+  })
 
   return (
     <div
@@ -67,9 +99,9 @@ function SceneCard({
         <p style={{ fontSize: '0.85rem', color: 'var(--muted)', marginBottom: '0.25rem' }}>
           <strong>Cast:</strong> {castCharacters.length > 0 ? castCharacters.map(c => c.name).join(', ') : 'None'}
         </p>
-        {attachedPresets.length > 0 && (
+        {presetLabels.length > 0 && (
           <p style={{ fontSize: '0.85rem', color: 'var(--muted)', marginTop: '0.25rem' }}>
-            <strong>FX Presets:</strong> {attachedPresets.map(p => p.type).join(', ')}
+            <strong>FX Recipes:</strong> {presetLabels.join(', ')}
           </p>
         )}
         {scene.storyboardId && (
@@ -314,20 +346,22 @@ function SceneEditDialog({
 
         <div style={{ marginBottom: '1.5rem' }}>
           <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem' }}>
-            FX Presets
+            FX Recipe References
           </label>
           {presets.length === 0 ? (
-            <p style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>No presets available</p>
+            <p style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>
+              No recipes yet — add effects from the Scene storyboard timeline
+            </p>
           ) : (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', maxHeight: '200px', overflowY: 'auto' }}>
               {presets.map((preset) => (
                 <label
                   key={preset.id}
                   style={{
-                    display: 'inline-flex',
+                    display: 'flex',
                     alignItems: 'center',
                     gap: '0.5rem',
-                    padding: '0.5rem 0.75rem',
+                    padding: '0.5rem',
                     border: '1px solid var(--border)',
                     borderRadius: '4px',
                     cursor: 'pointer',
@@ -340,7 +374,11 @@ function SceneEditDialog({
                     checked={selectedPresets.has(preset.id)}
                     onChange={() => togglePreset(preset.id)}
                   />
-                  <span>{preset.type}</span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: selectedPresets.has(preset.id) ? 'bold' : 'normal' }}>
+                      {getPresetLabel(preset)}
+                    </div>
+                  </div>
                 </label>
               ))}
             </div>

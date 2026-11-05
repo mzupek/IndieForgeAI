@@ -151,9 +151,15 @@ Navigate to **Scenes** in the studio sidebar, then select a game. You can:
 
 Storyboards opened from a scene show "Attached to Scene: [Scene Name]" in the sidebar.
 
-### Presets as Recipes
+### FX Recipes (Behind-the-Scenes Library)
 
-Scene presets (camera/FX) are no longer treated as full scene composers. Instead, they are lightweight, reusable effect recipes that can be attached to multiple scenes. The PresetsView now shows which scenes use each preset.
+Scene presets (camera/FX) are lightweight, reusable effect recipes managed behind the scenes. There is no separate "FX Presets" tab in the UI. Instead:
+- Create/edit FX recipes from the **Storyboard** timeline effect markers
+- Reference recipes from **Scenes** via attachedPresets
+- Effect markers on the timeline can use existing recipes or create quick ones (shake, flash, freeze, zoom_punch, versus)
+- Click an effect marker to inspect/edit its params in-context
+
+This keeps storyboards as the primary place for juice (effects in narrative context), not a standalone presets editor.
 
 ## No Cold Lock
 
