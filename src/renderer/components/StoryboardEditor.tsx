@@ -59,14 +59,42 @@ function CameraInspector({
     typeof keyframe.target === 'object' ? keyframe.target.y : 0.5
   )
 
-  const handleSave = () => {
+  // Live preview - update immediately on change (Matt's fix)
+  const updateLive = (newZoom?: number, newType?: 'layer' | 'point', newLayer?: string, newX?: number, newY?: number) => {
     const updated: CameraKeyframe = {
       t: keyframe.t,
-      zoom,
-      target: targetType === 'layer' ? targetLayer : { x: targetX, y: targetY },
+      zoom: newZoom ?? zoom,
+      target: (newType ?? targetType) === 'layer' 
+        ? (newLayer ?? targetLayer) || { x: 0.5, y: 0.5 }
+        : { x: newX ?? targetX, y: newY ?? targetY },
       framingRect: keyframe.framingRect
     }
     onSave(updated)
+  }
+
+  const handleZoomChange = (newZoom: number) => {
+    setZoom(newZoom)
+    updateLive(newZoom)
+  }
+
+  const handleTargetTypeChange = (newType: 'layer' | 'point') => {
+    setTargetType(newType)
+    updateLive(undefined, newType)
+  }
+
+  const handleTargetLayerChange = (newLayer: string) => {
+    setTargetLayer(newLayer)
+    updateLive(undefined, undefined, newLayer)
+  }
+
+  const handleTargetXChange = (newX: number) => {
+    setTargetX(newX)
+    updateLive(undefined, undefined, undefined, newX)
+  }
+
+  const handleTargetYChange = (newY: number) => {
+    setTargetY(newY)
+    updateLive(undefined, undefined, undefined, undefined, newY)
   }
 
   return (
@@ -83,7 +111,7 @@ function CameraInspector({
           min="0.5"
           max="5"
           value={zoom}
-          onChange={(e) => setZoom(Number(e.target.value))}
+          onChange={(e) => handleZoomChange(Number(e.target.value))}
           style={{ width: '100%', marginTop: '0.25rem' }}
         />
       </label>
@@ -92,7 +120,7 @@ function CameraInspector({
         Target Type:
         <select
           value={targetType}
-          onChange={(e) => setTargetType(e.target.value as 'layer' | 'point')}
+          onChange={(e) => handleTargetTypeChange(e.target.value as 'layer' | 'point')}
           style={{ width: '100%', marginTop: '0.25rem' }}
         >
           <option value="layer">Layer</option>
@@ -105,7 +133,7 @@ function CameraInspector({
           Target Layer:
           <select
             value={targetLayer}
-            onChange={(e) => setTargetLayer(e.target.value)}
+            onChange={(e) => handleTargetLayerChange(e.target.value)}
             style={{ width: '100%', marginTop: '0.25rem' }}
           >
             <option value="">Center (no layer)</option>
@@ -126,7 +154,7 @@ function CameraInspector({
               min="0"
               max="1"
               value={targetX}
-              onChange={(e) => setTargetX(Number(e.target.value))}
+              onChange={(e) => handleTargetXChange(Number(e.target.value))}
               style={{ width: '100%', marginTop: '0.25rem' }}
             />
           </label>
@@ -138,7 +166,7 @@ function CameraInspector({
               min="0"
               max="1"
               value={targetY}
-              onChange={(e) => setTargetY(Number(e.target.value))}
+              onChange={(e) => handleTargetYChange(Number(e.target.value))}
               style={{ width: '100%', marginTop: '0.25rem' }}
             />
           </label>
@@ -151,22 +179,22 @@ function CameraInspector({
         </div>
       )}
       
-      <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem' }}>
-        <button type="button" onClick={handleSave} style={{ flex: 1 }}>
-          Save
-        </button>
-        <button type="button" onClick={onClose} style={{ flex: 1 }} className="secondary">
-          Close
-        </button>
+      <div style={{ fontSize: '0.7rem', color: 'var(--muted)', marginTop: '0.5rem', fontStyle: 'italic' }}>
+        💡 Changes apply instantly as you edit
       </div>
       
-      <button 
-        type="button" 
-        onClick={onDelete} 
-        style={{ width: '100%', marginTop: '0.5rem', background: 'var(--danger)', color: 'white' }}
-      >
-        Delete Keyframe
-      </button>
+      <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem' }}>
+        <button type="button" onClick={onClose} style={{ flex: 1 }}>
+          Close
+        </button>
+        <button 
+          type="button" 
+          onClick={onDelete} 
+          style={{ flex: 1, background: 'var(--danger)', color: 'white' }}
+        >
+          Delete
+        </button>
+      </div>
     </div>
   )
 }
@@ -194,8 +222,11 @@ function EffectInspector({
 
   const [params, setParams] = useState(preset.params)
 
-  const handleSave = () => {
-    onSave(params)
+  // Live preview - update immediately on change (Matt's fix)
+  const updateParam = (key: string, value: unknown) => {
+    const newParams = { ...params, [key]: value }
+    setParams(newParams)
+    onSave(newParams)
   }
 
   return (
@@ -211,7 +242,7 @@ function EffectInspector({
             <input
               type="number"
               value={params.intensity as number || 10}
-              onChange={(e) => setParams({ ...params, intensity: Number(e.target.value) })}
+              onChange={(e) => updateParam('intensity', Number(e.target.value))}
               style={{ width: '100%', marginTop: '0.25rem' }}
             />
           </label>
@@ -220,7 +251,7 @@ function EffectInspector({
             <input
               type="number"
               value={params.durationMs as number || 300}
-              onChange={(e) => setParams({ ...params, durationMs: Number(e.target.value) })}
+              onChange={(e) => updateParam('durationMs', Number(e.target.value))}
               style={{ width: '100%', marginTop: '0.25rem' }}
             />
           </label>
@@ -234,7 +265,7 @@ function EffectInspector({
             <input
               type="text"
               value={params.color as string || 'white'}
-              onChange={(e) => setParams({ ...params, color: e.target.value })}
+              onChange={(e) => updateParam('color', e.target.value)}
               style={{ width: '100%', marginTop: '0.25rem' }}
             />
           </label>
@@ -243,7 +274,7 @@ function EffectInspector({
             <input
               type="number"
               value={params.durationMs as number || 200}
-              onChange={(e) => setParams({ ...params, durationMs: Number(e.target.value) })}
+              onChange={(e) => updateParam('durationMs', Number(e.target.value))}
               style={{ width: '100%', marginTop: '0.25rem' }}
             />
           </label>
@@ -256,7 +287,7 @@ function EffectInspector({
           <input
             type="number"
             value={params.durationMs as number || 500}
-            onChange={(e) => setParams({ ...params, durationMs: Number(e.target.value) })}
+            onChange={(e) => updateParam('durationMs', Number(e.target.value))}
             style={{ width: '100%', marginTop: '0.25rem' }}
           />
         </label>
@@ -270,7 +301,7 @@ function EffectInspector({
               type="number"
               step="0.05"
               value={params.scale as number || 1.15}
-              onChange={(e) => setParams({ ...params, scale: Number(e.target.value) })}
+              onChange={(e) => updateParam('scale', Number(e.target.value))}
               style={{ width: '100%', marginTop: '0.25rem' }}
             />
           </label>
@@ -279,7 +310,7 @@ function EffectInspector({
             <input
               type="number"
               value={params.durationMs as number || 300}
-              onChange={(e) => setParams({ ...params, durationMs: Number(e.target.value) })}
+              onChange={(e) => updateParam('durationMs', Number(e.target.value))}
               style={{ width: '100%', marginTop: '0.25rem' }}
             />
           </label>
@@ -294,7 +325,7 @@ function EffectInspector({
               type="number"
               step="0.1"
               value={params.zoom as number || 1.0}
-              onChange={(e) => setParams({ ...params, zoom: Number(e.target.value) })}
+              onChange={(e) => updateParam('zoom', Number(e.target.value))}
               style={{ width: '100%', marginTop: '0.25rem' }}
             />
           </label>
@@ -304,14 +335,13 @@ function EffectInspector({
         </>
       )}
       
-      <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem' }}>
-        <button type="button" onClick={handleSave} style={{ flex: 1 }}>
-          Save
-        </button>
-        <button type="button" onClick={onClose} style={{ flex: 1 }} className="secondary">
-          Cancel
-        </button>
+      <div style={{ fontSize: '0.7rem', color: 'var(--muted)', marginTop: '0.5rem', fontStyle: 'italic' }}>
+        💡 Changes apply instantly as you edit
       </div>
+      
+      <button type="button" onClick={onClose} style={{ width: '100%', marginTop: '1rem' }}>
+        Close
+      </button>
     </div>
   )
 }
@@ -499,6 +529,28 @@ export function StoryboardEditor() {
       framingRect: before.framingRect || after.framingRect
     }
   }, [selectedShot])
+  
+  // Get active effects at current time (Matt's fix - evaluate effects)
+  const getActiveEffects = useCallback((time: number) => {
+    if (!selectedShot) return []
+    
+    return selectedShot.effectsTrack.filter(ef => {
+      const preset = ef.presetId ? presets.find(p => p.id === ef.presetId) : null
+      const params = preset?.params || ef.inlineParams || {}
+      const durationMs = (params.durationMs as number) || 300
+      const durationSec = durationMs / 1000
+      
+      return time >= ef.t && time <= ef.t + durationSec
+    }).map(ef => {
+      const preset = ef.presetId ? presets.find(p => p.id === ef.presetId) : null
+      const type = preset?.type || ef.inlineType
+      const params = preset?.params || ef.inlineParams || {}
+      const durationMs = (params.durationMs as number) || 300
+      const progress = Math.min(1, (time - ef.t) / (durationMs / 1000))
+      
+      return { type, params, progress, t: ef.t }
+    })
+  }, [selectedShot, presets])
 
   // Render canvas
   useEffect(() => {
@@ -689,6 +741,36 @@ export function StoryboardEditor() {
     }
 
     ctx.restore()
+    
+    // Apply active effects (Matt's fix - make effects visible)
+    const activeEffects = getActiveEffects(playbackTime)
+    for (const effect of activeEffects) {
+      if (effect.type === 'shake') {
+        const intensity = (effect.params.intensity as number) || 10
+        const shakeX = (Math.random() - 0.5) * intensity * (1 - effect.progress)
+        const shakeY = (Math.random() - 0.5) * intensity * (1 - effect.progress)
+        ctx.save()
+        ctx.translate(shakeX, shakeY)
+        ctx.restore()
+      } else if (effect.type === 'flash') {
+        const color = (effect.params.color as string) || 'white'
+        const opacity = ((effect.params.opacity as number) || 0.8) * (1 - effect.progress)
+        ctx.fillStyle = color
+        ctx.globalAlpha = opacity
+        ctx.fillRect(0, 0, canvas.width, canvas.height)
+        ctx.globalAlpha = 1
+      } else if (effect.type === 'freeze') {
+        // Visual indicator that time is frozen
+        ctx.strokeStyle = '#00FFFF'
+        ctx.lineWidth = 3
+        ctx.strokeRect(5, 5, canvas.width - 10, canvas.height - 10)
+      } else if (effect.type === 'zoom_punch') {
+        // Already handled by camera zoom interpolation, but add flash
+        const opacity = 0.3 * (1 - effect.progress)
+        ctx.fillStyle = 'rgba(255, 255, 255, ' + opacity + ')'
+        ctx.fillRect(0, 0, canvas.width, canvas.height)
+      }
+    }
 
     // Draw framing rect overlay in camera mode (persistent - Matt's fix v2)
     if (mode === 'camera') {
@@ -1021,8 +1103,10 @@ export function StoryboardEditor() {
     await window.indieForge.pipeline.updateShot(projectId!, selectedShotId!, { cameraTrack: newTrack })
     const proj = await window.indieForge.projects.open(projectId!)
     setActiveProject(proj)
-    setEditingCamera(false)
-    setSelectedCameraIndex(null)
+    
+    // Keep inspector open and jump to key time so user sees the change
+    setPlaybackTime(updated.t)
+    // Don't close inspector - let user iteratively adjust
   }
   
   const handleDeleteCameraKeyframe = async (index: number) => {
@@ -1080,8 +1164,10 @@ export function StoryboardEditor() {
       await window.indieForge.pipeline.updatePreset(effect.presetId, { params })
       const updated = await window.indieForge.projects.open(projectId!)
       setActiveProject(updated)
-      setSelectedEffectIndex(null)
-      setEditingEffect(false)
+      
+      // Keep inspector open and jump to effect time so user sees the result
+      setPlaybackTime(effect.t)
+      // Don't close inspector - let user iteratively adjust
     } catch (err) {
       console.error('Failed to update effect:', err)
       alert(err instanceof Error ? err.message : 'Failed to update effect')
@@ -1721,6 +1807,34 @@ export function StoryboardEditor() {
                   touchAction: 'none'
                 }}
               />
+              
+              {mode === 'camera' && (() => {
+                const cam = getInterpolatedCamera(playbackTime)
+                if (!cam) return null
+                const targetLabel = typeof cam.target === 'string' 
+                  ? selectedShot?.layers.find(l => l.id === cam.target)?.characterId || 'layer'
+                  : `(${cam.target.x.toFixed(2)}, ${cam.target.y.toFixed(2)})`
+                return (
+                  <div style={{
+                    marginTop: '0.5rem',
+                    padding: '0.5rem',
+                    background: 'rgba(0, 170, 255, 0.15)',
+                    borderRadius: '4px',
+                    fontSize: '0.8rem',
+                    color: '#00AAFF',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center'
+                  }}>
+                    <span>
+                      <strong>Camera:</strong> Zoom {cam.zoom.toFixed(2)}x · Target: {targetLabel}
+                    </span>
+                    <span style={{ color: 'var(--muted)', fontSize: '0.75rem' }}>
+                      @ {playbackTime.toFixed(2)}s
+                    </span>
+                  </div>
+                )
+              })()}
             </div>
 
             {/* Timeline */}
