@@ -1,20 +1,25 @@
 /**
  * Asset Thumbnail Component
- * 
- * Handles loading thumbnails using proper Electron file protocol
+ *
+ * Library grid preview: root thumbnail if present, else default-state file.
+ * Uses sanctioned useLocalFilePreview (data URL for PNG).
  */
 
 import React from 'react'
 import { useLocalFilePreview } from '../hooks/useLocalFilePreview'
-import type { VisualAsset } from '@shared/types/assetPipeline'
+import type { AssetState, VisualAsset } from '@shared/types/assetPipeline'
+import { resolveLibraryPreviewPath } from '@shared/storyboard/layerValidation'
 
 interface AssetThumbnailProps {
   asset: VisualAsset
+  states?: AssetState[]
+  gameId?: string
   style?: React.CSSProperties
 }
 
-export function AssetThumbnail({ asset, style }: AssetThumbnailProps) {
-  const thumbnailSrc = useLocalFilePreview(asset.thumbnail)
+export function AssetThumbnail({ asset, states = [], gameId, style }: AssetThumbnailProps) {
+  const previewPath = resolveLibraryPreviewPath(asset, states, { gameId }).path
+  const thumbnailSrc = useLocalFilePreview(previewPath)
 
   // Show thumbnail if loaded
   if (thumbnailSrc) {

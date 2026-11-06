@@ -243,6 +243,8 @@ const api: IndieForgeAPI = {
   assetStates: {
     list: (assetId) =>
       ipcRenderer.invoke(IPC_CHANNELS.ASSET_STATE_LIST, assetId),
+    listForGame: (gameId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.ASSET_STATE_LIST_FOR_GAME, gameId),
     get: (stateId) =>
       ipcRenderer.invoke(IPC_CHANNELS.ASSET_STATE_GET, stateId),
     create: (assetId, name, sourcePath) =>

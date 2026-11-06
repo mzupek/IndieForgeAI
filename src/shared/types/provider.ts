@@ -613,6 +613,7 @@ export interface IndieForgeAPI {
   }
   assetStates: {
     list: (assetId: string) => Promise<any[]>
+    listForGame: (gameId: string) => Promise<any[]>
     get: (stateId: string) => Promise<any | undefined>
     create: (assetId: string, name: string, sourcePath: string) => Promise<any>
     update: (state: any) => Promise<any>

@@ -456,6 +456,21 @@ export async function getAssetStates(assetId: string, dataDirOverride?: string):
 }
 
 /**
+ * Asset states whose parent visual asset belongs to the selected Game.
+ * One pipeline read — used by Library grid previews.
+ */
+export async function getAssetStatesForGame(
+  gameId: string,
+  dataDirOverride?: string
+): Promise<import('@shared/types/assetPipeline').AssetState[]> {
+  const pipeline = await getAssetPipeline(dataDirOverride)
+  const ids = new Set(
+    (pipeline.visualAssets || []).filter((a) => a.gameId === gameId).map((a) => a.id)
+  )
+  return (pipeline.assetStates || []).filter((s) => ids.has(s.assetId))
+}
+
+/**
  * Get a single asset state by ID
  */
 export async function getAssetState(stateId: string, dataDirOverride?: string): Promise<import('@shared/types/assetPipeline').AssetState | undefined> {

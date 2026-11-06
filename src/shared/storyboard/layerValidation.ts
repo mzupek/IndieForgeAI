@@ -118,6 +118,33 @@ export function resolveVisualAssetImagePath(
   return { error: `Visual asset '${asset.name}' has no static image and no states` }
 }
 
+/**
+ * Library grid preview path. Does not mutate asset records.
+ * Prefers authored root thumbnail (static --image); otherwise the Game-scoped
+ * default state's imported file via resolveVisualAssetImagePath. Missing or
+ * invalid refs return no path (caller shows the category icon). Never throws.
+ */
+export function resolveLibraryPreviewPath(
+  asset: VisualAsset,
+  states: AssetState[],
+  options?: { gameId?: string }
+): { path?: string } {
+  try {
+    if (options?.gameId && asset.gameId !== options.gameId) {
+      return {}
+    }
+    if (asset.thumbnail) {
+      return { path: asset.thumbnail }
+    }
+    const owned = (states || []).filter((s) => s && s.assetId === asset.id)
+    const resolved = resolveVisualAssetImagePath(asset, null, owned)
+    if (resolved.path) return { path: resolved.path }
+    return {}
+  } catch {
+    return {}
+  }
+}
+
 export function resolveLayerImagePath(
   layer: StoryboardLayer,
   pipeline: AssetPipelineProject

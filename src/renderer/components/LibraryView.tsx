@@ -18,6 +18,7 @@ export function LibraryView() {
   const navigate = useNavigate()
   const location = useLocation()
   const [editingAsset, setEditingAsset] = useState<VisualAsset | null>(null)
+  const [libraryEpoch, setLibraryEpoch] = useState(0)
   
   // Determine active tab from URL or default to visual-assets
   const searchParams = new URLSearchParams(location.search)
@@ -106,6 +107,7 @@ export function LibraryView() {
         {activeTab === 'visual-assets' ? (
           <AssetLibrary
             gameId={gameId}
+            reloadEpoch={libraryEpoch}
             onAssetEdit={(asset) => setEditingAsset(asset)}
           />
         ) : (
@@ -125,8 +127,12 @@ export function LibraryView() {
           asset={editingAsset}
           onSave={(updated) => {
             setEditingAsset(updated)
+            setLibraryEpoch((n) => n + 1)
           }}
-          onClose={() => setEditingAsset(null)}
+          onClose={() => {
+            setEditingAsset(null)
+            setLibraryEpoch((n) => n + 1)
+          }}
         />
       )}
     </div>

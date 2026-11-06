@@ -5,20 +5,22 @@
  * Game-scoped (respects selected game from context)
  */
 
-import React, { useState, useEffect } from 'react'
-import type { VisualAsset } from '@shared/types/assetPipeline'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
+import type { AssetState, VisualAsset } from '@shared/types/assetPipeline'
 import { CreateAssetModal } from './CreateAssetModal'
 import { ConfirmModal } from './ConfirmModal'
 import { AssetThumbnail } from './AssetThumbnail'
 
 interface AssetLibraryProps {
   gameId: string
+  reloadEpoch?: number
   onAssetSelect?: (asset: VisualAsset) => void
   onAssetEdit?: (asset: VisualAsset) => void
 }
 
-export function AssetLibrary({ gameId, onAssetSelect, onAssetEdit }: AssetLibraryProps) {
+export function AssetLibrary({ gameId, reloadEpoch = 0, onAssetSelect, onAssetEdit }: AssetLibraryProps) {
   const [assets, setAssets] = useState<VisualAsset[]>([])
+  const [states, setStates] = useState<AssetState[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
@@ -29,24 +31,35 @@ export function AssetLibrary({ gameId, onAssetSelect, onAssetEdit }: AssetLibrar
 
   const categories = ['all', 'logo', 'symbol', 'item', 'weapon', 'prop']
 
-  // Load assets when game changes
-  useEffect(() => {
-    loadAssets()
-  }, [gameId])
-
-  async function loadAssets() {
+  // Load assets + Game-scoped states together; ignore stale responses after Game switch
+  const loadGenRef = useRef(0)
+  const loadAssets = useCallback(async () => {
+    const gen = ++loadGenRef.current
     try {
       setLoading(true)
       setError(null)
-      const loaded = await window.indieForge.visualAssets.list(gameId)
+      const [loaded, loadedStates] = await Promise.all([
+        window.indieForge.visualAssets.list(gameId),
+        window.indieForge.assetStates.listForGame(gameId)
+      ])
+      if (gen !== loadGenRef.current) return
       setAssets(loaded)
+      setStates(loadedStates)
     } catch (err: any) {
+      if (gen !== loadGenRef.current) return
       setError(err.message || 'Failed to load assets')
       console.error('Failed to load assets:', err)
     } finally {
-      setLoading(false)
+      if (gen === loadGenRef.current) setLoading(false)
     }
-  }
+  }, [gameId])
+
+  useEffect(() => {
+    void loadAssets()
+    return () => {
+      loadGenRef.current++
+    }
+  }, [gameId, reloadEpoch, loadAssets])
 
   async function handleCreateSave(asset: VisualAsset) {
     await loadAssets()
@@ -209,7 +222,7 @@ export function AssetLibrary({ gameId, onAssetSelect, onAssetEdit }: AssetLibrar
                   marginBottom: '0.5rem',
                   overflow: 'hidden'
                 }}>
-                  <AssetThumbnail asset={asset} />
+                  <AssetThumbnail asset={asset} states={states} gameId={gameId} />
                 </div>
                 
                 {/* Asset info */}

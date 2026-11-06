@@ -112,6 +112,7 @@ import {
   updateVisualAsset,
   deleteVisualAsset,
   getAssetStates,
+  getAssetStatesForGame,
   getAssetState,
   addAssetState,
   updateAssetState,
@@ -1198,6 +1199,11 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.ASSET_STATE_LIST,
     async (_e, assetId: string) => getAssetStates(assetId)
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.ASSET_STATE_LIST_FOR_GAME,
+    async (_e, gameId: string) => getAssetStatesForGame(gameId)
   )
 
   ipcMain.handle(
