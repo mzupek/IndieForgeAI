@@ -23,6 +23,7 @@ interface Options {
   name?: string
   category?: 'logo' | 'symbol' | 'item' | 'weapon' | 'prop'
   tags?: string
+  image?: string
 }
 
 async function verifyGameExists(gameId: string, dataDir?: string) {
@@ -117,6 +118,7 @@ export async function create(options: Options): Promise<void> {
     
     const now = new Date().toISOString()
     const assetId = randomUUID()
+    const dataDir = options.dataDir || getDataDir()
     
     const asset: VisualAsset = {
       id: assetId,
@@ -130,6 +132,32 @@ export async function create(options: Options): Promise<void> {
       updatedAt: now
     }
     
+    // Handle optional image import for static assets
+    if (options.image) {
+      const assetsDir = join(dataDir, 'assets', assetId)
+      await mkdir(assetsDir, { recursive: true })
+      
+      // Validate file extension
+      const ext = extname(options.image).toLowerCase()
+      if (ext !== '.png') {
+        throw new Error(`Image must be PNG format, got: ${ext}`)
+      }
+      
+      // Copy image file
+      const imagePath = join(assetsDir, 'image.png')
+      await copyFile(options.image, imagePath)
+      
+      // Generate thumbnail
+      const thumbPath = join(assetsDir, 'thumbnail.png')
+      await sharp(options.image)
+        .resize(256, 256, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
+        .png()
+        .toFile(thumbPath)
+      
+      // Set thumbnail path on asset
+      asset.thumbnail = thumbPath
+    }
+    
     await addVisualAsset(asset, options.dataDir)
     
     if (options.json) {
@@ -138,7 +166,14 @@ export async function create(options: Options): Promise<void> {
       console.log(`\nCreated visual asset: ${asset.name} (${asset.id})`)
       console.log(`  Category: ${asset.category}`)
       console.log(`  Game: ${options.game}`)
+      if (options.image) {
+        console.log(`  Image: imported from ${options.image}`)
+        console.log(`  Thumbnail: generated`)
+      }
       console.log(`\nNext steps:`)
+      if (!options.image) {
+        console.log(`  - Add image: forge asset update ${assetId} --game ${options.game} --image "./path.png"`)
+      }
       console.log(`  - Add states: forge asset-state create --game ${options.game} --asset ${assetId} --name "..." --file "./path.png"`)
       console.log(`  - Or use as single-state asset in scenes`)
     }
@@ -175,6 +210,33 @@ export async function update(assetId: string, options: Options): Promise<void> {
       asset.tags = options.tags.split(',').map(t => t.trim())
     }
     
+    // Handle image update
+    if (options.image) {
+      const dataDir = options.dataDir || getDataDir()
+      const assetsDir = join(dataDir, 'assets', assetId)
+      await mkdir(assetsDir, { recursive: true })
+      
+      // Validate file extension
+      const ext = extname(options.image).toLowerCase()
+      if (ext !== '.png') {
+        throw new Error(`Image must be PNG format, got: ${ext}`)
+      }
+      
+      // Copy image file
+      const imagePath = join(assetsDir, 'image.png')
+      await copyFile(options.image, imagePath)
+      
+      // Generate thumbnail
+      const thumbPath = join(assetsDir, 'thumbnail.png')
+      await sharp(options.image)
+        .resize(256, 256, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
+        .png()
+        .toFile(thumbPath)
+      
+      // Update thumbnail path
+      asset.thumbnail = thumbPath
+    }
+    
     asset.updatedAt = new Date().toISOString()
     
     await updateVisualAsset(asset, options.dataDir)
@@ -183,6 +245,10 @@ export async function update(assetId: string, options: Options): Promise<void> {
       output(asset, options)
     } else {
       console.log(`\nUpdated visual asset: ${asset.name} (${asset.id})`)
+      if (options.image) {
+        console.log(`  Image: imported from ${options.image}`)
+        console.log(`  Thumbnail: generated`)
+      }
     }
   } catch (err) {
     outputError(err, options)

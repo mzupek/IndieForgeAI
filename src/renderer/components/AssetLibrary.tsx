@@ -222,7 +222,7 @@ export function AssetLibrary({ gameId, onAssetSelect, onAssetEdit }: AssetLibrar
                   }
                 }}
               >
-                {/* Thumbnail placeholder */}
+                {/* Thumbnail */}
                 <div style={{
                   width: '100%',
                   aspectRatio: '1',
@@ -232,13 +232,28 @@ export function AssetLibrary({ gameId, onAssetSelect, onAssetEdit }: AssetLibrar
                   alignItems: 'center',
                   justifyContent: 'center',
                   marginBottom: '0.5rem',
-                  fontSize: '2rem'
+                  fontSize: '2rem',
+                  overflow: 'hidden'
                 }}>
-                  {asset.category === 'logo' && '🏷️'}
-                  {asset.category === 'symbol' && '⚡'}
-                  {asset.category === 'item' && '📦'}
-                  {asset.category === 'weapon' && '⚔️'}
-                  {asset.category === 'prop' && '🎨'}
+                  {asset.thumbnail ? (
+                    <img 
+                      src={`local-file://${asset.thumbnail}`} 
+                      alt={asset.name}
+                      style={{ 
+                        maxWidth: '100%', 
+                        maxHeight: '100%', 
+                        objectFit: 'contain' 
+                      }}
+                    />
+                  ) : (
+                    <>
+                      {asset.category === 'logo' && '🏷️'}
+                      {asset.category === 'symbol' && '⚡'}
+                      {asset.category === 'item' && '📦'}
+                      {asset.category === 'weapon' && '⚔️'}
+                      {asset.category === 'prop' && '🎨'}
+                    </>
+                  )}
                 </div>
                 
                 {/* Asset info */}

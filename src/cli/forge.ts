@@ -119,6 +119,7 @@ assetCmd
   .requiredOption('--name <name>', 'Asset name')
   .requiredOption('--category <category>', 'Category (logo|symbol|item|weapon|prop)')
   .option('--tags <tags>', 'Comma-separated tags')
+  .option('--image <path>', 'PNG image file path (for static single-image assets)')
   .action(async (options) => {
     await asset.create({ ...program.opts(), ...options })
   })
@@ -131,6 +132,7 @@ assetCmd
   .option('--name <name>', 'Asset name')
   .option('--category <category>', 'Category (logo|symbol|item|weapon|prop)')
   .option('--tags <tags>', 'Comma-separated tags')
+  .option('--image <path>', 'PNG image file path (add/replace static image)')
   .action(async (assetId, options) => {
     await asset.update(assetId, { ...program.opts(), ...options })
   })
