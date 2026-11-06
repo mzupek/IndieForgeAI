@@ -320,6 +320,13 @@ export async function updateVisualAsset(asset: import('@shared/types/assetPipeli
   if (index === -1) {
     throw new Error(`Visual asset not found: ${asset.id}`)
   }
+  
+  // Guard: prevent changing gameId (cross-game modification)
+  const existing = pipeline.visualAssets[index]
+  if (existing.gameId !== asset.gameId) {
+    throw new Error(`Cannot change gameId of asset '${asset.name}'. Cross-game moves are not allowed.`)
+  }
+  
   pipeline.visualAssets[index] = asset
   await updateAssetPipeline(pipeline, dataDirOverride)
 }
@@ -375,6 +382,13 @@ export async function getAssetState(stateId: string, dataDirOverride?: string): 
  */
 export async function addAssetState(state: import('@shared/types/assetPipeline').AssetState, dataDirOverride?: string): Promise<void> {
   const pipeline = await getAssetPipeline(dataDirOverride)
+  
+  // Guard: validate parent asset exists
+  const parentAsset = pipeline.visualAssets.find(a => a.id === state.assetId)
+  if (!parentAsset) {
+    throw new Error(`Cannot add state '${state.name}': parent asset '${state.assetId}' not found`)
+  }
+  
   pipeline.assetStates.push(state)
   await updateAssetPipeline(pipeline, dataDirOverride)
 }
@@ -388,6 +402,13 @@ export async function updateAssetState(state: import('@shared/types/assetPipelin
   if (index === -1) {
     throw new Error(`Asset state not found: ${state.id}`)
   }
+  
+  // Guard: prevent changing assetId (cross-asset move)
+  const existing = pipeline.assetStates[index]
+  if (existing.assetId !== state.assetId) {
+    throw new Error(`Cannot change assetId of state '${state.name}'. Cross-asset moves are not allowed.`)
+  }
+  
   pipeline.assetStates[index] = state
   await updateAssetPipeline(pipeline, dataDirOverride)
 }
