@@ -569,6 +569,19 @@ export function StoryboardEditor() {
     ctx.fillRect(0, 0, canvas.width, canvas.height)
     ctx.restore()
 
+    // Apply shake effect BEFORE drawing (affects entire canvas)
+    ctx.save()
+    const activeEffects = getActiveEffects(playbackTime)
+    const shakeEffect = activeEffects.find(e => e.type === 'shake')
+    if (shakeEffect) {
+      const intensity = (shakeEffect.params.intensity as number) || 10
+      // Use progress for fade-out: shake strongest at start, fades as progress → 1
+      const shakeAmount = intensity * (1 - shakeEffect.progress)
+      const shakeX = (Math.random() - 0.5) * shakeAmount
+      const shakeY = (Math.random() - 0.5) * shakeAmount
+      ctx.translate(shakeX, shakeY)
+    }
+
     // Draw background image if present (before camera transform)
     if (backgroundImage) {
       const bgAspect = backgroundImage.width / backgroundImage.height
@@ -746,19 +759,12 @@ export function StoryboardEditor() {
       }
     }
 
-    ctx.restore()
+    ctx.restore()  // Restore camera transform
+    ctx.restore()  // Restore shake transform (applied before drawing)
     
-    // Apply active effects (Matt's fix - make effects visible)
-    const activeEffects = getActiveEffects(playbackTime)
+    // Apply overlay effects (flash, freeze, zoom_punch - drawn on top)
     for (const effect of activeEffects) {
-      if (effect.type === 'shake') {
-        const intensity = (effect.params.intensity as number) || 10
-        const shakeX = (Math.random() - 0.5) * intensity * (1 - effect.progress)
-        const shakeY = (Math.random() - 0.5) * intensity * (1 - effect.progress)
-        ctx.save()
-        ctx.translate(shakeX, shakeY)
-        ctx.restore()
-      } else if (effect.type === 'flash') {
+      if (effect.type === 'flash') {
         const color = (effect.params.color as string) || 'white'
         const opacity = ((effect.params.opacity as number) || 0.8) * (1 - effect.progress)
         ctx.fillStyle = color
