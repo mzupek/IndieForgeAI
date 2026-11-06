@@ -7,6 +7,10 @@ import { mapFilenameToSlot } from '@shared/poseValidation'
 import { getAssetPipeline, updateAssetPipeline } from '@core/storage/studioStorage'
 import { getDataDir } from '@core/storage/dataDir'
 import { output, outputError } from '../utils/output'
+import {
+  collectPoseBindingUsage,
+  formatBindingInUseError
+} from '../../shared/storyboard/eventValidation'
 import { join } from 'path'
 
 interface Options {
@@ -173,6 +177,10 @@ export async function remove(poseId: string, options: Options): Promise<void> {
     }
     
     const pose = pipeline.poses[poseIndex]
+    const bindingUsage = collectPoseBindingUsage(pipeline, poseId)
+    if (bindingUsage.labels.length > 0) {
+      throw new Error(formatBindingInUseError('pose', pose.slot, bindingUsage.labels))
+    }
     pipeline.poses.splice(poseIndex, 1)
     await updateAssetPipeline(pipeline, options.dataDir)
     

@@ -198,6 +198,16 @@ function testAssetPipelineProject() {
         updatedAt: now
       }
     ],
+    scenes: [],
+    storyboards: [],
+    storyboardShots: [],
+    gameDefinitions: [],
+    visualAssets: [],
+    assetStates: [],
+    fonts: [],
+    palettes: [],
+    eventDefinitions: [],
+    eventBindings: [],
     exportProfiles: [
       {
         id: 'export-1',
@@ -234,6 +244,16 @@ function testJsonSerialization() {
     poses: [],
     clips: [],
     scenePresets: [],
+    scenes: [],
+    storyboards: [],
+    storyboardShots: [],
+    gameDefinitions: [],
+    visualAssets: [],
+    assetStates: [],
+    fonts: [],
+    palettes: [],
+    eventDefinitions: [],
+    eventBindings: [],
     exportProfiles: [],
     createdAt: now,
     updatedAt: now

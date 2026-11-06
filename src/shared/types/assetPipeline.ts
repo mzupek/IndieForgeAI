@@ -322,6 +322,54 @@ export interface StoryboardLayer {
   }
 }
 
+/** P3: After a timed event action, return to authored default or hold the override. */
+export type EventReturnPolicy = 'default' | 'hold'
+
+export type EventBindingAction =
+  | { type: 'setPose'; poseId: string }
+  | { type: 'setState'; stateId: string }
+  | { type: 'setVisibility'; visible: boolean }
+  | { type: 'setText'; text: string }
+
+export interface EventPayloadSchema {
+  type: 'object'
+  properties: Record<string, 'string' | 'number' | 'boolean'>
+}
+
+/**
+ * P3: Named game event the engine may fire (hit_received, etc.).
+ * Forge authors and preview-simulates responses; Unity/Godot detect real hits.
+ */
+export interface EventDefinition {
+  id: string
+  gameId: string
+  name: string
+  description?: string
+  payloadSchema?: EventPayloadSchema
+  schemaVersion: 1
+  createdAt: string
+  updatedAt: string
+}
+
+/**
+ * P3: Shot binding: event → layer → pose/state/visibility/text action.
+ * Authored defaults live on the layer; preview holds never write this record.
+ */
+export interface EventBinding {
+  id: string
+  shotId: string
+  eventId: string
+  targetLayerId: string
+  action: EventBindingAction
+  payloadFilter?: Record<string, string | number | boolean>
+  /** 0 = instant (no timer). >0 starts a hold; returnPolicy decides expiry. */
+  durationSec: number
+  returnPolicy: EventReturnPolicy
+  schemaVersion: 1
+  createdAt: string
+  updatedAt: string
+}
+
 /**
  * Camera keyframe for shot cinematography
  */
@@ -520,6 +568,10 @@ export interface AssetPipelineProject {
   fonts: Font[]
   /** P2: Color palettes for text layers */
   palettes: Palette[]
+  /** P3: Game-scoped event definitions */
+  eventDefinitions: EventDefinition[]
+  /** P3: Shot-scoped event → layer bindings */
+  eventBindings: EventBinding[]
   createdAt: string
   updatedAt: string
 }

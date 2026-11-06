@@ -2,9 +2,13 @@ import { randomUUID } from 'crypto'
 import { copyFile, mkdir } from 'fs/promises'
 import { basename, extname, join } from 'path'
 import sharp from 'sharp'
-import type { Pose, PoseSlot } from '@shared/types/assetPipeline'
+import type { AssetPipelineProject, Pose, PoseSlot } from '@shared/types/assetPipeline'
 import type { PoseMetadata } from '@shared/poseValidation'
 import { loadProject, saveProject } from './projectStore'
+import {
+  collectPoseBindingUsage,
+  formatBindingInUseError
+} from '../../shared/storyboard/eventValidation'
 
 function getPoseAssetsDir(projectId: string): string {
   const { app } = require('electron')
@@ -175,6 +179,18 @@ export async function removePose(
   
   if (!project.assetPipeline) {
     throw new Error('Project has no asset pipeline data')
+  }
+
+  const pose = project.assetPipeline.poses.find((p) => p.id === poseId)
+  if (!pose) {
+    throw new Error(`Pose not found: ${poseId}`)
+  }
+  const bindingUsage = collectPoseBindingUsage(
+    project.assetPipeline as unknown as AssetPipelineProject,
+    poseId
+  )
+  if (bindingUsage.labels.length > 0) {
+    throw new Error(formatBindingInUseError('pose', pose.slot, bindingUsage.labels))
   }
 
   project.assetPipeline.poses = project.assetPipeline.poses.filter(

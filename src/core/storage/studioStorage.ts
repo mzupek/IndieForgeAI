@@ -16,6 +16,10 @@ import {
   collectPaletteLayerUsage,
   formatInUseError
 } from '../../shared/storyboard/layerValidation'
+import {
+  collectStateBindingUsage,
+  formatBindingInUseError
+} from '../../shared/storyboard/eventValidation'
 
 interface StudioData {
   schemaVersion: number
@@ -57,7 +61,9 @@ function createEmptyStudioData(): StudioData {
       assetStates: [],
       fonts: [],
       palettes: [],
-      createdAt: now,
+      eventDefinitions: [],
+      eventBindings: [],
+    createdAt: now,
       updatedAt: now
     },
     createdAt: now,
@@ -139,6 +145,12 @@ async function migrateFromProjects(dataDirOverride?: string): Promise<StudioData
     for (const profile of project.assetPipeline.exportProfiles || []) {
       studio.assetPipeline.exportProfiles.push(profile)
     }
+    for (const event of (project.assetPipeline as { eventDefinitions?: typeof studio.assetPipeline.eventDefinitions }).eventDefinitions || []) {
+      studio.assetPipeline.eventDefinitions.push(event)
+    }
+    for (const binding of (project.assetPipeline as { eventBindings?: typeof studio.assetPipeline.eventBindings }).eventBindings || []) {
+      studio.assetPipeline.eventBindings.push(binding)
+    }
   }
   
   return studio
@@ -186,6 +198,14 @@ export async function loadStudio(dataDirOverride?: string): Promise<StudioData> 
       }
       if (!studio.assetPipeline.palettes) {
         studio.assetPipeline.palettes = []
+      }
+
+      // Migrate: ensure event definitions/bindings exist (P3)
+      if (!studio.assetPipeline.eventDefinitions) {
+        studio.assetPipeline.eventDefinitions = []
+      }
+      if (!studio.assetPipeline.eventBindings) {
+        studio.assetPipeline.eventBindings = []
       }
       
       // Migrate: ensure StoryboardLayer.visible exists (P2)
@@ -498,6 +518,10 @@ export async function deleteAssetState(stateId: string, dataDirOverride?: string
     const usage = collectAssetStateLayerUsage(pipeline, stateId)
     if (usage.labels.length > 0) {
       throw new Error(formatInUseError('state', state.name, usage.labels))
+    }
+    const bindingUsage = collectStateBindingUsage(pipeline, stateId)
+    if (bindingUsage.labels.length > 0) {
+      throw new Error(formatBindingInUseError('state', state.name, bindingUsage.labels))
     }
   }
   

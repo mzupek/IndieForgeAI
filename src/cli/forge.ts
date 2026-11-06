@@ -14,6 +14,7 @@ import * as validate from './commands/validate'
 import * as status from './commands/status'
 import { registerStoryboardCommands } from './commands/storyboard'
 import { registerSceneCommands } from './commands/scene'
+import { registerEventCommands } from './commands/event'
 import * as asset from './commands/asset'
 import * as assetState from './commands/asset-state'
 
@@ -376,6 +377,9 @@ program
 
 // Storyboard commands (storyboard, shot, layer, camera, effect)
 registerStoryboardCommands(program)
+
+// P3: event + binding
+registerEventCommands(program)
 
 // Scene commands (Phase C)
 registerSceneCommands(program)

@@ -16,9 +16,19 @@ import type {
   AssetState,
   Font,
   Palette,
-  AssetPipelineProject
+  AssetPipelineProject,
+  EventDefinition,
+  EventBinding
 } from '@shared/types/assetPipeline'
 import { ConfirmModal } from './ConfirmModal'
+import { EventBindingsPanel } from './EventBindingsPanel'
+import {
+  applyLayerPreview,
+  EMPTY_PREVIEW_SNAPSHOT,
+  EventPreviewEngine,
+  type EventPreviewSnapshot,
+  type PrimitivePayload
+} from '@shared/storyboard/eventPreview'
 import {
   getLayerKind,
   resolveLayerImagePath,
@@ -406,6 +416,10 @@ export function StoryboardEditor() {
   const [addTextPalette, setAddTextPalette] = useState(DEFAULT_PALETTE_REF)
   const [layerError, setLayerError] = useState<string | null>(null)
   const [confirmDeleteLayer, setConfirmDeleteLayer] = useState(false)
+  const [previewSnapshot, setPreviewSnapshot] = useState<EventPreviewSnapshot>(EMPTY_PREVIEW_SNAPSHOT)
+  const previewEngineRef = useRef(new EventPreviewEngine())
+  const wasPlayingRef = useRef(false)
+  const previewTickRafRef = useRef<number | null>(null)
   const [libraryAssets, setLibraryAssets] = useState<VisualAsset[]>([])
   const [libraryStates, setLibraryStates] = useState<AssetState[]>([])
   const [showAddEffect, setShowAddEffect] = useState(false)
@@ -443,6 +457,22 @@ export function StoryboardEditor() {
   const fonts = (activeProject?.assetPipeline?.fonts ?? []).filter((f: Font) => f.gameId === gameId)
   const palettes = (activeProject?.assetPipeline?.palettes ?? []).filter((p: Palette) => p.gameId === gameId)
   const pipeline = activeProject?.assetPipeline as AssetPipelineProject | undefined
+  const eventDefinitions: EventDefinition[] =
+    pipeline?.eventDefinitions?.filter((e) => e.gameId === gameId) ?? []
+  const eventBindings: EventBinding[] =
+    pipeline?.eventBindings?.filter((b) => b.shotId === selectedShotId) ?? []
+
+  const previewLayer = (layer: StoryboardLayer): StoryboardLayer =>
+    applyLayerPreview(layer, previewSnapshot.overrides[layer.id])
+
+  const commitPreview = () => {
+    setPreviewSnapshot(previewEngineRef.current.snapshot())
+  }
+
+  const resetEventPreview = () => {
+    previewEngineRef.current.reset()
+    commitPreview()
+  }
   
   // Phase C: Find scene attached to this storyboard
   const attachedScene = selectedStoryboard?.sceneId 
@@ -494,7 +524,48 @@ export function StoryboardEditor() {
     loadBg()
   }, [selectedShot?.backgroundImage])
 
-  // Load images
+  // Keep preview engine catalog in sync; never persist preview holds
+  useEffect(() => {
+    const engine = previewEngineRef.current
+    engine.setCatalog(pipeline?.eventDefinitions || [], pipeline?.eventBindings || [])
+  }, [pipeline?.eventDefinitions, pipeline?.eventBindings])
+
+  useEffect(() => {
+    const engine = previewEngineRef.current
+    engine.setShot(selectedShotId ?? null)
+    commitPreview()
+  }, [selectedShotId])
+
+  useEffect(() => {
+    if (playbackState === 'stopped' && wasPlayingRef.current) {
+      resetEventPreview()
+    }
+    wasPlayingRef.current = playbackState === 'playing'
+  }, [playbackState])
+
+  useEffect(() => {
+    const engine = previewEngineRef.current
+    if (!engine.hasPendingTimers()) return
+    const tick = (now: number) => {
+      if (engine.tick(now)) {
+        commitPreview()
+      }
+      if (engine.hasPendingTimers()) {
+        previewTickRafRef.current = requestAnimationFrame(tick)
+      } else {
+        previewTickRafRef.current = null
+      }
+    }
+    previewTickRafRef.current = requestAnimationFrame(tick)
+    return () => {
+      if (previewTickRafRef.current !== null) {
+        cancelAnimationFrame(previewTickRafRef.current)
+        previewTickRafRef.current = null
+      }
+    }
+  }, [previewSnapshot.generation, previewSnapshot.holds.length])
+
+  // Load images (authored + preview pose/state overlays; preview never writes layers)
   useEffect(() => {
     if (!selectedShot) return
 
@@ -516,7 +587,8 @@ export function StoryboardEditor() {
       const newImages = new Map<string, LoadedImage>()
       const pipe = activeProject?.assetPipeline
       
-      for (const layer of selectedShot.layers) {
+      for (const raw of selectedShot.layers) {
+        const layer = previewLayer(raw)
         if (layer.visible === false) continue
         let path: string | undefined
         if (pipe && (layer.visualAssetId || layer.poseId || layer.clipId || layer.imagePath)) {
@@ -537,7 +609,7 @@ export function StoryboardEditor() {
     }
 
     loadAllImages()
-  }, [selectedShot, poses, clips, activeProject?.assetPipeline])
+  }, [selectedShot, poses, clips, activeProject?.assetPipeline, previewSnapshot])
 
   // Get interpolated camera state
   const getInterpolatedCamera = useCallback((time: number): { target: {x: number, y: number}, zoom: number, framingRect?: any } | null => {
@@ -694,8 +766,8 @@ export function StoryboardEditor() {
       }
     }
 
-    // Draw layers
-    const sortedLayers = [...selectedShot.layers].sort((a, b) => a.zOrder - b.zOrder)
+    // Draw layers (preview overlays pose/state/visibility/text; authored defaults unchanged)
+    const sortedLayers = [...selectedShot.layers].map(previewLayer).sort((a, b) => a.zOrder - b.zOrder)
     
     for (const layer of sortedLayers) {
       if (layer.visible === false) continue
@@ -880,7 +952,7 @@ export function StoryboardEditor() {
         ctx.fillRect(rectX + rectW - 2, rectY + rectH - handleSize + 2, 4, handleSize)
       }
     }
-  }, [selectedShot, selectedLayerId, mode, playbackTime, loadedImages, dragStart, getInterpolatedCamera, pipeline, gameId])
+  }, [selectedShot, selectedLayerId, mode, playbackTime, loadedImages, dragStart, getInterpolatedCamera, pipeline, gameId, previewSnapshot])
 
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (!canvasRef.current || !selectedShot) return
@@ -956,7 +1028,7 @@ export function StoryboardEditor() {
     
     if (mode === 'layout') {
       // Select layer
-      const sortedLayers = [...selectedShot.layers].sort((a, b) => b.zOrder - a.zOrder)
+      const sortedLayers = [...selectedShot.layers].map(previewLayer).sort((a, b) => b.zOrder - a.zOrder)
       for (const layer of sortedLayers) {
         const img = loadedImages.get(layer.id)
         if (hitTestLayer(layer, x, y, canvas.width, !!img)) {
@@ -1592,7 +1664,7 @@ export function StoryboardEditor() {
         
         if (newTime >= selectedShot.durationSec) {
           if (loopPlayback) {
-            // Loop: restart from beginning
+            queueMicrotask(() => resetEventPreview())
             return 0
           } else {
             // Stop: clamp to duration and stop playback
@@ -2765,6 +2837,20 @@ export function StoryboardEditor() {
                   </div>
                   <div style={{ fontSize: '0.9rem', fontWeight: 'bold' }}>{label}</div>
                   {character && pose && <div style={{ fontSize: '0.8rem', opacity: 0.8 }}>Starting pose: {pose.slot}</div>}
+                  {previewSnapshot.overrides[layer.id] && (
+                    <div style={{ fontSize: '0.75rem', marginTop: '0.2rem', fontWeight: 'bold' }}>
+                      PREVIEW
+                      {previewSnapshot.overrides[layer.id].poseId
+                        ? `: ${poses.find(p => p.id === previewSnapshot.overrides[layer.id].poseId)?.slot || previewSnapshot.overrides[layer.id].poseId}`
+                        : previewSnapshot.overrides[layer.id].assetStateId
+                          ? `: ${assetStates.find(s => s.id === previewSnapshot.overrides[layer.id].assetStateId)?.name || previewSnapshot.overrides[layer.id].assetStateId}`
+                          : previewSnapshot.overrides[layer.id].visible === false
+                            ? ': hidden'
+                            : previewSnapshot.overrides[layer.id].text !== undefined
+                              ? `: “${previewSnapshot.overrides[layer.id].text}”`
+                              : ''}
+                    </div>
+                  )}
                   {refError && (
                     <div style={{ fontSize: '0.75rem', color: selectedLayerId === layer.id ? '#5a0000' : '#ff8a8a', marginTop: '0.25rem' }}>
                       {refError}
@@ -3209,6 +3295,28 @@ export function StoryboardEditor() {
               </div>
             </div>
           )}
+              {pipeline && selectedShotId && (
+                <EventBindingsPanel
+                  gameId={gameId}
+                  shotId={selectedShotId}
+                  layers={selectedShot.layers}
+                  pipeline={pipeline}
+                  poses={poses}
+                  assetStates={assetStates}
+                  events={eventDefinitions}
+                  bindings={eventBindings}
+                  previewSnapshot={previewSnapshot}
+                  onProjectChanged={async () => {
+                    const updated = await window.indieForge.projects.open(projectId!)
+                    setActiveProject(updated)
+                  }}
+                  onFire={(eventId, payload) => {
+                    previewEngineRef.current.fire(eventId, performance.now(), payload as PrimitivePayload | undefined)
+                    commitPreview()
+                  }}
+                  onResetPreview={resetEventPreview}
+                />
+              )}
               </>
             ) : (
               <>

@@ -187,6 +187,8 @@ function makePipeline(): AssetPipelineProject {
     assetStates: [stateA1, stateB1],
     fonts: [font],
     palettes: [palette],
+    eventDefinitions: [],
+    eventBindings: [],
     createdAt: now,
     updatedAt: now
   }

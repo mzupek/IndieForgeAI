@@ -8,6 +8,7 @@ import type {
 } from '@shared/types/assetPipeline'
 import { getAssetPipeline, updateAssetPipeline } from './studioStorage'
 import { validateLayerReferences } from '../../shared/storyboard/layerValidation'
+import { purgeBindingsForLayers, purgeBindingsForShots } from './eventService'
 
 /**
  * Create a new storyboard
@@ -104,6 +105,7 @@ export async function removeStoryboard(
   pipeline.storyboardShots = pipeline.storyboardShots.filter(
     (shot) => !storyboard.shotIds.includes(shot.id)
   )
+  purgeBindingsForShots(pipeline, storyboard.shotIds)
   
   // Remove storyboard
   pipeline.storyboards = pipeline.storyboards.filter((s) => s.id !== storyboardId)
@@ -223,6 +225,7 @@ export async function removeShot(
   storyboard.updatedAt = new Date().toISOString()
   
   pipeline.storyboardShots = pipeline.storyboardShots.filter((s) => s.id !== shotId)
+  purgeBindingsForShots(pipeline, [shotId])
   
   await updateAssetPipeline(pipeline, dataDirOverride)
 }
@@ -311,6 +314,7 @@ export async function removeLayer(
   
   shot.layers = shot.layers.filter((l) => l.id !== layerId)
   shot.updatedAt = new Date().toISOString()
+  purgeBindingsForLayers(pipeline, [layerId])
   
   await updateAssetPipeline(pipeline, dataDirOverride)
 }

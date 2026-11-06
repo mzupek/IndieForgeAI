@@ -112,5 +112,15 @@ export const IPC_CHANNELS = {
   ASSET_STATE_CREATE: 'assetState:create',
   ASSET_STATE_UPDATE: 'assetState:update',
   ASSET_STATE_DELETE: 'assetState:delete',
-  ASSET_STATE_SET_DEFAULT: 'assetState:setDefault'
+  ASSET_STATE_SET_DEFAULT: 'assetState:setDefault',
+  EVENT_LIST: 'event:list',
+  EVENT_GET: 'event:get',
+  EVENT_CREATE: 'event:create',
+  EVENT_UPDATE: 'event:update',
+  EVENT_DELETE: 'event:delete',
+  BINDING_LIST: 'binding:list',
+  BINDING_GET: 'binding:get',
+  BINDING_CREATE: 'binding:create',
+  BINDING_UPDATE: 'binding:update',
+  BINDING_DELETE: 'binding:delete'
 } as const

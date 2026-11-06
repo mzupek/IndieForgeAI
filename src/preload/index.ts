@@ -234,6 +234,20 @@ const api: IndieForgeAPI = {
     setDefault: (assetId, stateId) =>
       ipcRenderer.invoke(IPC_CHANNELS.ASSET_STATE_SET_DEFAULT, assetId, stateId)
   },
+  events: {
+    list: (gameId) => ipcRenderer.invoke(IPC_CHANNELS.EVENT_LIST, gameId),
+    get: (eventId) => ipcRenderer.invoke(IPC_CHANNELS.EVENT_GET, eventId),
+    create: (input) => ipcRenderer.invoke(IPC_CHANNELS.EVENT_CREATE, input),
+    update: (eventId, patch) => ipcRenderer.invoke(IPC_CHANNELS.EVENT_UPDATE, eventId, patch),
+    remove: (eventId) => ipcRenderer.invoke(IPC_CHANNELS.EVENT_DELETE, eventId)
+  },
+  bindings: {
+    list: (shotId) => ipcRenderer.invoke(IPC_CHANNELS.BINDING_LIST, shotId),
+    get: (bindingId) => ipcRenderer.invoke(IPC_CHANNELS.BINDING_GET, bindingId),
+    create: (input) => ipcRenderer.invoke(IPC_CHANNELS.BINDING_CREATE, input),
+    update: (bindingId, patch) => ipcRenderer.invoke(IPC_CHANNELS.BINDING_UPDATE, bindingId, patch),
+    remove: (bindingId) => ipcRenderer.invoke(IPC_CHANNELS.BINDING_DELETE, bindingId)
+  },
   gameDefinitions: {
     list: () =>
       ipcRenderer.invoke(IPC_CHANNELS.GAME_DEFINITION_LIST),

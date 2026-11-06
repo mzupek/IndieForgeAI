@@ -573,6 +573,20 @@ export interface IndieForgeAPI {
     delete: (stateId: string) => Promise<{ ok: true }>
     setDefault: (assetId: string, stateId: string) => Promise<any>
   }
+  events: {
+    list: (gameId: string) => Promise<any[]>
+    get: (eventId: string) => Promise<any | undefined>
+    create: (input: { gameId: string; name: string; description?: string }) => Promise<any>
+    update: (eventId: string, patch: { name?: string; description?: string }) => Promise<any>
+    remove: (eventId: string) => Promise<{ ok: true }>
+  }
+  bindings: {
+    list: (shotId: string) => Promise<any[]>
+    get: (bindingId: string) => Promise<any | undefined>
+    create: (input: any) => Promise<any>
+    update: (bindingId: string, patch: any) => Promise<any>
+    remove: (bindingId: string) => Promise<{ ok: true }>
+  }
   gameDefinitions: {
     list: () => Promise<any[]>
     get: (id: string) => Promise<any | null>

@@ -108,6 +108,18 @@ import {
   deleteAssetState
 } from '../../core/storage/studioStorage'
 import {
+  createBinding,
+  createEvent,
+  listBindings,
+  listEvents,
+  getBinding,
+  getEvent,
+  removeBinding,
+  removeEvent,
+  updateBinding,
+  updateEvent
+} from '../../core/storage/eventService'
+import {
   createScene as createSceneInPipeline,
   getScene,
   listScenes,
@@ -1176,6 +1188,34 @@ export function registerIpcHandlers(): void {
       return asset
     }
   )
+
+  // P3: Events + bindings (preview-fire stays in the renderer; never persisted)
+  ipcMain.handle(IPC_CHANNELS.EVENT_LIST, async (_e, gameId: string) => listEvents(gameId))
+  ipcMain.handle(IPC_CHANNELS.EVENT_GET, async (_e, eventId: string) => getEvent(eventId))
+  ipcMain.handle(
+    IPC_CHANNELS.EVENT_CREATE,
+    async (_e, input: { gameId: string; name: string; description?: string }) => createEvent(input)
+  )
+  ipcMain.handle(
+    IPC_CHANNELS.EVENT_UPDATE,
+    async (_e, eventId: string, patch: { name?: string; description?: string }) =>
+      updateEvent(eventId, patch)
+  )
+  ipcMain.handle(IPC_CHANNELS.EVENT_DELETE, async (_e, eventId: string) => {
+    await removeEvent(eventId)
+    return { ok: true as const }
+  })
+  ipcMain.handle(IPC_CHANNELS.BINDING_LIST, async (_e, shotId: string) => listBindings(shotId))
+  ipcMain.handle(IPC_CHANNELS.BINDING_GET, async (_e, bindingId: string) => getBinding(bindingId))
+  ipcMain.handle(IPC_CHANNELS.BINDING_CREATE, async (_e, input: any) => createBinding(input))
+  ipcMain.handle(
+    IPC_CHANNELS.BINDING_UPDATE,
+    async (_e, bindingId: string, patch: any) => updateBinding(bindingId, patch)
+  )
+  ipcMain.handle(IPC_CHANNELS.BINDING_DELETE, async (_e, bindingId: string) => {
+    await removeBinding(bindingId)
+    return { ok: true as const }
+  })
 }
 
 export async function ensureAppDataDirs(): Promise<void> {
