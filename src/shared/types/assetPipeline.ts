@@ -281,6 +281,21 @@ export interface StoryboardLayer {
   clipId?: string
   imagePath?: string
   
+  /** P2: Visual asset references */
+  visualAssetId?: string
+  /** P2: Asset state ID (null = use asset's default state, undefined = no asset) */
+  assetStateId?: string | null
+  
+  /** P2: Text content */
+  text?: string
+  /** P2: Font reference (ID from Game Definition fonts or "default") */
+  fontRef?: string
+  /** P2: Palette reference (ID from Game Definition palettes or "default") */
+  paletteRef?: string
+  
+  /** P2: Visibility flag */
+  visible: boolean
+  
   /** Transform in normalized stage coordinates [0,1] */
   x: number
   y: number
@@ -397,6 +412,40 @@ export interface Storyboard {
 }
 
 /**
+ * P2: Font definition
+ */
+export interface Font {
+  id: string
+  name: string
+  family: string
+  weight?: string
+  style?: string
+  source: 'system' | 'custom'
+  file?: string
+  schemaVersion: 1
+  createdAt: string
+  updatedAt: string
+}
+
+/**
+ * P2: Color palette definition
+ */
+export interface Palette {
+  id: string
+  name: string
+  colors: {
+    primary: string
+    secondary: string
+    accent: string
+    background: string
+    text: string
+  }
+  schemaVersion: 1
+  createdAt: string
+  updatedAt: string
+}
+
+/**
  * Visual asset - generic reusable art asset with optional states
  * Distinct from character poses (which remain import-only 1024 PNGs)
  * P1: Generic visual assets (logos, symbols, items, weapons, props)
@@ -459,6 +508,10 @@ export interface AssetPipelineProject {
   visualAssets: VisualAsset[]
   /** P1: Asset states for multi-state assets */
   assetStates: AssetState[]
+  /** P2: Fonts for text layers */
+  fonts: Font[]
+  /** P2: Color palettes for text layers */
+  palettes: Palette[]
   createdAt: string
   updatedAt: string
 }

@@ -166,6 +166,27 @@ export async function loadStudio(dataDirOverride?: string): Promise<StudioData> 
         studio.assetPipeline.assetStates = []
       }
       
+      // Migrate: ensure fonts and palettes exist (P2)
+      if (!studio.assetPipeline.fonts) {
+        studio.assetPipeline.fonts = []
+      }
+      if (!studio.assetPipeline.palettes) {
+        studio.assetPipeline.palettes = []
+      }
+      
+      // Migrate: ensure StoryboardLayer.visible exists (P2)
+      if (studio.assetPipeline.storyboardShots) {
+        for (const shot of studio.assetPipeline.storyboardShots) {
+          if (shot.layers) {
+            for (const layer of shot.layers) {
+              if (layer.visible === undefined) {
+                layer.visible = true
+              }
+            }
+          }
+        }
+      }
+      
       // Migrate: ensure scenes field exists (Phase C)
       if (!studio.assetPipeline.scenes) {
         studio.assetPipeline.scenes = []
