@@ -54,8 +54,7 @@ export function formatAudioDuration(seconds: number): string {
 }
 
 /**
- * In-use collector. A1 has no shot audioTrack / playSfx yet; still scans optional
- * forward fields so delete cannot orphan later refs if they appear in JSON.
+ * In-use collector: shot audioTrack (A2) and event playSfx bindings (A3).
  */
 export function collectAudioUsage(
   pipeline: AssetPipelineProject,
@@ -72,7 +71,7 @@ export function collectAudioUsage(
   for (const binding of pipeline.eventBindings || []) {
     const action = binding.action as { type: string; audioId?: string }
     if (action.type === 'playSfx' && action.audioId === audioId) {
-      labels.push(`event binding ${binding.id}`)
+      labels.push(`event binding ${binding.id} playSfx`)
     }
   }
   return { labels }

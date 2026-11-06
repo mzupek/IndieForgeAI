@@ -1167,6 +1167,20 @@ forge shot update --id <shotId> --duration 3
 
 `sample` prints active blocks, source time, and fade gain. It is preview-only and never persisted.
 
+### Event SFX (A3)
+
+`playSfx` is a **binding action** on a named event. It is **not** coupled to timed pose/state keys. Bind `playSfx` on the same event as `setPose` / `setState` / `setText` / `setVisibility` so one Fire button both changes the layer and plays a one-shot. `targetLayerId` is not required for `playSfx`.
+
+Preview never writes authored layers, defaults, or `shot.audioTrack`. `forge event fire` reports preview SFX state with `persisted: false`. That output is **not** host speaker audio.
+
+Playback: `durationSec` 0 plays the file once to completion unless Reset / Stop / shot change. Positive duration + `returnPolicy default` stops the voice at expiry. `hold` can play until completion / reset / stop. Event SFX never loops. Repeating the same binding cancels and restarts its voice; unrelated voices may overlap.
+
+```bash
+forge binding create --game <gameId> --shot <shotId> --event <eventId> --action playSfx --audio <audioId> [--volume 1] [--duration 0] [--return-policy default|hold] [--json]
+forge binding create --game <gameId> --shot <shotId> --event <eventId> --layer <layerId> --action setPose --pose <poseId> --duration 0.5 [--json]
+forge event fire --game <gameId> --shot <shotId> --event <eventId> [--now-ms 0] [--tick-ms 200] [--json]
+```
+
 ---
 
 ## Layer Management

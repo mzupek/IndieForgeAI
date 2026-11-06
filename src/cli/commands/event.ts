@@ -29,10 +29,12 @@ function parseAction(options: {
   state?: string
   visible?: string
   text?: string
+  audio?: string
+  volume?: string
 }): EventBindingAction {
   const type = options.action
   if (!type) {
-    throw new Error('--action is required (setPose|setState|setVisibility|setText)')
+    throw new Error('--action is required (setPose|setState|setVisibility|setText|playSfx)')
   }
   if (type === 'setPose') {
     if (!options.pose) throw new Error('--pose is required for setPose')
@@ -50,7 +52,18 @@ function parseAction(options: {
     if (options.text === undefined) throw new Error('--text is required for setText')
     return { type: 'setText', text: options.text }
   }
-  throw new Error(`Unknown action '${type}'. Use setPose|setState|setVisibility|setText`)
+  if (type === 'playSfx') {
+    if (!options.audio) throw new Error('--audio is required for playSfx')
+    const volume =
+      options.volume !== undefined && options.volume !== '' ? Number(options.volume) : undefined
+    if (volume !== undefined && (!Number.isFinite(volume) || volume < 0 || volume > 1)) {
+      throw new Error(`--volume must be between 0 and 1, got '${options.volume}'`)
+    }
+    return volume === undefined
+      ? { type: 'playSfx', audioId: options.audio }
+      : { type: 'playSfx', audioId: options.audio, volume }
+  }
+  throw new Error(`Unknown action '${type}'. Use setPose|setState|setVisibility|setText|playSfx`)
 }
 
 function parseOptionalAction(options: {
@@ -59,8 +72,17 @@ function parseOptionalAction(options: {
   state?: string
   visible?: string
   text?: string
+  audio?: string
+  volume?: string
 }): EventBindingAction | undefined {
-  if (!options.action && !options.pose && !options.state && options.visible === undefined && options.text === undefined) {
+  if (
+    !options.action &&
+    !options.pose &&
+    !options.state &&
+    options.visible === undefined &&
+    options.text === undefined &&
+    !options.audio
+  ) {
     return undefined
   }
   return parseAction({ ...options, action: options.action || inferAction(options) })
@@ -71,7 +93,9 @@ function inferAction(options: {
   state?: string
   visible?: string
   text?: string
+  audio?: string
 }): string | undefined {
+  if (options.audio) return 'playSfx'
   if (options.pose) return 'setPose'
   if (options.state) return 'setState'
   if (options.visible !== undefined) return 'setVisibility'
@@ -95,7 +119,7 @@ function parsePayload(value?: string): Record<string, string | number | boolean>
 export function registerEventCommands(program: Command): void {
   const eventCmd = program
     .command('event')
-    .description('Manage game events and preview-fire simulated responses (P3)')
+    .description('Manage game events and preview-fire simulated responses (P3/A3; fire is not host speaker audio)')
 
   eventCmd
     .command('list')
@@ -228,7 +252,7 @@ export function registerEventCommands(program: Command): void {
   eventCmd
     .command('fire')
     .description(
-      'Preview-fire an event in Forge only (does not persist; Unity/Godot detect real hits)'
+      'Preview-fire an event in Forge only (does not persist; reports preview SFX state, not host speaker audio)'
     )
     .requiredOption('--game <gameId>', 'Game ID')
     .requiredOption('--shot <shotId>', 'Shot ID')
@@ -290,20 +314,34 @@ export function registerEventCommands(program: Command): void {
             previewText: effective.text ?? null
           }
         })
+        const authoredAudioTrack = (persisted?.audioTrack || []).map((b) => ({ ...b }))
         const result = {
           fire: simulated.fire,
           snapshot: simulated.snapshot,
           previewLayers,
           authoredDefaults,
+          sfx: (simulated.snapshot.sfx || []).map((s) => ({
+            bindingId: s.bindingId,
+            audioId: s.audioId,
+            volume: s.volume,
+            durationSec: s.durationSec,
+            returnPolicy: s.returnPolicy,
+            stopOnExpiry: s.stopOnExpiry,
+            generation: s.generation,
+            persisted: false
+          })),
+          authoredAudioTrack,
           persisted: false,
-          note: 'Preview only. Authored layer defaults were not written.'
+          note:
+            'Preview only. Authored layer defaults and audioTrack were not written. This reports preview state, not host speaker audio.'
         }
         if (mergedOpts.json) {
           output(result, mergedOpts)
         } else {
           console.log(`Fired ${event.name}: matched ${simulated.fire.matched}`)
           console.log(`Preview holds: ${simulated.snapshot.holds.length}`)
-          console.log('Authored defaults were not persisted.')
+          console.log(`Preview SFX: ${result.sfx.length} (persisted: false)`)
+          console.log('Authored defaults and audioTrack were not persisted.')
         }
       } catch (err) {
         outputError(err, { ...cmd.parent!.parent!.opts(), ...options })
@@ -313,7 +351,7 @@ export function registerEventCommands(program: Command): void {
 
   const bindingCmd = program
     .command('binding')
-    .description('Manage shot event bindings (event → layer → pose/state/visibility)')
+    .description('Manage shot event bindings (event → layer action and/or playSfx)')
 
   bindingCmd
     .command('list')
@@ -330,8 +368,10 @@ export function registerEventCommands(program: Command): void {
         } else {
           console.log(`Found ${bindings.length} binding(s):`)
           for (const b of bindings) {
+            const target =
+              b.action.type === 'playSfx' ? 'playSfx' : `layer ${b.targetLayerId || '-'}`
             console.log(
-              `  ${b.id}: event ${b.eventId} → layer ${b.targetLayerId} ${describeBindingAction(b.action)} (${b.durationSec}s ${b.returnPolicy})`
+              `  ${b.id}: event ${b.eventId} → ${target} ${describeBindingAction(b.action)} (${b.durationSec}s ${b.returnPolicy})`
             )
           }
         }
@@ -358,7 +398,7 @@ export function registerEventCommands(program: Command): void {
           console.log(binding.id)
           console.log(`  Shot: ${binding.shotId}`)
           console.log(`  Event: ${binding.eventId}`)
-          console.log(`  Layer: ${binding.targetLayerId}`)
+          console.log(`  Layer: ${binding.targetLayerId || '(none — playSfx needs no layer)'}`)
           console.log(`  Action: ${describeBindingAction(binding.action)}`)
           console.log(`  Duration: ${binding.durationSec}s  Return: ${binding.returnPolicy}`)
         }
@@ -370,18 +410,20 @@ export function registerEventCommands(program: Command): void {
 
   bindingCmd
     .command('create')
-    .description('Bind an event to a layer action on a shot')
+    .description('Bind an event to a layer action and/or playSfx on a shot')
     .requiredOption('--game <gameId>', 'Game ID (must match the shot\'s storyboard)')
     .requiredOption('--shot <shotId>', 'Shot ID')
     .requiredOption('--event <eventId>', 'Event ID')
-    .requiredOption('--layer <layerId>', 'Target layer ID')
-    .requiredOption('--action <type>', 'setPose | setState | setVisibility | setText')
+    .option('--layer <layerId>', 'Target layer ID (required except playSfx)')
+    .requiredOption('--action <type>', 'setPose | setState | setVisibility | setText | playSfx')
     .option('--pose <poseId>', 'Pose ID (setPose)')
     .option('--state <stateId>', 'Asset state ID (setState)')
     .option('--visible <bool>', 'true|false (setVisibility)')
     .option('--text <content>', 'Text content (setText)')
-    .option('--duration <sec>', 'Hold duration in seconds (0 = instant)', '0')
-    .option('--return-policy <policy>', "default (return to authored) | hold", 'default')
+    .option('--audio <audioId>', 'Library audio ID (playSfx)')
+    .option('--volume <0-1>', 'playSfx linear gain (default 1)')
+    .option('--duration <sec>', 'Hold duration in seconds (0 = instant / playSfx plays once to completion)', '0')
+    .option('--return-policy <policy>', "default (return to authored / stop SFX at expiry) | hold", 'default')
     .option('--filter <json>', 'Optional payload filter JSON')
     .action(async (options, cmd) => {
       try {
@@ -417,11 +459,13 @@ export function registerEventCommands(program: Command): void {
     .option('--game <gameId>', 'Game ID (scope check)')
     .option('--event <eventId>', 'Event ID')
     .option('--layer <layerId>', 'Target layer ID')
-    .option('--action <type>', 'setPose | setState | setVisibility | setText')
+    .option('--action <type>', 'setPose | setState | setVisibility | setText | playSfx')
     .option('--pose <poseId>', 'Pose ID (setPose)')
     .option('--state <stateId>', 'Asset state ID (setState)')
     .option('--visible <bool>', 'true|false (setVisibility)')
     .option('--text <content>', 'Text content (setText)')
+    .option('--audio <audioId>', 'Library audio ID (playSfx)')
+    .option('--volume <0-1>', 'playSfx linear gain')
     .option('--duration <sec>', 'Hold duration in seconds')
     .option('--return-policy <policy>', 'default | hold')
     .option('--filter <json>', 'Payload filter JSON (empty to clear)')

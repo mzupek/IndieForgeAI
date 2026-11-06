@@ -81,6 +81,13 @@ import {
   silenceAudioVoices,
   type AudioVoice
 } from '@shared/storyboard/audioPlayback'
+import {
+  applyEventSfxPlayback,
+  cancelEventSfxVoices,
+  disposeEventSfxVoices,
+  markEventSfxEnded,
+  type EventSfxVoice
+} from '@shared/storyboard/eventSfxPlayback'
 
 type EditorMode = 'layout' | 'camera'
 type DragMode = 'move' | 'scale' | 'rotate' | 'framingRect' | 'cameraMarker' | 'effectMarker' | null
@@ -514,8 +521,11 @@ export function StoryboardEditor() {
   const [shotDurationDraft, setShotDurationDraft] = useState('')
   const [shotDurationError, setShotDurationError] = useState<string | null>(null)
   const audioVoicesRef = useRef<Map<string, AudioVoice>>(new Map())
+  const eventSfxVoicesRef = useRef<Map<string, EventSfxVoice>>(new Map())
   const lastPlaybackTimeRef = useRef(0)
   const [audioEpoch, setAudioEpoch] = useState(0)
+  const [eventSfxEpoch, setEventSfxEpoch] = useState(0)
+  const [eventSfxError, setEventSfxError] = useState<string | null>(null)
   const videosRef = useRef<Map<string, LoadedVideo>>(new Map())
   const [videoEpoch, setVideoEpoch] = useState(0)
   const [previewSnapshot, setPreviewSnapshot] = useState<EventPreviewSnapshot>(EMPTY_PREVIEW_SNAPSHOT)
@@ -605,7 +615,9 @@ export function StoryboardEditor() {
 
   const resetEventPreview = () => {
     previewEngineRef.current.reset()
+    cancelEventSfxVoices(eventSfxVoicesRef.current)
     commitPreview()
+    setEventSfxEpoch((n) => n + 1)
   }
   
   // Phase C: Find scene attached to this storyboard
@@ -1023,14 +1035,144 @@ export function StoryboardEditor() {
     lastPlaybackTimeRef.current = playbackTime
   }, [playbackTime, playbackState, selectedShot, audioEpoch, dragMode])
 
+  const playSfxBindings = eventBindings.filter((b) => b.action.type === 'playSfx')
+
+  useEffect(() => {
+    const needed = new Set(playSfxBindings.map((b) => b.id))
+    for (const [id, voice] of eventSfxVoicesRef.current) {
+      if (!needed.has(id)) {
+        voice.playGeneration += 1
+        if (!voice.element.paused) voice.element.pause()
+        try {
+          voice.element.src = ''
+        } catch {
+          /* ignore */
+        }
+        eventSfxVoicesRef.current.delete(id)
+      }
+    }
+    let cancelled = false
+    const load = async () => {
+      for (const binding of playSfxBindings) {
+        if (cancelled) return
+        if (binding.action.type !== 'playSfx') continue
+        const existing = eventSfxVoicesRef.current.get(binding.id)
+        if (
+          existing &&
+          (existing.status === 'ready' || existing.status === 'loading') &&
+          existing.audioId === binding.action.audioId
+        ) {
+          continue
+        }
+        if (existing) {
+          existing.playGeneration += 1
+          if (!existing.element.paused) existing.element.pause()
+          try {
+            existing.element.src = ''
+          } catch {
+            /* ignore */
+          }
+        }
+        const asset = (pipeline?.audioAssets || []).find((a) => a.id === binding.action.audioId)
+        const makeStub = (status: EventSfxVoice['status'], message: string): EventSfxVoice => ({
+          bindingId: binding.id,
+          audioId: binding.action.type === 'playSfx' ? binding.action.audioId : '',
+          element: document.createElement('audio'),
+          url: '',
+          status,
+          message,
+          playGeneration: 0,
+          appliedGeneration: 0,
+          completedGeneration: -1
+        })
+        if (!asset) {
+          eventSfxVoicesRef.current.set(binding.id, makeStub('missing', `Audio not found: ${binding.action.audioId}`))
+          continue
+        }
+        if (!asset.file) {
+          eventSfxVoicesRef.current.set(binding.id, makeStub('missing', `Audio '${asset.name}' has no media file`))
+          continue
+        }
+        if (!isSupportedAudioMedia(asset.file)) {
+          eventSfxVoicesRef.current.set(
+            binding.id,
+            makeStub('unsupported', unsupportedAudioMediaMessage(asset.file))
+          )
+          continue
+        }
+        try {
+          const { localUrl } = await window.indieForge.files.getLocalUrl(asset.file)
+          if (cancelled) return
+          if (!localUrl || localUrl.startsWith('local-file:')) {
+            eventSfxVoicesRef.current.set(
+              binding.id,
+              makeStub('error', 'Audio URL is not forge-file://; local-file:// is not supported')
+            )
+            continue
+          }
+          const el = document.createElement('audio')
+          el.preload = 'auto'
+          el.loop = false
+          const entry: EventSfxVoice = {
+            bindingId: binding.id,
+            audioId: binding.action.audioId,
+            element: el,
+            url: localUrl,
+            status: 'loading',
+            playGeneration: 0,
+            appliedGeneration: 0,
+            completedGeneration: -1
+          }
+          el.addEventListener('loadedmetadata', () => {
+            entry.status = 'ready'
+            setEventSfxEpoch((n) => n + 1)
+          })
+          el.addEventListener('error', () => {
+            entry.status = 'error'
+            entry.message = 'Audio failed to load (missing file, codec, or host decode)'
+            setEventSfxEpoch((n) => n + 1)
+          })
+          el.addEventListener('ended', () => {
+            markEventSfxEnded(entry)
+            setEventSfxEpoch((n) => n + 1)
+          })
+          eventSfxVoicesRef.current.set(binding.id, entry)
+          el.src = localUrl
+        } catch (err) {
+          eventSfxVoicesRef.current.set(
+            binding.id,
+            makeStub('error', err instanceof Error ? err.message : 'Failed to resolve audio URL')
+          )
+        }
+      }
+      if (!cancelled) setEventSfxEpoch((n) => n + 1)
+    }
+    void load()
+    return () => {
+      cancelled = true
+    }
+  }, [selectedShotId, pipeline?.audioAssets, pipeline?.eventBindings])
+
+  useEffect(() => {
+    applyEventSfxPlayback(previewSnapshot, eventSfxVoicesRef.current, {
+      onPlayRejected: (_id, err) => {
+        setEventSfxError(err instanceof Error ? err.message : 'Event SFX play() was rejected')
+        setEventSfxEpoch((n) => n + 1)
+      }
+    })
+  }, [previewSnapshot.generation, previewSnapshot.sfx, eventSfxEpoch])
+
   useEffect(() => {
     silenceAudioVoices(audioVoicesRef.current)
+    cancelEventSfxVoices(eventSfxVoicesRef.current)
     lastPlaybackTimeRef.current = 0
+    setEventSfxEpoch((n) => n + 1)
   }, [selectedShotId])
 
   useEffect(() => {
     return () => {
       disposeAudioVoices(audioVoicesRef.current)
+      disposeEventSfxVoices(eventSfxVoicesRef.current)
     }
   }, [])
 
@@ -1061,7 +1203,7 @@ export function StoryboardEditor() {
         previewTickRafRef.current = null
       }
     }
-  }, [previewSnapshot.generation, previewSnapshot.holds.length])
+  }, [previewSnapshot.generation, previewSnapshot.holds.length, previewSnapshot.sfx.length])
 
   // Load images from effective pose/state (event hold → timed sample → authored).
   // Depend on media signature, not raw playbackTime, so scrubbing a hold does not reload every frame.
@@ -3044,6 +3186,8 @@ export function StoryboardEditor() {
     setPlaybackState('stopped')
     setPlaybackTime(0)
     if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current)
+    // Fire is not gated on transport; Stop must cancel event SFX even if we were paused.
+    resetEventPreview()
   }
 
   useEffect(() => {
@@ -5596,11 +5740,19 @@ export function StoryboardEditor() {
                   events={eventDefinitions}
                   bindings={eventBindings}
                   previewSnapshot={previewSnapshot}
+                  audioAssets={audioAssets}
+                  sfxVoiceStatus={[...eventSfxVoicesRef.current.values()].map((v) => ({
+                    bindingId: v.bindingId,
+                    status: v.status,
+                    message: v.message
+                  }))}
+                  mixerError={eventSfxError}
                   onProjectChanged={async () => {
                     const updated = await window.indieForge.projects.open(projectId!)
                     setActiveProject(updated)
                   }}
                   onFire={(eventId, payload) => {
+                    setEventSfxError(null)
                     previewEngineRef.current.fire(eventId, performance.now(), payload as PrimitivePayload | undefined)
                     commitPreview()
                   }}

@@ -35,7 +35,7 @@ export interface CreateBindingInput {
   gameId?: string
   shotId: string
   eventId: string
-  targetLayerId: string
+  targetLayerId?: string
   action: EventBindingAction
   payloadFilter?: Record<string, string | number | boolean> | string
   durationSec?: number | string
@@ -177,7 +177,8 @@ export async function createBinding(
     id: randomUUID(),
     shotId: input.shotId,
     eventId: input.eventId,
-    targetLayerId: input.targetLayerId,
+    targetLayerId:
+      input.action.type === 'playSfx' ? undefined : input.targetLayerId,
     action: input.action,
     payloadFilter: parsePayloadFilter(input.payloadFilter),
     durationSec: parseDurationSec(input.durationSec),
@@ -212,7 +213,10 @@ export async function updateBinding(
   const next: EventBinding = {
     ...existing,
     eventId: patch.eventId ?? existing.eventId,
-    targetLayerId: patch.targetLayerId ?? existing.targetLayerId,
+    targetLayerId:
+      (patch.action ?? existing.action).type === 'playSfx'
+        ? undefined
+        : patch.targetLayerId ?? existing.targetLayerId,
     action: patch.action ?? existing.action,
     payloadFilter:
       patch.payloadFilter === null || patch.payloadFilter === ''
@@ -263,6 +267,8 @@ export function purgeBindingsForLayers(
 ): number {
   const before = (pipeline.eventBindings || []).length
   const idSet = new Set(layerIds)
-  pipeline.eventBindings = (pipeline.eventBindings || []).filter((b) => !idSet.has(b.targetLayerId))
+  pipeline.eventBindings = (pipeline.eventBindings || []).filter(
+    (b) => !b.targetLayerId || !idSet.has(b.targetLayerId)
+  )
   return before - pipeline.eventBindings.length
 }

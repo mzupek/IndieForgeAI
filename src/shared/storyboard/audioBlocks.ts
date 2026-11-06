@@ -447,4 +447,5 @@ export function assertReplacementFitsAudioBlocks(
       }
     }
   }
+  // playSfx bindings have no sourceOut trim; a shorter replacement is allowed.
 }

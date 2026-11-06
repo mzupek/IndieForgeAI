@@ -13,10 +13,17 @@ import type {
   StoryboardLayer
 } from '../types/assetPipeline'
 import { getLayerKind, getShotGameId } from './layerValidation'
+import { isSupportedAudioMedia, unsupportedAudioMediaMessage } from './audioValidation'
 
 export function ensureEventArrays(pipeline: AssetPipelineProject): void {
   if (!pipeline.eventDefinitions) pipeline.eventDefinitions = []
   if (!pipeline.eventBindings) pipeline.eventBindings = []
+}
+
+export function isPlaySfxAction(
+  action: EventBindingAction
+): action is Extract<EventBindingAction, { type: 'playSfx' }> {
+  return action.type === 'playSfx'
 }
 
 export function describeBindingAction(action: EventBindingAction): string {
@@ -29,6 +36,10 @@ export function describeBindingAction(action: EventBindingAction): string {
       return `setVisibility ${action.visible}`
     case 'setText':
       return `setText ${JSON.stringify(action.text)}`
+    case 'playSfx': {
+      const vol = action.volume === undefined ? '' : ` vol=${action.volume}`
+      return `playSfx ${action.audioId}${vol}`
+    }
   }
 }
 
@@ -174,9 +185,17 @@ export function validateBindingReferences(
     )
   }
 
+  const action = binding.action
+  if (action.type === 'playSfx') {
+    validatePlaySfxAction(action, pipeline, shotGameId)
+    return
+  }
+
+  if (!binding.targetLayerId) {
+    throw new Error(`Binding action '${action.type}' requires --layer / targetLayerId`)
+  }
   const { layer } = findLayerInShot(pipeline, binding.shotId, binding.targetLayerId)
   const kind = getLayerKind(layer)
-  const action = binding.action
 
   if (action.type === 'setPose') {
     if (!layer.characterId) {
@@ -215,12 +234,47 @@ export function validateBindingReferences(
   }
 }
 
+export function validatePlaySfxAction(
+  action: Extract<EventBindingAction, { type: 'playSfx' }>,
+  pipeline: AssetPipelineProject,
+  shotGameId: string
+): void {
+  const audioId = (action.audioId || '').trim()
+  if (!audioId) {
+    throw new Error('playSfx requires audioId')
+  }
+  const asset = (pipeline.audioAssets || []).find((a) => a.id === audioId)
+  if (!asset) {
+    throw new Error(`Audio not found: ${audioId}`)
+  }
+  if (asset.gameId !== shotGameId) {
+    throw new Error(
+      `Audio '${asset.name}' belongs to game '${asset.gameId}', not '${shotGameId}'`
+    )
+  }
+  if (!asset.file) {
+    throw new Error(`Audio '${asset.name}' has no media file`)
+  }
+  if (!isSupportedAudioMedia(asset.file)) {
+    throw new Error(unsupportedAudioMediaMessage(asset.file))
+  }
+  if (action.volume !== undefined) {
+    const n = Number(action.volume)
+    if (!Number.isFinite(n) || n < 0 || n > 1) {
+      throw new Error(`playSfx volume must be between 0 and 1, got '${action.volume}'`)
+    }
+  }
+}
+
 export function describeBindingRef(pipeline: AssetPipelineProject, binding: EventBinding): string {
   const shot = (pipeline.storyboardShots || []).find((s) => s.id === binding.shotId)
   const event = (pipeline.eventDefinitions || []).find((e) => e.id === binding.eventId)
   const shotName = shot?.name || binding.shotId
   const eventName = event?.name || binding.eventId
-  return `${shotName}/${eventName}/${binding.targetLayerId}`
+  if (isPlaySfxAction(binding.action)) {
+    return `${shotName}/${eventName}/playSfx ${binding.action.audioId}`
+  }
+  return `${shotName}/${eventName}/${binding.targetLayerId || 'no-layer'}`
 }
 
 export function collectEventBindingUsage(
@@ -272,7 +326,7 @@ export function collectLayerBindingUsage(
   pipeline: AssetPipelineProject,
   layerId: string
 ): EventBinding[] {
-  return (pipeline.eventBindings || []).filter((b) => b.targetLayerId === layerId)
+  return (pipeline.eventBindings || []).filter((b) => !!b.targetLayerId && b.targetLayerId === layerId)
 }
 
 export function formatBindingInUseError(kind: string, name: string, labels: string[]): string {

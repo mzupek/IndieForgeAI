@@ -35,11 +35,27 @@ export interface ActiveEventHold {
   override: PreviewLayerOverride
 }
 
+/** Transient event SFX voice. Never written to audioTrack. */
+export interface ActiveEventSfx {
+  bindingId: string
+  eventId: string
+  audioId: string
+  volume: number
+  generation: number
+  startedAtMs: number
+  /** null = play to completion unless reset/stop/shot change */
+  expiresAtMs: number | null
+  durationSec: number
+  returnPolicy: EventReturnPolicy
+  stopOnExpiry: boolean
+}
+
 export interface EventPreviewSnapshot {
   shotId: string | null
   generation: number
   overrides: Record<string, PreviewLayerOverride>
   holds: ActiveEventHold[]
+  sfx: ActiveEventSfx[]
 }
 
 export interface FireResult {
@@ -48,10 +64,11 @@ export interface FireResult {
   matched: number
   skippedFilter: number
   skippedWrongShot: number
+  sfxStarted: number
 }
 
 function emptySnapshot(shotId: string | null, generation: number): EventPreviewSnapshot {
-  return { shotId, generation, overrides: {}, holds: [] }
+  return { shotId, generation, overrides: {}, holds: [], sfx: [] }
 }
 
 export function payloadMatchesFilter(
@@ -82,6 +99,8 @@ export function overrideFromAction(
       return { ...base, visible: binding.action.visible }
     case 'setText':
       return { ...base, text: binding.action.text }
+    case 'playSfx':
+      return base
   }
 }
 
@@ -130,6 +149,7 @@ export class EventPreviewEngine {
   private shotId: string | null = null
   private generation = 0
   private holds = new Map<string, ActiveEventHold>()
+  private sfx = new Map<string, ActiveEventSfx>()
 
   setCatalog(events: EventDefinition[], bindings: EventBinding[]): void {
     this.events = events
@@ -155,6 +175,10 @@ export class EventPreviewEngine {
     for (let i = 0; i < holds.length; i++) {
       if (holds[i].expiresAtMs !== null) return true
     }
+    const sfx = Array.from(this.sfx.values())
+    for (let i = 0; i < sfx.length; i++) {
+      if (sfx[i].expiresAtMs !== null) return true
+    }
     return false
   }
 
@@ -174,6 +198,7 @@ export class EventPreviewEngine {
     let matched = 0
     let skippedFilter = 0
     let skippedWrongShot = 0
+    let sfxStarted = 0
 
     for (const binding of this.bindings) {
       if (binding.eventId !== eventId) continue
@@ -187,6 +212,30 @@ export class EventPreviewEngine {
       }
 
       this.generation += 1
+      if (binding.action.type === 'playSfx') {
+        const stopOnExpiry = binding.durationSec > 0 && binding.returnPolicy === 'default'
+        const voice: ActiveEventSfx = {
+          bindingId: binding.id,
+          eventId: binding.eventId,
+          audioId: binding.action.audioId,
+          volume:
+            binding.action.volume !== undefined && Number.isFinite(binding.action.volume)
+              ? Math.max(0, Math.min(1, binding.action.volume))
+              : 1,
+          generation: this.generation,
+          startedAtMs: nowMs,
+          expiresAtMs: stopOnExpiry ? nowMs + binding.durationSec * 1000 : null,
+          durationSec: binding.durationSec,
+          returnPolicy: binding.returnPolicy,
+          stopOnExpiry
+        }
+        this.sfx.set(binding.id, voice)
+        sfxStarted += 1
+        matched += 1
+        continue
+      }
+
+      if (!binding.targetLayerId) continue
       const override = overrideFromAction(binding)
       const hold: ActiveEventHold = {
         layerId: binding.targetLayerId,
@@ -208,7 +257,8 @@ export class EventPreviewEngine {
       eventName: event.name,
       matched,
       skippedFilter,
-      skippedWrongShot
+      skippedWrongShot,
+      sfxStarted
     }
   }
 
@@ -220,6 +270,15 @@ export class EventPreviewEngine {
       const hold = entries[i][1]
       if (hold.expiresAtMs !== null && nowMs >= hold.expiresAtMs) {
         this.holds.delete(layerId)
+        changed = true
+      }
+    }
+    const sfxEntries = Array.from(this.sfx.entries())
+    for (let i = 0; i < sfxEntries.length; i++) {
+      const bindingId = sfxEntries[i][0]
+      const voice = sfxEntries[i][1]
+      if (voice.expiresAtMs !== null && nowMs >= voice.expiresAtMs) {
+        this.sfx.delete(bindingId)
         changed = true
       }
     }
@@ -235,11 +294,17 @@ export class EventPreviewEngine {
       overrides[hold.layerId] = hold.override
       holds.push({ ...hold, override: { ...hold.override } })
     }
+    const sfx: ActiveEventSfx[] = []
+    const sfxCurrent = Array.from(this.sfx.values())
+    for (let i = 0; i < sfxCurrent.length; i++) {
+      sfx.push({ ...sfxCurrent[i] })
+    }
     return {
       shotId: this.shotId,
       generation: this.generation,
       overrides,
-      holds
+      holds,
+      sfx
     }
   }
 
@@ -249,6 +314,7 @@ export class EventPreviewEngine {
 
   private clearHolds(): void {
     this.holds.clear()
+    this.sfx.clear()
   }
 }
 

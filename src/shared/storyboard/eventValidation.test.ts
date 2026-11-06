@@ -6,6 +6,7 @@
 import type {
   AssetPipelineProject,
   AssetState,
+  AudioAsset,
   Character,
   EventBinding,
   EventDefinition,
@@ -206,7 +207,32 @@ function makePipeline(): AssetPipelineProject {
     palettes: [],
     eventDefinitions: [evt, foreignEvt],
     eventBindings: [bind],
-    audioAssets: [],
+    audioAssets: [
+      {
+        id: 'aud-hit',
+        gameId: 'game-a',
+        name: 'Hit',
+        kind: 'sfx',
+        tags: [],
+        file: '/data/audio/hit/audio.wav',
+        durationSec: 0.4,
+        schemaVersion: 1,
+        createdAt: now,
+        updatedAt: now
+      } satisfies AudioAsset,
+      {
+        id: 'aud-other',
+        gameId: 'game-b',
+        name: 'OtherHit',
+        kind: 'sfx',
+        tags: [],
+        file: '/data/audio/other/audio.wav',
+        durationSec: 0.4,
+        schemaVersion: 1,
+        createdAt: now,
+        updatedAt: now
+      } satisfies AudioAsset
+    ],
     createdAt: now,
     updatedAt: now
   }
@@ -400,12 +426,88 @@ function testSetPoseOnAssetRejected() {
   console.log('✓ setPose on non-character layer rejected')
 }
 
+function testPlaySfxValidation() {
+  const pipeline = makePipeline()
+  validateBindingReferences(
+    {
+      shotId: 'shot-a',
+      eventId: 'evt-hit',
+      action: { type: 'playSfx', audioId: 'aud-hit', volume: 0.8 },
+      durationSec: 0,
+      returnPolicy: 'default'
+    },
+    pipeline
+  )
+  assertThrows(
+    () =>
+      validateBindingReferences(
+        {
+          shotId: 'shot-a',
+          eventId: 'evt-hit',
+          action: { type: 'playSfx', audioId: 'missing' },
+          durationSec: 0,
+          returnPolicy: 'default'
+        },
+        pipeline
+      ),
+    'Audio not found',
+    'missing audio'
+  )
+  assertThrows(
+    () =>
+      validateBindingReferences(
+        {
+          shotId: 'shot-a',
+          eventId: 'evt-hit',
+          action: { type: 'playSfx', audioId: 'aud-other' },
+          durationSec: 0,
+          returnPolicy: 'default'
+        },
+        pipeline
+      ),
+    'belongs to game',
+    'wrong-game audio'
+  )
+  assertThrows(
+    () =>
+      validateBindingReferences(
+        {
+          shotId: 'shot-a',
+          eventId: 'evt-hit',
+          action: { type: 'playSfx', audioId: 'aud-hit', volume: 1.5 },
+          durationSec: 0,
+          returnPolicy: 'default'
+        },
+        pipeline
+      ),
+    'between 0 and 1',
+    'bad volume'
+  )
+  assertThrows(
+    () =>
+      validateBindingReferences(
+        {
+          shotId: 'shot-a',
+          eventId: 'evt-hit',
+          action: { type: 'setPose', poseId: 'pose-hurt' },
+          durationSec: 0,
+          returnPolicy: 'default'
+        },
+        pipeline
+      ),
+    'targetLayerId',
+    'layer action still requires layer'
+  )
+  console.log('✓ playSfx validates audio/file/game/volume; no layer required')
+}
+
 function main() {
   testValidBindings()
   testWrongParentAndMissing()
   testInUseGuards()
   testDuplicateEventName()
   testSetPoseOnAssetRejected()
+  testPlaySfxValidation()
   console.log('\nAll eventValidation tests passed')
 }
 

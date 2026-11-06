@@ -28,7 +28,7 @@ function event(partial: Partial<EventDefinition> & Pick<EventDefinition, 'id' | 
 }
 
 function binding(
-  partial: Partial<EventBinding> & Pick<EventBinding, 'id' | 'eventId' | 'targetLayerId' | 'action'>
+  partial: Partial<EventBinding> & Pick<EventBinding, 'id' | 'eventId' | 'action'>
 ): EventBinding {
   return {
     shotId: 'shot-a',
@@ -279,6 +279,105 @@ function testPayloadMatches() {
   console.log('✓ payloadMatchesFilter')
 }
 
+function testPlaySfxWithPoseSameEvent() {
+  const authored = layer({ id: 'layer-hero', poseId: 'pose-idle' })
+  const sfxBind = binding({
+    id: 'bind-sfx',
+    eventId: 'evt-hit',
+    action: { type: 'playSfx', audioId: 'aud-hit', volume: 0.7 },
+    durationSec: 0,
+    returnPolicy: 'default'
+  })
+  const engine = new EventPreviewEngine()
+  engine.setCatalog([hit], [hurtBinding, sfxBind])
+  engine.setShot('shot-a')
+  const before = JSON.stringify(authored)
+  const audioTrack = [{ id: 'blk', audioId: 'aud-bed' }]
+  const trackBefore = JSON.stringify(audioTrack)
+  const result = engine.fire('evt-hit', 0)
+  assert(result.matched === 2, 'pose + sfx matched')
+  assert(result.sfxStarted === 1, 'one sfx started')
+  const snap = engine.snapshot()
+  assert(snap.overrides['layer-hero']?.poseId === 'pose-hurt', 'pose override')
+  assert(snap.sfx.length === 1, 'sfx in snapshot')
+  assert(snap.sfx[0].audioId === 'aud-hit', 'sfx audioId')
+  assert(snap.sfx[0].volume === 0.7, 'sfx volume')
+  assert(snap.sfx[0].expiresAtMs === null, 'duration 0 does not auto-stop')
+  assert(JSON.stringify(authored) === before, 'authored layer JSON unchanged')
+  assert(JSON.stringify(audioTrack) === trackBefore, 'audioTrack JSON unchanged')
+  const firstGen = snap.sfx[0].generation
+  engine.fire('evt-hit', 100)
+  const again = engine.snapshot()
+  assert(again.sfx.length === 1, 'repeat replaces same binding voice')
+  assert(again.sfx[0].generation > firstGen, 'generation advanced (restart)')
+  assert(again.sfx[0].startedAtMs === 100, 'restarted clock')
+  engine.reset()
+  assert(engine.snapshot().sfx.length === 0, 'reset clears sfx')
+  assert(JSON.stringify(authored) === before, 'reset does not mutate authored')
+  console.log('✓ same event changes pose and sounds; repeat restarts; no authored JSON mutation')
+}
+
+function testPlaySfxExpiryHoldAndShotChange() {
+  const sfxDefault = binding({
+    id: 'bind-sfx-d',
+    eventId: 'evt-hit',
+    action: { type: 'playSfx', audioId: 'aud-hit' },
+    durationSec: 0.2,
+    returnPolicy: 'default'
+  })
+  const sfxHold = binding({
+    id: 'bind-sfx-h',
+    eventId: 'evt-other',
+    action: { type: 'playSfx', audioId: 'aud-hit' },
+    durationSec: 0.2,
+    returnPolicy: 'hold'
+  })
+  const engine = new EventPreviewEngine()
+  engine.setCatalog([hit, other], [sfxDefault, sfxHold])
+  engine.setShot('shot-a')
+  engine.fire('evt-hit', 0)
+  assert(engine.snapshot().sfx[0].stopOnExpiry === true, 'default stops at expiry')
+  engine.tick(199)
+  assert(engine.snapshot().sfx.length === 1, 'still playing before expiry')
+  engine.tick(200)
+  assert(engine.snapshot().sfx.length === 0, 'default expired stops sfx')
+  engine.fire('evt-other', 300)
+  engine.tick(10_000)
+  assert(engine.snapshot().sfx.length === 1, 'hold plays past duration until reset/stop')
+  engine.setShot('shot-b')
+  assert(engine.snapshot().sfx.length === 0, 'shot change disposes sfx')
+  console.log('✓ SFX default expiry, hold-to-completion, shot-change disposal')
+}
+
+function testTwoPlaySfxOnSameEventOverlap() {
+  const a = binding({
+    id: 'bind-sfx-a',
+    eventId: 'evt-hit',
+    action: { type: 'playSfx', audioId: 'aud-hit' }
+  })
+  const b = binding({
+    id: 'bind-sfx-b',
+    eventId: 'evt-hit',
+    action: { type: 'playSfx', audioId: 'aud-whoosh' }
+  })
+  const engine = new EventPreviewEngine()
+  engine.setCatalog([hit], [a, b])
+  engine.setShot('shot-a')
+  const result = engine.fire('evt-hit', 0)
+  assert(result.sfxStarted === 2, 'both sfx started')
+  const snap = engine.snapshot()
+  assert(snap.sfx.length === 2, 'two voices in snapshot')
+  assert(snap.sfx.some((s) => s.audioId === 'aud-hit'), 'hit present')
+  assert(snap.sfx.some((s) => s.audioId === 'aud-whoosh'), 'whoosh present')
+  const firstGens = snap.sfx.map((s) => s.generation).sort((x, y) => x - y)
+  engine.fire('evt-hit', 50)
+  const again = engine.snapshot()
+  assert(again.sfx.length === 2, 'repeat keeps two voices')
+  const nextGens = again.sfx.map((s) => s.generation).sort((x, y) => x - y)
+  assert(nextGens[0] > firstGens[0] && nextGens[1] > firstGens[1], 'both generations advanced')
+  console.log('✓ two playSfx on the same event overlap; repeat restarts each')
+}
+
 function testMissingEventThrows() {
   const engine = new EventPreviewEngine()
   engine.setCatalog([], [])
@@ -306,6 +405,9 @@ function main() {
   testSimulateHelperTick()
   testApplyLayerPreviewCopy()
   testPayloadMatches()
+  testPlaySfxWithPoseSameEvent()
+  testPlaySfxExpiryHoldAndShotChange()
+  testTwoPlaySfxOnSameEventOverlap()
   testMissingEventThrows()
   console.log('\nAll eventPreview tests passed')
 }

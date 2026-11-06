@@ -353,6 +353,7 @@ export type EventBindingAction =
   | { type: 'setState'; stateId: string }
   | { type: 'setVisibility'; visible: boolean }
   | { type: 'setText'; text: string }
+  | { type: 'playSfx'; audioId: string; volume?: number }
 
 export interface EventPayloadSchema {
   type: 'object'
@@ -375,17 +376,24 @@ export interface EventDefinition {
 }
 
 /**
- * P3: Shot binding: event → layer → pose/state/visibility/text action.
- * Authored defaults live on the layer; preview holds never write this record.
+ * P3/A3: Shot binding: event → layer action and/or playSfx.
+ * Layer actions require targetLayerId. playSfx does not (not tied to timed keys).
+ * Authored defaults / audioTrack are never written by preview.
  */
 export interface EventBinding {
   id: string
   shotId: string
   eventId: string
-  targetLayerId: string
+  /** Required for pose/state/text/visibility. Omit for playSfx. */
+  targetLayerId?: string
   action: EventBindingAction
   payloadFilter?: Record<string, string | number | boolean>
-  /** 0 = instant (no timer). >0 starts a hold; returnPolicy decides expiry. */
+  /**
+   * Layer holds: 0 = instant (until reset); >0 + default returns at expiry.
+   * playSfx: 0 = play file once to completion unless reset/stop/shot change;
+   * >0 + default stops the voice at expiry; hold plays until completion/reset/stop.
+   * Event SFX never loops.
+   */
   durationSec: number
   returnPolicy: EventReturnPolicy
   schemaVersion: 1

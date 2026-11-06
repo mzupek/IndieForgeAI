@@ -7,6 +7,7 @@ import { useState, type CSSProperties } from 'react'
 import type {
   AssetPipelineProject,
   AssetState,
+  AudioAsset,
   EventBinding,
   EventBindingAction,
   EventDefinition,
@@ -14,6 +15,7 @@ import type {
   StoryboardLayer
 } from '@shared/types/assetPipeline'
 import { bindingActionIssues, describeBindingAction } from '@shared/storyboard/eventValidation'
+import type { AudioVoiceStatus } from '@shared/storyboard/audioPlayback'
 import { describeLayerLabel } from '@shared/storyboard/layerRender'
 import { ConfirmModal } from './ConfirmModal'
 import type { EventPreviewSnapshot } from '@shared/storyboard/eventPreview'
@@ -39,6 +41,9 @@ export function EventBindingsPanel({
   events,
   bindings,
   previewSnapshot,
+  audioAssets,
+  sfxVoiceStatus,
+  mixerError,
   onProjectChanged,
   onFire,
   onResetPreview
@@ -52,6 +57,9 @@ export function EventBindingsPanel({
   events: EventDefinition[]
   bindings: EventBinding[]
   previewSnapshot: EventPreviewSnapshot
+  audioAssets: AudioAsset[]
+  sfxVoiceStatus: Array<{ bindingId: string; status: AudioVoiceStatus; message?: string }>
+  mixerError?: string | null
   onProjectChanged: () => Promise<void>
   onFire: (eventId: string, payload?: Record<string, string | number | boolean>) => void
   onResetPreview: () => void
@@ -65,6 +73,8 @@ export function EventBindingsPanel({
   const [stateId, setStateId] = useState('')
   const [visible, setVisible] = useState(true)
   const [text, setText] = useState('')
+  const [audioId, setAudioId] = useState('')
+  const [sfxVolume, setSfxVolume] = useState('1')
   const [durationSec, setDurationSec] = useState('0.5')
   const [returnPolicy, setReturnPolicy] = useState<'default' | 'hold'>('default')
   const [payloadJson, setPayloadJson] = useState('')
@@ -92,6 +102,14 @@ export function EventBindingsPanel({
     if (actionType === 'setVisibility') {
       return { type: 'setVisibility', visible }
     }
+    if (actionType === 'playSfx') {
+      if (!audioId) throw new Error('Select library audio for playSfx')
+      const volume = Number(sfxVolume)
+      if (!Number.isFinite(volume) || volume < 0 || volume > 1) {
+        throw new Error('Volume must be between 0 and 1')
+      }
+      return { type: 'playSfx', audioId, volume }
+    }
     return { type: 'setText', text }
   }
 
@@ -117,7 +135,8 @@ export function EventBindingsPanel({
     setError(null)
     try {
       if (!eventId) throw new Error('Select an event')
-      if (!layerId) throw new Error('Select a target layer')
+      const action = buildAction()
+      if (action.type !== 'playSfx' && !layerId) throw new Error('Select a target layer')
       const duration = Number(durationSec)
       if (!Number.isFinite(duration) || duration < 0) {
         throw new Error('Duration must be >= 0')
@@ -126,8 +145,8 @@ export function EventBindingsPanel({
         gameId,
         shotId,
         eventId,
-        targetLayerId: layerId,
-        action: buildAction(),
+        targetLayerId: action.type === 'playSfx' ? undefined : layerId,
+        action,
         durationSec: duration,
         returnPolicy
       })
@@ -155,18 +174,20 @@ export function EventBindingsPanel({
     }
   }
 
-  const holdCount = previewSnapshot.holds.length
+  const holdCount = previewSnapshot.holds.length + previewSnapshot.sfx.length
 
   return (
     <div style={{ marginTop: '1.25rem', paddingTop: '1rem', borderTop: '1px solid var(--border)' }}>
       <h3 style={{ fontSize: '1rem', margin: '0 0 0.35rem 0' }}>Events</h3>
       <div style={{ fontSize: '0.7rem', color: 'var(--muted)', marginBottom: '0.75rem', lineHeight: 1.35 }}>
-        Preview-fire in Forge only. Authored layer defaults are not overwritten.
+        Preview-fire in Forge only. Authored layer defaults and audioTrack are not overwritten.
+        Bind playSfx on the same named event as a pose/state/text/visibility action to hear a hit
+        and see Hurt together. playSfx is not tied to timed pose/state keys.
         Unity/Godot detect real hits.
       </div>
 
-      {error && (
-        <div style={{ fontSize: '0.75rem', color: '#ff8a8a', marginBottom: '0.5rem' }}>{error}</div>
+      {(error || mixerError) && (
+        <div style={{ fontSize: '0.75rem', color: '#ff8a8a', marginBottom: '0.5rem' }}>{error || mixerError}</div>
       )}
 
       <div style={{ display: 'flex', gap: '0.35rem', marginBottom: '0.75rem' }}>
@@ -244,10 +265,20 @@ export function EventBindingsPanel({
       )}
       {bindings.map((binding) => {
         const issue = bindingActionIssues(binding, pipeline)
-        const layer = layers.find((l) => l.id === binding.targetLayerId)
-        const label = layer ? describeLayerLabel(layer, pipeline) : binding.targetLayerId
+        const layer = binding.targetLayerId
+          ? layers.find((l) => l.id === binding.targetLayerId)
+          : undefined
+        const label = binding.action.type === 'playSfx'
+          ? 'playSfx (no layer)'
+          : layer
+            ? describeLayerLabel(layer, pipeline)
+            : binding.targetLayerId
         const ev = events.find((e) => e.id === binding.eventId)
-        const previewing = previewSnapshot.overrides[binding.targetLayerId]?.bindingId === binding.id
+        const previewing =
+          (binding.targetLayerId &&
+            previewSnapshot.overrides[binding.targetLayerId]?.bindingId === binding.id) ||
+          previewSnapshot.sfx.some((s) => s.bindingId === binding.id)
+        const sfxVoice = sfxVoiceStatus.find((v) => v.bindingId === binding.id)
         return (
           <div
             key={binding.id}
@@ -268,6 +299,14 @@ export function EventBindingsPanel({
               {previewing ? ' · PREVIEW' : ''}
             </div>
             {issue && <div style={{ color: '#ff8a8a', marginTop: '0.2rem' }}>{issue}</div>}
+            {sfxVoice && sfxVoice.status !== 'ready' && sfxVoice.status !== 'loading' && (
+              <div style={{ color: '#ff8a8a', marginTop: '0.2rem' }}>
+                {sfxVoice.message || `SFX ${sfxVoice.status}`}
+              </div>
+            )}
+            {sfxVoice?.status === 'loading' && (
+              <div style={{ color: '#9ad', marginTop: '0.2rem' }}>Loading SFX…</div>
+            )}
             <button
               type="button"
               onClick={() => setConfirmBindingId(binding.id)}
@@ -289,6 +328,7 @@ export function EventBindingsPanel({
           ))}
         </select>
       </label>
+      {actionType !== 'playSfx' && (
       <label style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.35rem' }}>
         Layer
         <select
@@ -308,17 +348,23 @@ export function EventBindingsPanel({
           ))}
         </select>
       </label>
+      )}
       <label style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.35rem' }}>
         Action
         <select
           value={actionType}
-          onChange={(e) => setActionType(e.target.value as EventBindingAction['type'])}
+          onChange={(e) => {
+            const next = e.target.value as EventBindingAction['type']
+            setActionType(next)
+            if (next === 'playSfx') setDurationSec('0')
+          }}
           style={selectStyle}
         >
           <option value="setPose">setPose</option>
           <option value="setState">setState</option>
           <option value="setVisibility">setVisibility</option>
           <option value="setText">setText</option>
+          <option value="playSfx">playSfx</option>
         </select>
       </label>
       {actionType === 'setPose' && (
@@ -355,8 +401,40 @@ export function EventBindingsPanel({
           <input value={text} onChange={(e) => setText(e.target.value)} style={{ ...selectStyle, boxSizing: 'border-box' }} />
         </label>
       )}
+      {actionType === 'playSfx' && (
+        <>
+          <label style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.35rem' }}>
+            Audio (this Game library)
+            <select value={audioId} onChange={(e) => setAudioId(e.target.value)} style={selectStyle}>
+              <option value="">Select audio</option>
+              {audioAssets.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.kind} · {a.name} ({a.durationSec.toFixed(2)}s)
+                </option>
+              ))}
+            </select>
+          </label>
+          <label style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.35rem' }}>
+            Volume (0–1)
+            <input
+              type="number"
+              min="0"
+              max="1"
+              step="0.05"
+              value={sfxVolume}
+              onChange={(e) => setSfxVolume(e.target.value)}
+              style={{ ...selectStyle, boxSizing: 'border-box' }}
+            />
+          </label>
+          <div style={{ fontSize: '0.7rem', color: 'var(--muted)', marginBottom: '0.35rem', lineHeight: 1.35 }}>
+            No layer required. Does not follow timed pose/state keys. Duration 0 plays once to
+            completion unless Reset/Stop/shot change. Positive duration + default stops at expiry;
+            hold can finish the file. Event SFX does not loop.
+          </div>
+        </>
+      )}
       <label style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.35rem' }}>
-        Duration (sec, 0 = instant)
+        Duration (sec, 0 = instant / SFX plays once)
         <input
           type="number"
           min="0"
@@ -373,8 +451,8 @@ export function EventBindingsPanel({
           onChange={(e) => setReturnPolicy(e.target.value as 'default' | 'hold')}
           style={selectStyle}
         >
-          <option value="default">default (return to authored)</option>
-          <option value="hold">hold (stay until reset / next event)</option>
+          <option value="default">default (return to authored / stop SFX at expiry)</option>
+          <option value="hold">hold (stay until reset / next event; SFX may finish)</option>
         </select>
       </label>
       <button
