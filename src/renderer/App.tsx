@@ -10,6 +10,7 @@ import { ScenesView } from './components/ScenesView'
 import { StoryboardEditor } from './components/StoryboardEditor'
 import { GameDefinitionView } from './components/GameDefinitionView'
 import { ExportView } from './components/ExportView'
+import { AssetsView } from './components/AssetsView'
 import {
   LibraryPlaceholder
 } from './components/ComingSoon'
@@ -22,6 +23,7 @@ function StudioLayout({ children }: { children: React.ReactNode }) {
     { path: '/studio/characters', label: 'Characters', phase: 1 },
     { path: '/studio/poses', label: 'Poses', phase: 2, live: true },
     { path: '/studio/clips', label: 'Clips', phase: 3, live: true },
+    { path: '/studio/assets', label: 'Assets', phase: 'P1', live: true },
     { path: '/studio/scenes', label: 'Scenes', phase: 'C', live: true },
     { path: '/studio/storyboards', label: 'Storyboards', phase: 4.5, live: true },
     { path: '/studio/definitions', label: 'Game Definitions', phase: 'B', live: true },
@@ -102,6 +104,8 @@ function AppRoutes() {
           <Route path="poses/:gameId" element={<PosesView />} />
           <Route path="clips" element={<Navigate to="/studio/clips/game-neon-recall" replace />} />
           <Route path="clips/:gameId" element={<ClipsView />} />
+          <Route path="assets" element={<Navigate to="/studio/assets/game-neon-recall" replace />} />
+          <Route path="assets/:gameId" element={<AssetsView />} />
           <Route path="scenes" element={<Navigate to="/studio/scenes/game-neon-recall" replace />} />
           <Route path="scenes/:gameId" element={<ScenesView />} />
           <Route path="storyboards" element={<Navigate to="/studio/storyboards/game-neon-recall" replace />} />
