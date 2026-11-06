@@ -206,6 +206,32 @@ const api: IndieForgeAPI = {
     createSceneStoryboard: (sceneId, input) =>
       ipcRenderer.invoke(IPC_CHANNELS.SCENE_CREATE_STORYBOARD, sceneId, input)
   },
+  visualAssets: {
+    list: (gameId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.VISUAL_ASSET_LIST, gameId),
+    get: (assetId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.VISUAL_ASSET_GET, assetId),
+    create: (asset) =>
+      ipcRenderer.invoke(IPC_CHANNELS.VISUAL_ASSET_CREATE, asset),
+    update: (asset) =>
+      ipcRenderer.invoke(IPC_CHANNELS.VISUAL_ASSET_UPDATE, asset),
+    delete: (assetId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.VISUAL_ASSET_DELETE, assetId)
+  },
+  assetStates: {
+    list: (assetId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.ASSET_STATE_LIST, assetId),
+    get: (stateId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.ASSET_STATE_GET, stateId),
+    create: (assetId, name, sourcePath) =>
+      ipcRenderer.invoke(IPC_CHANNELS.ASSET_STATE_CREATE, assetId, name, sourcePath),
+    update: (state) =>
+      ipcRenderer.invoke(IPC_CHANNELS.ASSET_STATE_UPDATE, state),
+    delete: (stateId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.ASSET_STATE_DELETE, stateId),
+    setDefault: (assetId, stateId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.ASSET_STATE_SET_DEFAULT, assetId, stateId)
+  },
   gameDefinitions: {
     list: () =>
       ipcRenderer.invoke(IPC_CHANNELS.GAME_DEFINITION_LIST),

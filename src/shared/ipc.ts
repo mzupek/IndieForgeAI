@@ -100,5 +100,16 @@ export const IPC_CHANNELS = {
   SCENE_REMOVE_CHARACTER: 'scene:removeCharacter',
   SCENE_ATTACH_PRESET: 'scene:attachPreset',
   SCENE_DETACH_PRESET: 'scene:detachPreset',
-  SCENE_CREATE_STORYBOARD: 'scene:createStoryboard'
+  SCENE_CREATE_STORYBOARD: 'scene:createStoryboard',
+  VISUAL_ASSET_LIST: 'visualAsset:list',
+  VISUAL_ASSET_GET: 'visualAsset:get',
+  VISUAL_ASSET_CREATE: 'visualAsset:create',
+  VISUAL_ASSET_UPDATE: 'visualAsset:update',
+  VISUAL_ASSET_DELETE: 'visualAsset:delete',
+  ASSET_STATE_LIST: 'assetState:list',
+  ASSET_STATE_GET: 'assetState:get',
+  ASSET_STATE_CREATE: 'assetState:create',
+  ASSET_STATE_UPDATE: 'assetState:update',
+  ASSET_STATE_DELETE: 'assetState:delete',
+  ASSET_STATE_SET_DEFAULT: 'assetState:setDefault'
 } as const

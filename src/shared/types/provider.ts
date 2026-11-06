@@ -557,6 +557,21 @@ export interface IndieForgeAPI {
     detachPresetFromScene: (sceneId: string, presetId: string) => Promise<any>
     createSceneStoryboard: (sceneId: string, input: any) => Promise<{ scene: any; storyboardId: string }>
   }
+  visualAssets: {
+    list: (gameId: string) => Promise<any[]>
+    get: (assetId: string) => Promise<any | undefined>
+    create: (asset: any) => Promise<any>
+    update: (asset: any) => Promise<any>
+    delete: (assetId: string) => Promise<{ ok: true; statesDeleted: number }>
+  }
+  assetStates: {
+    list: (assetId: string) => Promise<any[]>
+    get: (stateId: string) => Promise<any | undefined>
+    create: (assetId: string, name: string, sourcePath: string) => Promise<any>
+    update: (state: any) => Promise<any>
+    delete: (stateId: string) => Promise<{ ok: true }>
+    setDefault: (assetId: string, stateId: string) => Promise<any>
+  }
   gameDefinitions: {
     list: () => Promise<any[]>
     get: (id: string) => Promise<any | null>

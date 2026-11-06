@@ -96,6 +96,18 @@ import {
   removeEffectMarker
 } from '../../core/storage/storyboardService'
 import {
+  getVisualAssets,
+  getVisualAsset,
+  addVisualAsset,
+  updateVisualAsset,
+  deleteVisualAsset,
+  getAssetStates,
+  getAssetState,
+  addAssetState,
+  updateAssetState,
+  deleteAssetState
+} from '../../core/storage/studioStorage'
+import {
   createScene as createSceneInPipeline,
   getScene,
   listScenes,
@@ -1039,6 +1051,122 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.SCENE_CREATE_STORYBOARD,
     async (_e, sceneId: string, input: any) => createSceneStoryboard(sceneId, input)
+  )
+
+  // P1: Visual Assets
+  ipcMain.handle(
+    IPC_CHANNELS.VISUAL_ASSET_LIST,
+    async (_e, gameId: string) => getVisualAssets(gameId)
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.VISUAL_ASSET_GET,
+    async (_e, assetId: string) => getVisualAsset(assetId)
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.VISUAL_ASSET_CREATE,
+    async (_e, asset: any) => {
+      await addVisualAsset(asset)
+      return asset
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.VISUAL_ASSET_UPDATE,
+    async (_e, asset: any) => {
+      await updateVisualAsset(asset)
+      return asset
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.VISUAL_ASSET_DELETE,
+    async (_e, assetId: string) => {
+      const result = await deleteVisualAsset(assetId)
+      return { ok: true as const, ...result }
+    }
+  )
+
+  // P1: Asset States
+  ipcMain.handle(
+    IPC_CHANNELS.ASSET_STATE_LIST,
+    async (_e, assetId: string) => getAssetStates(assetId)
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.ASSET_STATE_GET,
+    async (_e, stateId: string) => getAssetState(stateId)
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.ASSET_STATE_CREATE,
+    async (_e, assetId: string, name: string, sourcePath: string) => {
+      // Import similar to pose import - copy file to assets directory
+      const { randomUUID } = await import('crypto')
+      const { copyFile, mkdir } = await import('fs/promises')
+      const { join } = await import('path')
+      const sharp = (await import('sharp')).default
+      const { getDataDir } = await import('../../core/storage/dataDir')
+      
+      const stateId = randomUUID()
+      const assetsDir = join(getDataDir(), 'assets', assetId)
+      await mkdir(assetsDir, { recursive: true })
+      
+      // Copy file
+      const statePath = join(assetsDir, `state_${stateId}.png`)
+      await copyFile(sourcePath, statePath)
+      
+      // Generate thumbnail
+      const thumbPath = join(assetsDir, `state_${stateId}_thumb.png`)
+      await sharp(sourcePath)
+        .resize(256, 256, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
+        .png()
+        .toFile(thumbPath)
+      
+      const state = {
+        id: stateId,
+        assetId,
+        name,
+        file: statePath,
+        schemaVersion: 1,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      }
+      
+      await addAssetState(state)
+      return state
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.ASSET_STATE_UPDATE,
+    async (_e, state: any) => {
+      await updateAssetState(state)
+      return state
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.ASSET_STATE_DELETE,
+    async (_e, stateId: string) => {
+      await deleteAssetState(stateId)
+      return { ok: true as const }
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.ASSET_STATE_SET_DEFAULT,
+    async (_e, assetId: string, stateId: string) => {
+      const asset = await getVisualAsset(assetId)
+      if (!asset) {
+        throw new Error(`Visual asset not found: ${assetId}`)
+      }
+      asset.defaultStateId = stateId
+      asset.updatedAt = new Date().toISOString()
+      await updateVisualAsset(asset)
+      return asset
+    }
   )
 }
 
