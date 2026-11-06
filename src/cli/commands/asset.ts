@@ -13,6 +13,7 @@ import {
   deleteVisualAsset
 } from '@core/storage/studioStorage'
 import { getDataDir } from '@core/storage/dataDir'
+import { readSourceImageSize } from '@core/storage/imageSize'
 import { output, outputError } from '../utils/output'
 import { join } from 'path'
 
@@ -148,12 +149,12 @@ export async function create(options: Options): Promise<void> {
       const imagePath = join(assetsDir, 'image.png')
       await copyFile(options.image, imagePath)
       
-      // Generate thumbnail
       const thumbPath = join(assetsDir, 'thumbnail.png')
       await sharp(options.image)
         .resize(256, 256, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
         .png()
         .toFile(thumbPath)
+      asset.pixelSize = await readSourceImageSize(options.image)
       
       asset.image = imagePath
       asset.thumbnail = thumbPath
@@ -227,12 +228,12 @@ export async function update(assetId: string, options: Options): Promise<void> {
       const imagePath = join(assetsDir, 'image.png')
       await copyFile(options.image, imagePath)
       
-      // Generate thumbnail
       const thumbPath = join(assetsDir, 'thumbnail.png')
       await sharp(options.image)
         .resize(256, 256, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
         .png()
         .toFile(thumbPath)
+      asset.pixelSize = await readSourceImageSize(options.image)
       
       asset.image = imagePath
       asset.thumbnail = thumbPath

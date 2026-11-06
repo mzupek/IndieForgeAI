@@ -50,6 +50,8 @@ import {
   getLayerPixelSize,
   hitTestLayer,
   planLayerDraw,
+  resolveLayerSourceSize,
+  SOURCE_FIT_SCALE,
   TEXT_BASE_PX
 } from '@shared/storyboard/layerRender'
 import {
@@ -1095,8 +1097,22 @@ export function StoryboardEditor() {
     for (const layer of sortedLayers) {
       if (layer.visible === false) continue
 
+      const img = loadedImages.get(layer.id)
+      const clipSample = sampleLayerClip(selectedShot, clips, layer.id, playbackTime)
+      const clipVideo = clipSample ? videosRef.current.get(clipSample.clipId) : undefined
+      const videoReady =
+        clipVideo?.status === 'ready' &&
+        clipVideo.element.readyState >= 2 &&
+        clipVideo.element.videoWidth > 0
+      const naturalSize = img
+        ? { width: img.width, height: img.height }
+        : videoReady && clipVideo
+          ? { width: clipVideo.element.videoWidth, height: clipVideo.element.videoHeight }
+          : pipeline
+            ? resolveLayerSourceSize(layer, pipeline)
+            : undefined
       const plan = pipeline
-        ? planLayerDraw(layer, pipeline, gameId)
+        ? planLayerDraw(layer, pipeline, gameId, { naturalSize })
         : null
       ctx.save()
       
@@ -1107,14 +1123,7 @@ export function StoryboardEditor() {
       ctx.rotate((layer.rotation * Math.PI) / 180)
       ctx.scale(layer.flipX ? -1 : 1, 1)
       
-      const img = loadedImages.get(layer.id)
-      const clipSample = sampleLayerClip(selectedShot, clips, layer.id, playbackTime)
-      const clipVideo = clipSample ? videosRef.current.get(clipSample.clipId) : undefined
-      const videoReady =
-        clipVideo?.status === 'ready' &&
-        clipVideo.element.readyState >= 2 &&
-        clipVideo.element.videoWidth > 0
-      const pixel = plan?.pixelSize ?? getLayerPixelSize(layer, !!(img || videoReady))
+      const pixel = plan?.pixelSize ?? getLayerPixelSize(layer, !!(img || videoReady), naturalSize)
       const hideClipLayer = !!layer.clipId && !clipSample
       
       const drawContent = () => {
@@ -1326,8 +1335,14 @@ export function StoryboardEditor() {
 
     if (mode === 'layout' && selectedLayer) {
       const img = loadedImages.get(selectedLayerId!)
-      const pixel = getLayerPixelSize(selectedLayer, !!img)
-      const size = Math.max(pixel.width, pixel.height) / canvas.width
+      const naturalSize = img
+        ? { width: img.width, height: img.height }
+        : pipeline
+          ? resolveLayerSourceSize(selectedLayer, pipeline)
+          : undefined
+      const pixel = getLayerPixelSize(selectedLayer, !!img, naturalSize)
+      const halfW = pixel.width / 2 / canvas.width
+      const halfH = pixel.height / 2 / canvas.height
       const handleSize = 20 / canvas.width
       
       const lx = selectedLayer.x
@@ -1355,7 +1370,7 @@ export function StoryboardEditor() {
       }
       
       // Check rotation handle (rotated position above top edge)
-      const rotHandle = rotatePoint(lx, ly - size / 2 - 20 / canvas.width)
+      const rotHandle = rotatePoint(lx, ly - halfH - 20 / canvas.height)
       if (Math.hypot(x - rotHandle.x, y - rotHandle.y) < handleSize / 2) {
         setDragMode('rotate')
         setDragStart({ x, y, clientX: e.clientX, clientY: e.clientY, layerX: lx, layerY: ly, layerRotation: selectedLayer.rotation })
@@ -1364,10 +1379,10 @@ export function StoryboardEditor() {
       
       // Check corner handles (rotated corners)
       const corners = [
-        rotatePoint(lx - size / 2, ly - size / 2),
-        rotatePoint(lx + size / 2, ly - size / 2),
-        rotatePoint(lx - size / 2, ly + size / 2),
-        rotatePoint(lx + size / 2, ly + size / 2)
+        rotatePoint(lx - halfW, ly - halfH),
+        rotatePoint(lx + halfW, ly - halfH),
+        rotatePoint(lx - halfW, ly + halfH),
+        rotatePoint(lx + halfW, ly + halfH)
       ]
       
       for (const corner of corners) {
@@ -1380,7 +1395,7 @@ export function StoryboardEditor() {
       
       // Check body (move) - use inverse rotation to check if click is inside unrotated rect
       const localPoint = invRotatePoint(x, y)
-      if (Math.abs(localPoint.x - lx) <= size / 2 && Math.abs(localPoint.y - ly) <= size / 2) {
+      if (Math.abs(localPoint.x - lx) <= halfW && Math.abs(localPoint.y - ly) <= halfH) {
         setDragMode('move')
         setDragStart({ x, y, clientX: e.clientX, clientY: e.clientY, layerX: lx, layerY: ly })
         return
@@ -1392,7 +1407,12 @@ export function StoryboardEditor() {
       const sortedLayers = [...selectedShot.layers].map(previewLayer).sort((a, b) => b.zOrder - a.zOrder)
       for (const layer of sortedLayers) {
         const img = loadedImages.get(layer.id)
-        if (hitTestLayer(layer, x, y, canvas.width, !!img)) {
+        const naturalSize = img
+          ? { width: img.width, height: img.height }
+          : pipeline
+            ? resolveLayerSourceSize(layer, pipeline)
+            : undefined
+        if (hitTestLayer(layer, x, y, canvas.width, !!img, { naturalSize, canvasHeight: canvas.height })) {
           setSelectedLayerId(layer.id)
           return
         }
@@ -1989,6 +2009,20 @@ export function StoryboardEditor() {
       backgroundAssetStateId: stateId,
       backgroundImage: null
     })
+  }
+
+  const handleFitSourceAspect = async (layerId: string) => {
+    if (!projectId || !selectedShotId) return
+    try {
+      setLayerError(null)
+      await window.indieForge.pipeline.updateLayer(projectId, selectedShotId, layerId, {
+        scale: SOURCE_FIT_SCALE
+      })
+      const updated = await window.indieForge.projects.open(projectId)
+      setActiveProject(updated)
+    } catch (err) {
+      setLayerError(err instanceof Error ? err.message : 'Failed to reset source aspect')
+    }
   }
 
   const handleChangeLibraryBackgroundState = async (stateId: string | null) => {
@@ -3998,6 +4032,18 @@ export function StoryboardEditor() {
                         ? assetStates.find((s) => s.id === layer.assetStateId)?.name || layer.assetStateId
                         : 'default / static'}
                     </div>
+                  )}
+                  {selectedLayerId === layer.id && layer.visualAssetId && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        void handleFitSourceAspect(layer.id)
+                      }}
+                      style={{ width: '100%', marginTop: '0.35rem', fontSize: '0.75rem', padding: '0.3rem' }}
+                    >
+                      Reset to source aspect
+                    </button>
                   )}
                   {layer.clipId && (() => {
                     const sample = sampleLayerClip(selectedShot, clips, layer.id, playbackTime)

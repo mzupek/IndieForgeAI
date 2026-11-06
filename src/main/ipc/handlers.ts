@@ -1208,8 +1208,9 @@ export function registerIpcHandlers(): void {
       // Copy file
       const statePath = join(assetsDir, `state_${stateId}.png`)
       await copyFile(sourcePath, statePath)
+      const { readSourceImageSize } = await import('../../core/storage/imageSize')
+      const sourceSize = await readSourceImageSize(sourcePath)
       
-      // Generate thumbnail
       const thumbPath = join(assetsDir, `state_${stateId}_thumb.png`)
       await sharp(sourcePath)
         .resize(256, 256, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
@@ -1221,6 +1222,7 @@ export function registerIpcHandlers(): void {
         assetId,
         name,
         file: statePath,
+        boundingBox: sourceSize,
         schemaVersion: 1,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()

@@ -4,6 +4,7 @@ import sharp from 'sharp'
 import type { VisualAsset } from '@shared/types/assetPipeline'
 import { getDataDir } from './dataDir'
 import { getVisualAsset, updateVisualAsset } from './studioStorage'
+import { readSourceImageSize } from './imageSize'
 
 /**
  * Copy a PNG into app-owned storage for a static (no dummy state) visual asset.
@@ -35,6 +36,7 @@ export async function importStaticAssetImage(
     .resize(256, 256, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
     .png()
     .toFile(thumbPath)
+  asset.pixelSize = await readSourceImageSize(sourcePath)
 
   asset.image = imagePath
   asset.thumbnail = thumbPath

@@ -1137,10 +1137,16 @@ forge layer add \
 
 **Layer Coordinates:**
 - `x`, `y`: normalized stage coords [0-1] (0.5, 0.5 = center)
-- `scale`: scaling factor (1.0 = original size)
+- `scale`: uniform scaling factor (1.0 = 200px max-side source-aspect fit)
 - `rotation`: degrees (0-360)
 - `z`: z-order (higher = closer to camera)
 - `opacity`: 0.0 (transparent) to 1.0 (opaque)
+
+Visual-asset layers draw at the **source image aspect** (contain in the 200px box). They are not stretched to a square. Existing layers keep authored `scale`/`x`/`y`; stretching was a draw bug. To reset size to the default source fit without moving the layer:
+
+```bash
+forge layer update --shot <shotId> --id <layerId> --fit-source [--json]
+```
 
 ### Update Layer
 
@@ -1153,6 +1159,9 @@ forge layer update \
   --scale 1.5 \
   --rotation 15 \
   [--json]
+
+# Reset uniform scale to 1 (200px max-side, source aspect). Does not rewrite x/y/state.
+forge layer update --shot <shotId> --id <layerId> --fit-source [--json]
 ```
 
 ### Remove Layer

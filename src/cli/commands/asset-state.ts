@@ -13,6 +13,7 @@ import {
   deleteAssetState
 } from '@core/storage/studioStorage'
 import { getDataDir } from '@core/storage/dataDir'
+import { readSourceImageSize } from '@core/storage/imageSize'
 import { output, outputError } from '../utils/output'
 
 interface Options {
@@ -161,9 +162,11 @@ export async function create(options: Options): Promise<void> {
     const statePath = join(assetsDir, `state_${stateId}.png`)
     await copyFile(options.file, statePath)
     
-    // Generate thumbnail
+    const sourceSize = await readSourceImageSize(options.file)
+
+    // Generate thumbnail (256² contain). Do not record thumb pixels as boundingBox.
     const thumbPath = join(assetsDir, `state_${stateId}_thumb.png`)
-    const metadata = await sharp(options.file)
+    await sharp(options.file)
       .resize(256, 256, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
       .png()
       .toFile(thumbPath)
@@ -173,7 +176,7 @@ export async function create(options: Options): Promise<void> {
       assetId: options.asset,
       name: options.name,
       file: statePath,
-      boundingBox: { width: metadata.width, height: metadata.height },
+      boundingBox: sourceSize,
       schemaVersion: 1,
       createdAt: now,
       updatedAt: now
@@ -252,15 +255,16 @@ export async function update(stateId: string, options: Options): Promise<void> {
       const statePath = join(assetsDir, `state_${stateId}.png`)
       await copyFile(options.file, statePath)
       
-      // Generate new thumbnail
+      const sourceSize = await readSourceImageSize(options.file)
+
       const thumbPath = join(assetsDir, `state_${stateId}_thumb.png`)
-      const metadata = await sharp(options.file)
+      await sharp(options.file)
         .resize(256, 256, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
         .png()
         .toFile(thumbPath)
       
       state.file = statePath
-      state.boundingBox = { width: metadata.width, height: metadata.height }
+      state.boundingBox = sourceSize
     }
     
     state.updatedAt = new Date().toISOString()

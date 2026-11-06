@@ -579,6 +579,8 @@ export interface VisualAsset {
   image?: string
   /** Thumbnail path for library preview */
   thumbnail?: string
+  /** Full-resolution source pixels (not the 256² library thumbnail). */
+  pixelSize?: { width: number; height: number }
   schemaVersion: number
   createdAt: string
   updatedAt: string
@@ -595,7 +597,7 @@ export interface AssetState {
   name: string
   /** Path to image file (PNG with transparency) */
   file: string
-  /** Optional bounding box override */
+  /** Full-resolution source pixels (not the 256² library thumbnail). */
   boundingBox?: { width: number; height: number }
   schemaVersion: number
   createdAt: string

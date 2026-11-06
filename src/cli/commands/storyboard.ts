@@ -661,6 +661,7 @@ export function registerStoryboardCommands(program: Command): void {
     .option('--x <coord>', 'X coordinate (0-1)')
     .option('--y <coord>', 'Y coordinate (0-1)')
     .option('--scale <factor>', 'Scale factor')
+    .option('--fit-source', 'Reset scale to 1 (200px max-side source-aspect fit). Does not rewrite position, state, or media.')
     .option('--rotation <degrees>', 'Rotation in degrees')
     .option('--flip-x <bool>', 'Flip horizontally (true/false)')
     .option('--opacity <value>', 'Opacity (0-1)')
@@ -689,7 +690,8 @@ export function registerStoryboardCommands(program: Command): void {
         if (options.visible !== undefined) updates.visible = options.visible !== 'false'
         if (options.x !== undefined) updates.x = parseFloat(options.x)
         if (options.y !== undefined) updates.y = parseFloat(options.y)
-        if (options.scale !== undefined) updates.scale = parseFloat(options.scale)
+        if (options.fitSource) updates.scale = 1
+        else if (options.scale !== undefined) updates.scale = parseFloat(options.scale)
         if (options.rotation !== undefined) updates.rotation = parseFloat(options.rotation)
         if (options.flipX !== undefined) updates.flipX = options.flipX === 'true'
         if (options.opacity !== undefined) updates.opacity = parseFloat(options.opacity)
