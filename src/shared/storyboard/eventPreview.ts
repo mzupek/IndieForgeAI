@@ -105,7 +105,7 @@ export function applyLayerPreview(
 }
 
 /**
- * P0/P4 precedence helper: active event hold → timed sample (P4, unused) → authored default.
+ * P0/P4 precedence helper: active event hold → timed sample → authored default.
  */
 export function computeEffectiveLayerState<T>(
   eventHold: T | undefined,

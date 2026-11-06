@@ -302,6 +302,94 @@ function testEffectMarkerDragStateUpdate() {
   console.log('  ✅ All properties preserved')
 }
 
+function testTimedKeyDragStateUpdate() {
+  console.log('\n🧪 Test: Timed pose/state key drag uses object setActiveProject pattern')
+
+  const mockProject: IndieForgeProject = {
+    id: 'proj-test',
+    name: 'Test Project',
+    path: '/test/path',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    games: [],
+    studios: [],
+    assets: [],
+    assetPipeline: {
+      storyboards: [{ id: 'sb-1', gameId: 'g1', name: 'Test', description: '', shotIds: ['shot-1'], createdAt: '', updatedAt: '' }],
+      storyboardShots: [
+        {
+          id: 'shot-1',
+          name: 'Test Shot',
+          durationSec: 4,
+          layers: [
+            {
+              id: 'layer-1',
+              characterId: 'char-1',
+              poseId: 'pose-idle',
+              x: 0.5,
+              y: 0.5,
+              scale: 1,
+              zOrder: 1,
+              opacity: 1,
+              rotation: 0,
+              flipX: false,
+              visible: true,
+              timedKeys: [
+                { id: 'key-1', t: 1.0, action: { type: 'setPose', poseId: 'pose-hurt' }, schemaVersion: 1 }
+              ]
+            }
+          ],
+          cameraTrack: [{ t: 0, zoom: 1, target: { x: 0.5, y: 0.5 } }],
+          effectsTrack: [{ t: 2, presetId: 'preset-1' }],
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        }
+      ],
+      characters: [{ id: 'char-1', gameId: 'g1', name: 'Hero', studioId: 's', createdAt: '', updatedAt: '' }],
+      poses: [],
+      clips: [],
+      scenePresets: []
+    }
+  }
+
+  const selectedShotId = 'shot-1'
+  const newTime = 2.25
+  const layers = mockProject.assetPipeline!.storyboardShots![0].layers.map((layer) => {
+    if (layer.id !== 'layer-1') return layer
+    return {
+      ...layer,
+      timedKeys: (layer.timedKeys || []).map((key) =>
+        key.id === 'key-1' ? { ...key, t: newTime } : key
+      )
+    }
+  })
+
+  const updatedProject: IndieForgeProject = {
+    ...mockProject,
+    assetPipeline: {
+      ...mockProject.assetPipeline!,
+      storyboardShots: mockProject.assetPipeline!.storyboardShots?.map((s) =>
+        s.id === selectedShotId ? { ...s, layers } : s
+      )
+    }
+  }
+
+  assert(typeof updatedProject === 'object', 'setActiveProject receives an object, not a function')
+  assert(updatedProject.assetPipeline!.storyboards!.length === 1, 'storyboards preserved')
+  assert(updatedProject.assetPipeline!.characters!.length === 1, 'characters preserved')
+  assert(updatedProject.assetPipeline!.storyboardShots![0].cameraTrack.length === 1, 'camera track preserved')
+  assert(updatedProject.assetPipeline!.storyboardShots![0].effectsTrack.length === 1, 'effects track preserved')
+  assert(
+    updatedProject.assetPipeline!.storyboardShots![0].layers[0].timedKeys![0].t === 2.25,
+    'timed key time updated'
+  )
+  assert(
+    updatedProject.assetPipeline!.storyboardShots![0].layers[0].poseId === 'pose-idle',
+    'authored starting pose not written by drag'
+  )
+  console.log('  ✅ Timed key drag preserves pipeline and authored pose')
+}
+
 function testBuggyVersion() {
   console.log('\n🧪 Test: Verify old buggy version fails (regression proof)')
   
@@ -375,6 +463,7 @@ function testBuggyVersion() {
 try {
   testCameraMarkerDragStateUpdate()
   testEffectMarkerDragStateUpdate()
+  testTimedKeyDragStateUpdate()
   console.log('\n✅ All state update regression tests passed\n')
   process.exit(0)
 } catch (error) {

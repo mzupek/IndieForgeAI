@@ -20,6 +20,10 @@ import {
   collectStateBindingUsage,
   formatBindingInUseError
 } from '../../shared/storyboard/eventValidation'
+import {
+  collectStateTimedKeyUsage,
+  formatTimedKeyInUseError
+} from '../../shared/storyboard/timedKeys'
 
 interface StudioData {
   schemaVersion: number
@@ -215,6 +219,9 @@ export async function loadStudio(dataDirOverride?: string): Promise<StudioData> 
             for (const layer of shot.layers) {
               if (layer.visible === undefined) {
                 layer.visible = true
+              }
+              if (!layer.timedKeys) {
+                layer.timedKeys = []
               }
             }
           }
@@ -522,6 +529,10 @@ export async function deleteAssetState(stateId: string, dataDirOverride?: string
     const bindingUsage = collectStateBindingUsage(pipeline, stateId)
     if (bindingUsage.labels.length > 0) {
       throw new Error(formatBindingInUseError('state', state.name, bindingUsage.labels))
+    }
+    const keyUsage = collectStateTimedKeyUsage(pipeline, stateId)
+    if (keyUsage.labels.length > 0) {
+      throw new Error(formatTimedKeyInUseError('state', state.name, keyUsage.labels))
     }
   }
   

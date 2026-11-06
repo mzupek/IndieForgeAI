@@ -15,9 +15,24 @@ import {
   addCameraKeyframe,
   removeCameraKeyframe,
   addEffectMarker,
-  removeEffectMarker
+  removeEffectMarker,
+  addLayerTimedKey,
+  listLayerTimedKeys,
+  getLayerTimedKey,
+  updateLayerTimedKey,
+  removeLayerTimedKey
 } from '../../core/storage/storyboardService'
-import type { CameraKeyframe, EffectMarker, StoryboardLayer } from '@shared/types/assetPipeline'
+import type {
+  CameraKeyframe,
+  EffectMarker,
+  LayerTimedKeyAction,
+  StoryboardLayer
+} from '@shared/types/assetPipeline'
+import {
+  applyEffectiveLayer,
+  describeTimedKeyAction
+} from '../../shared/storyboard/timedKeys'
+import { simulateEventFire } from '../../shared/storyboard/eventPreview'
 import { getAssetPipeline } from '../../core/storage/studioStorage'
 import { getDataDir } from '../../core/storage/dataDir'
 import { copyFile, mkdir } from 'fs/promises'
@@ -292,7 +307,9 @@ export function registerStoryboardCommands(program: Command): void {
     })
 
   // Layer commands
-  const layerCmd = program.command('layer').description('Manage layers in shots')
+  const layerCmd = program
+    .command('layer')
+    .description('Manage layers in shots (including timed pose/state keys)')
 
   layerCmd
     .command('list')
@@ -526,6 +543,208 @@ export function registerStoryboardCommands(program: Command): void {
           console.log(JSON.stringify({ removed: true }, null, 2))
         } else {
           console.log(`✓ Removed layer: ${options.id}`)
+        }
+      } catch (err) {
+        console.error('Error:', err instanceof Error ? err.message : err)
+        process.exit(1)
+      }
+    })
+
+  const layerKeyCmd = layerCmd
+    .command('key')
+    .description('Timed pose/state keys on a layer (P4 step/hold; not C.3c FX keys)')
+
+  function layerKeyAction(options: { pose?: string; state?: string }): LayerTimedKeyAction {
+    if (options.pose && options.state) {
+      throw new Error('Specify --pose or --state, not both')
+    }
+    if (options.pose) return { type: 'setPose', poseId: options.pose }
+    if (options.state) return { type: 'setState', stateId: options.state }
+    throw new Error('--pose or --state is required')
+  }
+
+  layerKeyCmd
+    .command('add')
+    .description('Add a timed pose or state key on a layer')
+    .requiredOption('--shot <shotId>', 'Shot ID')
+    .requiredOption('--layer <layerId>', 'Layer ID')
+    .requiredOption('--time <seconds>', 'Time in seconds (0..shot duration)')
+    .option('--pose <poseId>', 'Pose ID (character layers)')
+    .option('--state <stateId>', 'Asset state ID (visual-asset layers)')
+    .option('--json', 'Output as JSON')
+    .action(async (options, cmd) => {
+      try {
+        const mergedOpts = { ...cmd.parent!.parent!.parent!.opts(), ...options }
+        const key = await addLayerTimedKey(
+          options.shot,
+          options.layer,
+          { t: options.time, action: layerKeyAction(options) },
+          getDataDir(mergedOpts.dataDir)
+        )
+        if (mergedOpts.json) {
+          console.log(JSON.stringify({ ...key, layerId: options.layer, shotId: options.shot }, null, 2))
+        } else {
+          console.log(`✓ Added timed key ${key.id} at t=${key.t}s (${describeTimedKeyAction(key.action)})`)
+        }
+      } catch (err) {
+        console.error('Error:', err instanceof Error ? err.message : err)
+        process.exit(1)
+      }
+    })
+
+  layerKeyCmd
+    .command('list')
+    .description('List timed pose/state keys on a shot or layer')
+    .requiredOption('--shot <shotId>', 'Shot ID')
+    .option('--layer <layerId>', 'Filter to one layer')
+    .option('--json', 'Output as JSON')
+    .action(async (options, cmd) => {
+      try {
+        const mergedOpts = { ...cmd.parent!.parent!.parent!.opts(), ...options }
+        const rows = await listLayerTimedKeys(
+          options.shot,
+          options.layer,
+          getDataDir(mergedOpts.dataDir)
+        )
+        if (mergedOpts.json) {
+          console.log(JSON.stringify(rows.map((r) => ({ ...r.key, layerId: r.layerId })), null, 2))
+        } else if (rows.length === 0) {
+          console.log('No timed keys found')
+        } else {
+          console.log(`Timed keys (${rows.length}):`)
+          for (const row of rows) {
+            console.log(
+              `  ${row.key.id}  layer=${row.layerId}  t=${row.key.t}s  ${describeTimedKeyAction(row.key.action)}`
+            )
+          }
+        }
+      } catch (err) {
+        console.error('Error:', err instanceof Error ? err.message : err)
+        process.exit(1)
+      }
+    })
+
+  layerKeyCmd
+    .command('show')
+    .description('Show a timed key')
+    .requiredOption('--id <keyId>', 'Timed key ID')
+    .option('--json', 'Output as JSON')
+    .action(async (options, cmd) => {
+      try {
+        const mergedOpts = { ...cmd.parent!.parent!.parent!.opts(), ...options }
+        const found = await getLayerTimedKey(options.id, getDataDir(mergedOpts.dataDir))
+        if (!found) {
+          console.error(`Timed key not found: ${options.id}`)
+          process.exit(1)
+        }
+        if (mergedOpts.json) {
+          console.log(JSON.stringify({ ...found.key, shotId: found.shotId, layerId: found.layerId }, null, 2))
+        } else {
+          console.log(`${found.key.id}  shot=${found.shotId} layer=${found.layerId} t=${found.key.t}s`)
+          console.log(`  ${describeTimedKeyAction(found.key.action)}`)
+        }
+      } catch (err) {
+        console.error('Error:', err instanceof Error ? err.message : err)
+        process.exit(1)
+      }
+    })
+
+  layerKeyCmd
+    .command('update')
+    .description('Update a timed key time or pose/state')
+    .requiredOption('--id <keyId>', 'Timed key ID')
+    .option('--time <seconds>', 'New time in seconds')
+    .option('--pose <poseId>', 'Pose ID')
+    .option('--state <stateId>', 'Asset state ID')
+    .option('--json', 'Output as JSON')
+    .action(async (options, cmd) => {
+      try {
+        const mergedOpts = { ...cmd.parent!.parent!.parent!.opts(), ...options }
+        const patch: { t?: string; action?: LayerTimedKeyAction } = {}
+        if (options.time !== undefined) patch.t = options.time
+        if (options.pose || options.state) patch.action = layerKeyAction(options)
+        const key = await updateLayerTimedKey(options.id, patch, getDataDir(mergedOpts.dataDir))
+        if (mergedOpts.json) {
+          console.log(JSON.stringify(key, null, 2))
+        } else {
+          console.log(`✓ Updated timed key ${key.id} at t=${key.t}s`)
+        }
+      } catch (err) {
+        console.error('Error:', err instanceof Error ? err.message : err)
+        process.exit(1)
+      }
+    })
+
+  layerKeyCmd
+    .command('remove')
+    .description('Remove a timed key')
+    .requiredOption('--id <keyId>', 'Timed key ID')
+    .option('--json', 'Output as JSON')
+    .action(async (options, cmd) => {
+      try {
+        const mergedOpts = { ...cmd.parent!.parent!.parent!.opts(), ...options }
+        await removeLayerTimedKey(options.id, getDataDir(mergedOpts.dataDir))
+        if (mergedOpts.json) {
+          console.log(JSON.stringify({ deleted: true, keyId: options.id }, null, 2))
+        } else {
+          console.log(`✓ Removed timed key: ${options.id}`)
+        }
+      } catch (err) {
+        console.error('Error:', err instanceof Error ? err.message : err)
+        process.exit(1)
+      }
+    })
+
+  layerKeyCmd
+    .command('sample')
+    .description('Print effective pose/state at a playhead time (preview only, never persisted)')
+    .requiredOption('--shot <shotId>', 'Shot ID')
+    .requiredOption('--layer <layerId>', 'Layer ID')
+    .requiredOption('--time <seconds>', 'Playhead time in seconds')
+    .option('--event <eventId>', 'Optional event id to simulate at this playhead')
+    .option('--now-ms <ms>', 'Event fire clock (default 0)', '0')
+    .option('--tick-ms <ms>', 'Optional later clock to expire a timed event hold')
+    .option('--json', 'Output as JSON')
+    .action(async (options, cmd) => {
+      try {
+        const mergedOpts = { ...cmd.parent!.parent!.parent!.opts(), ...options }
+        const dataDir = getDataDir(mergedOpts.dataDir)
+        const pipeline = await getAssetPipeline(dataDir)
+        const shot = await getShot(options.shot, dataDir)
+        if (!shot) throw new Error(`Shot not found: ${options.shot}`)
+        const layer = (shot.layers || []).find((l) => l.id === options.layer)
+        if (!layer) throw new Error(`Layer not found: ${options.layer}`)
+        const timeSec = Number(options.time)
+        if (!Number.isFinite(timeSec)) throw new Error('--time must be a number')
+        let eventOverride
+        if (options.event) {
+          const simulated = simulateEventFire({
+            events: pipeline.eventDefinitions || [],
+            bindings: pipeline.eventBindings || [],
+            shotId: options.shot,
+            eventId: options.event,
+            nowMs: Number(options.nowMs || 0),
+            tickMs: options.tickMs !== undefined ? Number(options.tickMs) : undefined
+          })
+          eventOverride = simulated.snapshot.overrides[layer.id]
+        }
+        const effective = applyEffectiveLayer(layer, timeSec, eventOverride)
+        const result = {
+          layerId: layer.id,
+          timeSec,
+          authoredPoseId: layer.poseId ?? null,
+          authoredStateId: layer.assetStateId ?? null,
+          effectivePoseId: effective.poseId ?? null,
+          effectiveStateId: effective.assetStateId ?? null,
+          eventActive: !!eventOverride,
+          persisted: false
+        }
+        if (mergedOpts.json) {
+          console.log(JSON.stringify(result, null, 2))
+        } else {
+          console.log(
+            `t=${timeSec}s authored pose=${result.authoredPoseId} state=${result.authoredStateId} → effective pose=${result.effectivePoseId} state=${result.effectiveStateId}${result.eventActive ? ' (event hold)' : ''}`
+          )
         }
       } catch (err) {
         console.error('Error:', err instanceof Error ? err.message : err)

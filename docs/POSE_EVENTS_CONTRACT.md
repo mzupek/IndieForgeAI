@@ -55,11 +55,13 @@ This contract defines the schema, event semantics, validation rules, and CLI sur
 - UI: Simulated event triggering (Forge only, no engine)
 - **Test:** Event → action → layer state change, timer cancellation
 
-### P4: Timed Pose/State Keyframes (Coordinated with C.3c)
-- Extend layer FX timeline to include pose/state keyframes
-- Integrate with pending Phase C.3c per-layer FX infrastructure
-- Property precedence: event hold > timed > authored default
-- **Test:** Keyframe scrubbing, event override, return-to-default
+### P4: Timed Pose/State Keyframes (implemented on the layer, not C.3c FX)
+- ONE shot layer changes pose/state via `layer.timedKeys` (step/hold). Do **not** duplicate layers.
+- Authored starting `poseId` / `assetStateId` stay separate from timed samples and event preview.
+- Precedence: active event hold → timed sample at playhead → authored default.
+- When an event ends, resolve the **current** timeline sample (not a stale sample from fire time).
+- CLI: `forge layer key add|list|show|update|remove|sample` (reuses the layer command path).
+- Pending C.3c per-layer FX keys are **not** part of P4.
 
 ### P5: Versioned Manifests + CLI Validate/Migrate
 - Add schema version to all new types

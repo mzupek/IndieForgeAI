@@ -177,6 +177,16 @@ const api: IndieForgeAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.LAYER_UPDATE, projectId, shotId, layerId, updates),
     deleteLayer: (projectId, shotId, layerId) =>
       ipcRenderer.invoke(IPC_CHANNELS.LAYER_DELETE, projectId, shotId, layerId),
+    addLayerTimedKey: (projectId, shotId, layerId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.LAYER_KEY_ADD, projectId, shotId, layerId, input),
+    listLayerTimedKeys: (shotId, layerId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.LAYER_KEY_LIST, shotId, layerId),
+    getLayerTimedKey: (keyId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.LAYER_KEY_GET, keyId),
+    updateLayerTimedKey: (projectId, keyId, updates) =>
+      ipcRenderer.invoke(IPC_CHANNELS.LAYER_KEY_UPDATE, projectId, keyId, updates),
+    deleteLayerTimedKey: (projectId, keyId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.LAYER_KEY_DELETE, projectId, keyId),
     addCameraKeyframe: (projectId, shotId, keyframe) =>
       ipcRenderer.invoke(IPC_CHANNELS.CAMERA_KEYFRAME_ADD, projectId, shotId, keyframe),
     removeCameraKeyframe: (projectId, shotId, t) =>

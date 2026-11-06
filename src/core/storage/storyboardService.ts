@@ -4,11 +4,20 @@ import type {
   StoryboardShot,
   StoryboardLayer,
   CameraKeyframe,
-  EffectMarker
+  EffectMarker,
+  LayerTimedKey,
+  LayerTimedKeyAction
 } from '@shared/types/assetPipeline'
 import { getAssetPipeline, updateAssetPipeline } from './studioStorage'
 import { validateLayerReferences } from '../../shared/storyboard/layerValidation'
 import { purgeBindingsForLayers, purgeBindingsForShots } from './eventService'
+import {
+  assertShotDurationFitsTimedKeys,
+  findTimedKey,
+  flattenShotTimedKeys,
+  parseTimedKeyTime,
+  validateLayerTimedKey
+} from '../../shared/storyboard/timedKeys'
 
 /**
  * Create a new storyboard
@@ -195,6 +204,16 @@ export async function updateShot(
   if (index === -1) {
     throw new Error(`Shot not found: ${shotId}`)
   }
+
+  const nextDuration =
+    updates.durationSec !== undefined
+      ? updates.durationSec
+      : pipeline.storyboardShots[index].durationSec
+  const durationCheckShot = {
+    ...pipeline.storyboardShots[index],
+    layers: updates.layers ?? pipeline.storyboardShots[index].layers
+  }
+  assertShotDurationFitsTimedKeys(durationCheckShot, nextDuration)
   
   pipeline.storyboardShots[index] = {
     ...pipeline.storyboardShots[index],
@@ -248,10 +267,14 @@ export async function addLayer(
   const newLayer: StoryboardLayer = {
     id: randomUUID(),
     ...layer,
-    visible: layer.visible !== false
+    visible: layer.visible !== false,
+    timedKeys: layer.timedKeys || []
   }
 
   validateLayerReferences(newLayer, pipeline, shotId)
+  for (const key of newLayer.timedKeys || []) {
+    validateLayerTimedKey(key, newLayer, pipeline, shotId)
+  }
   
   shot.layers.push(newLayer)
   shot.updatedAt = new Date().toISOString()
@@ -288,6 +311,9 @@ export async function updateLayer(
   }
 
   validateLayerReferences(merged, pipeline, shotId)
+  for (const key of merged.timedKeys || []) {
+    validateLayerTimedKey(key, merged, pipeline, shotId)
+  }
 
   shot.layers[layerIndex] = merged
   shot.updatedAt = new Date().toISOString()
@@ -402,5 +428,86 @@ export async function removeEffectMarker(
   shot.effectsTrack = shot.effectsTrack.filter((e) => e.t !== t)
   shot.updatedAt = new Date().toISOString()
   
+  await updateAssetPipeline(pipeline, dataDirOverride)
+}
+
+export async function addLayerTimedKey(
+  shotId: string,
+  layerId: string,
+  input: { t: number | string; action: LayerTimedKeyAction },
+  dataDirOverride?: string
+): Promise<LayerTimedKey> {
+  const pipeline = await getAssetPipeline(dataDirOverride)
+  const shot = pipeline.storyboardShots.find((s) => s.id === shotId)
+  if (!shot) throw new Error(`Shot not found: ${shotId}`)
+  const layer = shot.layers.find((l) => l.id === layerId)
+  if (!layer) throw new Error(`Layer not found: ${layerId}`)
+  if (!layer.timedKeys) layer.timedKeys = []
+
+  const key: LayerTimedKey = {
+    id: randomUUID(),
+    t: parseTimedKeyTime(input.t),
+    action: input.action,
+    schemaVersion: 1
+  }
+  validateLayerTimedKey(key, layer, pipeline, shotId)
+  layer.timedKeys.push(key)
+  layer.timedKeys.sort((a, b) => a.t - b.t)
+  shot.updatedAt = new Date().toISOString()
+  await updateAssetPipeline(pipeline, dataDirOverride)
+  return key
+}
+
+export async function listLayerTimedKeys(
+  shotId: string,
+  layerId?: string,
+  dataDirOverride?: string
+): Promise<Array<{ layerId: string; key: LayerTimedKey }>> {
+  const shot = await getShot(shotId, dataDirOverride)
+  if (!shot) throw new Error(`Shot not found: ${shotId}`)
+  const all = flattenShotTimedKeys(shot)
+  return layerId ? all.filter((row) => row.layerId === layerId) : all
+}
+
+export async function getLayerTimedKey(
+  keyId: string,
+  dataDirOverride?: string
+): Promise<{ shotId: string; layerId: string; key: LayerTimedKey } | undefined> {
+  const pipeline = await getAssetPipeline(dataDirOverride)
+  const found = findTimedKey(pipeline, keyId)
+  if (!found) return undefined
+  return { shotId: found.shot.id, layerId: found.layer.id, key: found.key }
+}
+
+export async function updateLayerTimedKey(
+  keyId: string,
+  patch: { t?: number | string; action?: LayerTimedKeyAction },
+  dataDirOverride?: string
+): Promise<LayerTimedKey> {
+  const pipeline = await getAssetPipeline(dataDirOverride)
+  const found = findTimedKey(pipeline, keyId)
+  if (!found) throw new Error(`Timed key not found: ${keyId}`)
+  const next: LayerTimedKey = {
+    ...found.key,
+    t: patch.t !== undefined ? parseTimedKeyTime(patch.t) : found.key.t,
+    action: patch.action ?? found.key.action
+  }
+  validateLayerTimedKey(next, found.layer, pipeline, found.shot.id, { excludeKeyId: keyId })
+  found.layer.timedKeys = (found.layer.timedKeys || []).map((k) => (k.id === keyId ? next : k))
+  found.layer.timedKeys.sort((a, b) => a.t - b.t)
+  found.shot.updatedAt = new Date().toISOString()
+  await updateAssetPipeline(pipeline, dataDirOverride)
+  return next
+}
+
+export async function removeLayerTimedKey(
+  keyId: string,
+  dataDirOverride?: string
+): Promise<void> {
+  const pipeline = await getAssetPipeline(dataDirOverride)
+  const found = findTimedKey(pipeline, keyId)
+  if (!found) throw new Error(`Timed key not found: ${keyId}`)
+  found.layer.timedKeys = (found.layer.timedKeys || []).filter((k) => k.id !== keyId)
+  found.shot.updatedAt = new Date().toISOString()
   await updateAssetPipeline(pipeline, dataDirOverride)
 }

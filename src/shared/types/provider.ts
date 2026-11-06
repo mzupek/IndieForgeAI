@@ -542,6 +542,31 @@ export interface IndieForgeAPI {
     addLayer: (projectId: string, shotId: string, layer: any) => Promise<any>
     updateLayer: (projectId: string, shotId: string, layerId: string, updates: any) => Promise<any>
     deleteLayer: (projectId: string, shotId: string, layerId: string) => Promise<any>
+    addLayerTimedKey: (
+      projectId: string,
+      shotId: string,
+      layerId: string,
+      input: {
+        t: number
+        action: { type: 'setPose'; poseId: string } | { type: 'setState'; stateId: string }
+      }
+    ) => Promise<any>
+    listLayerTimedKeys: (
+      shotId: string,
+      layerId?: string
+    ) => Promise<Array<{ key: any; layerId: string }>>
+    getLayerTimedKey: (
+      keyId: string
+    ) => Promise<{ key: any; shotId: string; layerId: string } | null>
+    updateLayerTimedKey: (
+      projectId: string,
+      keyId: string,
+      updates: {
+        t?: number
+        action?: { type: 'setPose'; poseId: string } | { type: 'setState'; stateId: string }
+      }
+    ) => Promise<any>
+    deleteLayerTimedKey: (projectId: string, keyId: string) => Promise<any>
     addCameraKeyframe: (projectId: string, shotId: string, keyframe: any) => Promise<any>
     removeCameraKeyframe: (projectId: string, shotId: string, time: number) => Promise<any>
     addEffectMarker: (projectId: string, shotId: string, effect: any) => Promise<any>

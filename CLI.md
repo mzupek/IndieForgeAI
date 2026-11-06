@@ -1138,6 +1138,23 @@ forge layer remove \
   [--json]
 ```
 
+### Timed pose/state keys (P4)
+
+Keys live on the **same layer** (`timedKeys`). They do not create duplicate layers and are not C.3c FX keys. Sampling is step/hold: the last key with `t <= playhead` holds until the next key. Before the first key, the authored starting pose/state is used. Event preview (P3) still wins while a hold is active; when the hold ends, the **current** timeline sample is used.
+
+```bash
+forge layer key add --shot <shotId> --layer <layerId> --time 1.0 --pose <poseId> [--json]
+forge layer key add --shot <shotId> --layer <layerId> --time 1.5 --state <stateId> [--json]
+forge layer key list --shot <shotId> [--layer <layerId>] [--json]
+forge layer key show --id <keyId> [--json]
+forge layer key update --id <keyId> [--time 2.0] [--pose <poseId>|--state <stateId>] [--json]
+forge layer key remove --id <keyId> [--json]
+forge layer key sample --shot <shotId> --layer <layerId> --time 1.2 \
+  [--event <eventId> --now-ms 0 --tick-ms 500] [--json]
+```
+
+Times must be `0..shot.durationSec`. Duplicate timestamps on the same layer (`|Δt| < 0.001s`) are rejected. Shrinking shot duration below an existing key is rejected. Pose/state must belong to that layer's character/asset.
+
 ---
 
 ## Camera Animation

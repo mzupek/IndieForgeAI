@@ -93,7 +93,12 @@ import {
   addCameraKeyframe,
   removeCameraKeyframe,
   addEffectMarker,
-  removeEffectMarker
+  removeEffectMarker,
+  addLayerTimedKey,
+  listLayerTimedKeys,
+  getLayerTimedKey,
+  updateLayerTimedKey,
+  removeLayerTimedKey
 } from '../../core/storage/storyboardService'
 import {
   getVisualAssets,
@@ -941,6 +946,44 @@ export function registerIpcHandlers(): void {
     IPC_CHANNELS.LAYER_DELETE,
     async (_e, projectId: string, shotId: string, layerId: string) => {
       await removeLayer(shotId, layerId)
+      return await loadProject(projectId)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.LAYER_KEY_ADD,
+    async (_e, projectId: string, shotId: string, layerId: string, input: any) => {
+      await addLayerTimedKey(shotId, layerId, input)
+      return await loadProject(projectId)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.LAYER_KEY_LIST,
+    async (_e, shotId: string, layerId?: string) => {
+      return await listLayerTimedKeys(shotId, layerId)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.LAYER_KEY_GET,
+    async (_e, keyId: string) => {
+      return await getLayerTimedKey(keyId)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.LAYER_KEY_UPDATE,
+    async (_e, projectId: string, keyId: string, updates: any) => {
+      await updateLayerTimedKey(keyId, updates)
+      return await loadProject(projectId)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.LAYER_KEY_DELETE,
+    async (_e, projectId: string, keyId: string) => {
+      await removeLayerTimedKey(keyId)
       return await loadProject(projectId)
     }
   )

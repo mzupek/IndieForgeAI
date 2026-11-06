@@ -18,17 +18,23 @@ import type {
   Palette,
   AssetPipelineProject,
   EventDefinition,
-  EventBinding
+  EventBinding,
+  LayerTimedKey
 } from '@shared/types/assetPipeline'
 import { ConfirmModal } from './ConfirmModal'
 import { EventBindingsPanel } from './EventBindingsPanel'
 import {
-  applyLayerPreview,
   EMPTY_PREVIEW_SNAPSHOT,
   EventPreviewEngine,
   type EventPreviewSnapshot,
   type PrimitivePayload
 } from '@shared/storyboard/eventPreview'
+import {
+  applyEffectiveLayer,
+  flattenShotTimedKeys,
+  sampleLayerTimedKeys,
+  timedKeyIssues
+} from '@shared/storyboard/timedKeys'
 import {
   getLayerKind,
   resolveLayerImagePath,
@@ -402,7 +408,12 @@ export function StoryboardEditor() {
   
   const [dragMode, setDragMode] = useState<DragMode>(null)
   const [dragStart, setDragStart] = useState<any>(null)
-  const [draggedMarker, setDraggedMarker] = useState<{ type: 'camera' | 'effect'; index: number } | null>(null)
+  const [draggedMarker, setDraggedMarker] = useState<{
+    type: 'camera' | 'effect' | 'timedKey'
+    index: number
+    layerId?: string
+    keyId?: string
+  } | null>(null)
   
   const [loadedImages, setLoadedImages] = useState<Map<string, LoadedImage>>(new Map())
   const [backgroundImage, setBackgroundImage] = useState<LoadedImage | null>(null)
@@ -416,6 +427,9 @@ export function StoryboardEditor() {
   const [addTextPalette, setAddTextPalette] = useState(DEFAULT_PALETTE_REF)
   const [layerError, setLayerError] = useState<string | null>(null)
   const [confirmDeleteLayer, setConfirmDeleteLayer] = useState(false)
+  const [selectedTimedKeyId, setSelectedTimedKeyId] = useState<string | null>(null)
+  const [confirmDeleteTimedKeyId, setConfirmDeleteTimedKeyId] = useState<string | null>(null)
+  const [timedKeyTimeDraft, setTimedKeyTimeDraft] = useState('')
   const [previewSnapshot, setPreviewSnapshot] = useState<EventPreviewSnapshot>(EMPTY_PREVIEW_SNAPSHOT)
   const previewEngineRef = useRef(new EventPreviewEngine())
   const wasPlayingRef = useRef(false)
@@ -463,7 +477,28 @@ export function StoryboardEditor() {
     pipeline?.eventBindings?.filter((b) => b.shotId === selectedShotId) ?? []
 
   const previewLayer = (layer: StoryboardLayer): StoryboardLayer =>
-    applyLayerPreview(layer, previewSnapshot.overrides[layer.id])
+    applyEffectiveLayer(layer, playbackTime, previewSnapshot.overrides[layer.id])
+
+  const layerMediaSignature = (selectedShot?.layers || [])
+    .map((raw) => {
+      const layer = applyEffectiveLayer(raw, playbackTime, previewSnapshot.overrides[raw.id])
+      return `${layer.id}:${layer.poseId ?? ''}:${layer.assetStateId ?? ''}:${layer.visible !== false}`
+    })
+    .join('|')
+
+  const timedKeyRows = selectedShot ? flattenShotTimedKeys(selectedShot) : []
+  const selectedTimedKeyRow = timedKeyRows.find((row) => row.key.id === selectedTimedKeyId)
+
+  const timedKeyActionLabel = (key: LayerTimedKey): string => {
+    if (key.action.type === 'setPose') {
+      const poseId = key.action.poseId
+      const pose = poses.find((p) => p.id === poseId)
+      return pose ? `pose ${pose.slot}` : `missing pose ${poseId}`
+    }
+    const stateId = key.action.stateId
+    const state = assetStates.find((s) => s.id === stateId)
+    return state ? `state ${state.name}` : `missing state ${stateId}`
+  }
 
   const commitPreview = () => {
     setPreviewSnapshot(previewEngineRef.current.snapshot())
@@ -534,7 +569,14 @@ export function StoryboardEditor() {
     const engine = previewEngineRef.current
     engine.setShot(selectedShotId ?? null)
     commitPreview()
+    setPlaybackTime(0)
+    setSelectedTimedKeyId(null)
+    setConfirmDeleteTimedKeyId(null)
   }, [selectedShotId])
+
+  useEffect(() => {
+    if (selectedTimedKeyRow) setTimedKeyTimeDraft(selectedTimedKeyRow.key.t.toFixed(2))
+  }, [selectedTimedKeyId, selectedTimedKeyRow?.key.t])
 
   useEffect(() => {
     if (playbackState === 'stopped' && wasPlayingRef.current) {
@@ -565,7 +607,8 @@ export function StoryboardEditor() {
     }
   }, [previewSnapshot.generation, previewSnapshot.holds.length])
 
-  // Load images (authored + preview pose/state overlays; preview never writes layers)
+  // Load images from effective pose/state (event hold → timed sample → authored).
+  // Depend on media signature, not raw playbackTime, so scrubbing a hold does not reload every frame.
   useEffect(() => {
     if (!selectedShot) return
 
@@ -609,7 +652,7 @@ export function StoryboardEditor() {
     }
 
     loadAllImages()
-  }, [selectedShot, poses, clips, activeProject?.assetPipeline, previewSnapshot])
+  }, [selectedShot, poses, clips, activeProject?.assetPipeline, previewSnapshot, layerMediaSignature])
 
   // Get interpolated camera state
   const getInterpolatedCamera = useCallback((time: number): { target: {x: number, y: number}, zoom: number, framingRect?: any } | null => {
@@ -1143,29 +1186,43 @@ export function StoryboardEditor() {
     
     const rect = e.currentTarget.getBoundingClientRect()
     const x = (e.clientX - rect.left) / rect.width
+    const yRatio = (e.clientY - rect.top) / rect.height
     const clickTime = x * selectedShot.durationSec
-    
-    // Check camera markers (wider hit area)
-    for (let i = 0; i < selectedShot.cameraTrack.length; i++) {
-      const kf = selectedShot.cameraTrack[i]
-      const markerX = kf.t / selectedShot.durationSec
-      if (Math.abs(x - markerX) < 0.03) {
-        setDraggedMarker({ type: 'camera', index: i })
-        setDragMode('marker' as any)
-        e.currentTarget.setPointerCapture(e.pointerId)
-        return
+    const near = (t: number) => Math.abs(x - t / selectedShot.durationSec) < 0.03
+
+    // Y-aware hit-test: camera / pose-state / effects thirds so overlapping x does not steal clicks
+    if (yRatio < 1 / 3) {
+      for (let i = 0; i < selectedShot.cameraTrack.length; i++) {
+        if (near(selectedShot.cameraTrack[i].t)) {
+          setDraggedMarker({ type: 'camera', index: i })
+          setDragMode('marker' as any)
+          e.currentTarget.setPointerCapture(e.pointerId)
+          return
+        }
       }
-    }
-    
-    // Check effect markers (wider hit area)
-    for (let i = 0; i < selectedShot.effectsTrack.length; i++) {
-      const ef = selectedShot.effectsTrack[i]
-      const markerX = ef.t / selectedShot.durationSec
-      if (Math.abs(x - markerX) < 0.03) {
-        setDraggedMarker({ type: 'effect', index: i })
-        setDragMode('marker' as any)
-        e.currentTarget.setPointerCapture(e.pointerId)
-        return
+    } else if (yRatio < 2 / 3) {
+      const rows = flattenShotTimedKeys(selectedShot)
+      for (let i = rows.length - 1; i >= 0; i--) {
+        if (near(rows[i].key.t)) {
+          setDraggedMarker({
+            type: 'timedKey',
+            index: i,
+            layerId: rows[i].layerId,
+            keyId: rows[i].key.id
+          })
+          setDragMode('marker' as any)
+          e.currentTarget.setPointerCapture(e.pointerId)
+          return
+        }
+      }
+    } else {
+      for (let i = 0; i < selectedShot.effectsTrack.length; i++) {
+        if (near(selectedShot.effectsTrack[i].t)) {
+          setDraggedMarker({ type: 'effect', index: i })
+          setDragMode('marker' as any)
+          e.currentTarget.setPointerCapture(e.pointerId)
+          return
+        }
       }
     }
     
@@ -1205,6 +1262,28 @@ export function StoryboardEditor() {
               ...activeProject.assetPipeline,
               storyboardShots: activeProject.assetPipeline.storyboardShots?.map(s => 
                 s.id === selectedShotId ? { ...s, cameraTrack: updated } : s
+              )
+            }
+          }
+          setActiveProject(updatedProject)
+        }
+      } else if (draggedMarker.type === 'timedKey' && draggedMarker.layerId && draggedMarker.keyId) {
+        const layers = selectedShot.layers.map((layer) => {
+          if (layer.id !== draggedMarker.layerId) return layer
+          return {
+            ...layer,
+            timedKeys: (layer.timedKeys || []).map((key) =>
+              key.id === draggedMarker.keyId ? { ...key, t: newTime } : key
+            )
+          }
+        })
+        if (activeProject && activeProject.assetPipeline) {
+          const updatedProject = {
+            ...activeProject,
+            assetPipeline: {
+              ...activeProject.assetPipeline,
+              storyboardShots: activeProject.assetPipeline.storyboardShots?.map((s) =>
+                s.id === selectedShotId ? { ...s, layers } : s
               )
             }
           }
@@ -1260,6 +1339,23 @@ export function StoryboardEditor() {
               setSelectedCameraIndex(newIndex)
             }
           }
+        }
+      } else if (draggedMarker.type === 'timedKey' && draggedMarker.keyId) {
+        const keyId = draggedMarker.keyId
+        const layer = selectedShot.layers.find((l) => l.id === draggedMarker.layerId)
+        const key = layer?.timedKeys?.find((k) => k.id === keyId)
+        try {
+          if (key) {
+            await window.indieForge.pipeline.updateLayerTimedKey(projectId!, keyId, { t: key.t })
+          }
+          const proj = await window.indieForge.projects.open(projectId!)
+          setActiveProject(proj)
+          setSelectedTimedKeyId(keyId)
+          setLayerError(null)
+        } catch (err) {
+          setLayerError(err instanceof Error ? err.message : 'Failed to move timed key')
+          const proj = await window.indieForge.projects.open(projectId!)
+          setActiveProject(proj)
         }
       } else {
         // Sort effects track by time too
@@ -1626,6 +1722,88 @@ export function StoryboardEditor() {
       setLayerError(err instanceof Error ? err.message : 'Failed to delete layer')
     } finally {
       setConfirmDeleteLayer(false)
+    }
+  }
+
+  const handleAddTimedKey = async () => {
+    if (!selectedShot || !selectedLayer) {
+      setLayerError('Select a character or visual-asset layer to add a pose/state key')
+      return
+    }
+    const kind = getLayerKind(selectedLayer)
+    try {
+      setLayerError(null)
+      let action: LayerTimedKey['action']
+      if (kind === 'character' && selectedLayer.characterId) {
+        const poseId =
+          selectedLayer.poseId ||
+          poses.find((p) => p.characterId === selectedLayer.characterId && p.status === 'approved')?.id ||
+          poses.find((p) => p.characterId === selectedLayer.characterId)?.id
+        if (!poseId) throw new Error('Character layer has no pose to key')
+        action = { type: 'setPose', poseId }
+      } else if (kind === 'visualAsset' && selectedLayer.visualAssetId) {
+        const stateId =
+          selectedLayer.assetStateId ||
+          assetStates.find((s) => s.assetId === selectedLayer.visualAssetId)?.id
+        if (!stateId) throw new Error('Visual-asset layer has no state to key')
+        action = { type: 'setState', stateId }
+      } else {
+        throw new Error('Select a character or visual-asset layer to add a pose/state key')
+      }
+      await window.indieForge.pipeline.addLayerTimedKey(projectId!, selectedShotId!, selectedLayer.id, {
+        t: playbackTime,
+        action
+      })
+      const updated = await window.indieForge.projects.open(projectId!)
+      setActiveProject(updated)
+      const shot = updated.assetPipeline?.storyboardShots?.find((s) => s.id === selectedShotId)
+      const layer = shot?.layers.find((l) => l.id === selectedLayer.id)
+      const created = (layer?.timedKeys || []).find((k) => Math.abs(k.t - playbackTime) < 0.001)
+      if (created) {
+        setSelectedTimedKeyId(created.id)
+        setTimedKeyTimeDraft(created.t.toFixed(2))
+      }
+      setSidebarTab('background')
+      setEditingCamera(false)
+      setSelectedCameraIndex(null)
+      setEditingEffect(false)
+      setSelectedEffectIndex(null)
+    } catch (err) {
+      setLayerError(err instanceof Error ? err.message : 'Failed to add timed key')
+      setSidebarTab('background')
+    }
+  }
+
+  const handleUpdateTimedKey = async (
+    keyId: string,
+    updates: { t?: number; action?: LayerTimedKey['action'] }
+  ) => {
+    try {
+      setLayerError(null)
+      await window.indieForge.pipeline.updateLayerTimedKey(projectId!, keyId, updates)
+      const updated = await window.indieForge.projects.open(projectId!)
+      setActiveProject(updated)
+      setSelectedTimedKeyId(keyId)
+      if (updates.t !== undefined) setTimedKeyTimeDraft(updates.t.toFixed(2))
+    } catch (err) {
+      setLayerError(err instanceof Error ? err.message : 'Failed to update timed key')
+      const updated = await window.indieForge.projects.open(projectId!)
+      setActiveProject(updated)
+    }
+  }
+
+  const confirmDeleteTimedKeyNow = async () => {
+    if (!confirmDeleteTimedKeyId) return
+    try {
+      setLayerError(null)
+      await window.indieForge.pipeline.deleteLayerTimedKey(projectId!, confirmDeleteTimedKeyId)
+      const updated = await window.indieForge.projects.open(projectId!)
+      setActiveProject(updated)
+      if (selectedTimedKeyId === confirmDeleteTimedKeyId) setSelectedTimedKeyId(null)
+    } catch (err) {
+      setLayerError(err instanceof Error ? err.message : 'Failed to delete timed key')
+    } finally {
+      setConfirmDeleteTimedKeyId(null)
     }
   }
 
@@ -2217,6 +2395,14 @@ export function StoryboardEditor() {
                   <button type="button" onClick={() => setShowAddEffect(true)} style={{ fontSize: '0.8rem', padding: '0.25rem 0.5rem' }}>
                     + Effect
                   </button>
+                  <button
+                    type="button"
+                    onClick={handleAddTimedKey}
+                    style={{ fontSize: '0.8rem', padding: '0.25rem 0.5rem' }}
+                    title="Add a pose/state key on the selected character or visual-asset layer (not a duplicate layer)"
+                  >
+                    + Pose/State @ {playbackTime.toFixed(1)}s
+                  </button>
                   <span style={{ color: 'var(--muted)' }}>
                     {playbackTime.toFixed(2)}s / {selectedShot.durationSec}s
                   </span>
@@ -2226,7 +2412,7 @@ export function StoryboardEditor() {
               <div 
                 style={{ 
                   position: 'relative', 
-                  height: '90px', 
+                  height: '120px', 
                   background: 'var(--bg)', 
                   borderRadius: '4px', 
                   cursor: 'pointer',
@@ -2241,12 +2427,16 @@ export function StoryboardEditor() {
                 <div style={{ position: 'absolute', left: '0.5rem', top: '5px', fontSize: '0.7rem', fontWeight: 'bold', color: '#00AAFF', zIndex: 5, pointerEvents: 'none' }}>
                   Camera
                 </div>
+                <div style={{ position: 'absolute', left: '0.5rem', top: '45px', fontSize: '0.7rem', fontWeight: 'bold', color: '#7CFFB2', zIndex: 5, pointerEvents: 'none' }}>
+                  Pose/State
+                </div>
                 <div style={{ position: 'absolute', left: '0.5rem', bottom: '5px', fontSize: '0.7rem', fontWeight: 'bold', color: '#FF6B6B', zIndex: 5, pointerEvents: 'none' }}>
                   Effects
                 </div>
                 
-                {/* Track Divider - pointerEvents none to not block marker clicks */}
-                <div style={{ position: 'absolute', left: 0, right: 0, top: '45px', height: '1px', background: 'rgba(255,255,255,0.1)', pointerEvents: 'none' }} />
+                {/* Track Dividers */}
+                <div style={{ position: 'absolute', left: 0, right: 0, top: '40px', height: '1px', background: 'rgba(255,255,255,0.1)', pointerEvents: 'none' }} />
+                <div style={{ position: 'absolute', left: 0, right: 0, top: '80px', height: '1px', background: 'rgba(255,255,255,0.1)', pointerEvents: 'none' }} />
                 
                 {/* Playhead - visual indicator, clicks handled by timeline */}
                 <div
@@ -2324,6 +2514,44 @@ export function StoryboardEditor() {
                   )
                 })}
                 
+                {/* Pose/state timed keys (same layer, not duplicate layers) */}
+                {timedKeyRows.map((row) => {
+                  const selected = selectedTimedKeyId === row.key.id
+                  const layer = selectedShot.layers.find((l) => l.id === row.layerId)
+                  const layerName = pipeline && layer ? describeLayerLabel(layer, pipeline) : row.layerId
+                  const issue = pipeline ? timedKeyIssues(row.key, layer || ({} as StoryboardLayer), pipeline, selectedShot.id) : null
+                  const tooltip = `${layerName}\n${timedKeyActionLabel(row.key)} @ ${row.key.t.toFixed(2)}s (step/hold)${issue ? `\n${issue}` : ''}`
+                  return (
+                    <div
+                      key={row.key.id}
+                      onPointerDown={() => {
+                        setSelectedTimedKeyId(row.key.id)
+                        setSelectedLayerId(row.layerId)
+                        setSidebarTab('background')
+                        setEditingCamera(false)
+                        setSelectedCameraIndex(null)
+                        setEditingEffect(false)
+                        setSelectedEffectIndex(null)
+                      }}
+                      style={{
+                        position: 'absolute',
+                        left: `${(row.key.t / selectedShot.durationSec) * 100}%`,
+                        top: '50px',
+                        width: '18px',
+                        height: '18px',
+                        background: selected ? '#FFD700' : issue ? '#C44' : '#7CFFB2',
+                        borderRadius: '3px',
+                        transform: 'translateX(-50%)',
+                        cursor: 'move',
+                        border: selected ? '3px solid #FFF' : '2px solid #fff',
+                        boxShadow: selected ? '0 0 8px rgba(255, 215, 0, 0.6)' : '0 2px 4px rgba(0,0,0,0.3)',
+                        zIndex: selected ? 11 : 5
+                      }}
+                      title={tooltip}
+                    />
+                  )
+                })}
+                
                 {/* Effect markers */}
                 {selectedShot.effectsTrack.map((ef, idx) => {
                   const preset = ef.presetId ? presets.find(p => p.id === ef.presetId) : null
@@ -2361,6 +2589,24 @@ export function StoryboardEditor() {
                   )
                 })}
               </div>
+
+              {selectedTimedKeyRow && selectedShot && (
+                <div style={{ marginTop: '0.5rem', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                  <strong>Pose/State key</strong>
+                  {' · '}
+                  {pipeline
+                    ? describeLayerLabel(
+                        selectedShot.layers.find((l) => l.id === selectedTimedKeyRow.layerId) || selectedShot.layers[0],
+                        pipeline
+                      )
+                    : selectedTimedKeyRow.layerId}
+                  {' · '}
+                  {timedKeyActionLabel(selectedTimedKeyRow.key)}
+                  {' @ '}
+                  {selectedTimedKeyRow.key.t.toFixed(2)}s
+                  {' (step/hold; authored starting pose/state unchanged)'}
+                </div>
+              )}
               
               {showAddEffect && (
                 <div style={{ marginTop: '0.5rem', padding: '0.75rem', background: 'var(--bg)', borderRadius: '4px', border: '2px solid var(--forge-gold)' }}>
@@ -2837,6 +3083,28 @@ export function StoryboardEditor() {
                   </div>
                   <div style={{ fontSize: '0.9rem', fontWeight: 'bold' }}>{label}</div>
                   {character && pose && <div style={{ fontSize: '0.8rem', opacity: 0.8 }}>Starting pose: {pose.slot}</div>}
+                  {layer.visualAssetId && (
+                    <div style={{ fontSize: '0.8rem', opacity: 0.8 }}>
+                      Starting state:{' '}
+                      {layer.assetStateId
+                        ? assetStates.find((s) => s.id === layer.assetStateId)?.name || layer.assetStateId
+                        : 'default / static'}
+                    </div>
+                  )}
+                  {(() => {
+                    const sample = sampleLayerTimedKeys(layer, playbackTime)
+                    if (!sample) return null
+                    return (
+                      <div style={{ fontSize: '0.75rem', marginTop: '0.15rem', opacity: 0.9 }}>
+                        TIMED @ {sample.t.toFixed(2)}s
+                        {sample.poseId
+                          ? `: ${poses.find((p) => p.id === sample.poseId)?.slot || sample.poseId}`
+                          : sample.assetStateId
+                            ? `: ${assetStates.find((s) => s.id === sample.assetStateId)?.name || sample.assetStateId}`
+                            : ''}
+                      </div>
+                    )
+                  })()}
                   {previewSnapshot.overrides[layer.id] && (
                     <div style={{ fontSize: '0.75rem', marginTop: '0.2rem', fontWeight: 'bold' }}>
                       PREVIEW
@@ -2911,6 +3179,116 @@ export function StoryboardEditor() {
                         ))}
                       </select>
                     </label>
+                  )}
+                  {selectedLayerId === layer.id && (layer.characterId || layer.visualAssetId) && (
+                    <div
+                      onClick={(e) => e.stopPropagation()}
+                      style={{ marginTop: '0.6rem', paddingTop: '0.5rem', borderTop: '1px solid rgba(255,255,255,0.15)' }}
+                    >
+                      <div style={{ fontSize: '0.75rem', fontWeight: 'bold', marginBottom: '0.35rem' }}>
+                        Timed pose/state keys
+                      </div>
+                      {(layer.timedKeys || []).length === 0 && (
+                        <div style={{ fontSize: '0.7rem', opacity: 0.75, marginBottom: '0.35rem' }}>
+                          None. Add at playhead — same layer, not a duplicate.
+                        </div>
+                      )}
+                      {(layer.timedKeys || [])
+                        .slice()
+                        .sort((a, b) => a.t - b.t)
+                        .map((key) => {
+                          const selected = selectedTimedKeyId === key.id
+                          const issue = pipeline ? timedKeyIssues(key, layer, pipeline, selectedShot.id) : null
+                          return (
+                            <div
+                              key={key.id}
+                              onClick={() => setSelectedTimedKeyId(key.id)}
+                              style={{
+                                marginBottom: '0.35rem',
+                                padding: '0.35rem',
+                                borderRadius: '4px',
+                                background: selected ? 'rgba(0,0,0,0.2)' : 'transparent',
+                                border: selected ? '1px solid var(--forge-gold)' : '1px solid transparent'
+                              }}
+                            >
+                              <div style={{ display: 'flex', gap: '0.25rem', alignItems: 'center' }}>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  max={selectedShot.durationSec}
+                                  step={0.01}
+                                  value={selected ? timedKeyTimeDraft : key.t.toFixed(2)}
+                                  onFocus={() => {
+                                    setSelectedTimedKeyId(key.id)
+                                    setTimedKeyTimeDraft(key.t.toFixed(2))
+                                  }}
+                                  onChange={(e) => setTimedKeyTimeDraft(e.target.value)}
+                                  onBlur={() => {
+                                    const next = Number(timedKeyTimeDraft)
+                                    if (Number.isFinite(next) && Math.abs(next - key.t) >= 0.0005) {
+                                      handleUpdateTimedKey(key.id, { t: next })
+                                    } else {
+                                      setTimedKeyTimeDraft(key.t.toFixed(2))
+                                    }
+                                  }}
+                                  style={{ width: '4.2rem', fontSize: '0.75rem' }}
+                                />
+                                <span style={{ fontSize: '0.7rem' }}>s</span>
+                                {layer.characterId ? (
+                                  <select
+                                    value={key.action.type === 'setPose' ? key.action.poseId : ''}
+                                    onChange={(e) =>
+                                      handleUpdateTimedKey(key.id, {
+                                        action: { type: 'setPose', poseId: e.target.value }
+                                      })
+                                    }
+                                    style={{ flex: 1, fontSize: '0.75rem' }}
+                                  >
+                                    {poses
+                                      .filter((p) => p.characterId === layer.characterId)
+                                      .map((p) => (
+                                        <option key={p.id} value={p.id}>{p.slot}{p.status !== 'approved' ? ` (${p.status})` : ''}</option>
+                                      ))}
+                                  </select>
+                                ) : (
+                                  <select
+                                    value={key.action.type === 'setState' ? key.action.stateId : ''}
+                                    onChange={(e) =>
+                                      handleUpdateTimedKey(key.id, {
+                                        action: { type: 'setState', stateId: e.target.value }
+                                      })
+                                    }
+                                    style={{ flex: 1, fontSize: '0.75rem' }}
+                                  >
+                                    {assetStates
+                                      .filter((s) => s.assetId === layer.visualAssetId)
+                                      .map((s) => (
+                                        <option key={s.id} value={s.id}>{s.name}</option>
+                                      ))}
+                                  </select>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmDeleteTimedKeyId(key.id)}
+                                  style={{ fontSize: '0.7rem', padding: '0.15rem 0.35rem', background: 'var(--danger)', color: 'white' }}
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                              {issue && (
+                                <div style={{ fontSize: '0.7rem', color: '#ff8a8a', marginTop: '0.2rem' }}>{issue}</div>
+                              )}
+                            </div>
+                          )
+                        })}
+                      <button
+                        type="button"
+                        onClick={handleAddTimedKey}
+                        style={{ width: '100%', fontSize: '0.75rem', padding: '0.25rem', marginTop: '0.15rem' }}
+                      >
+                        + Key @ {playbackTime.toFixed(2)}s
+                      </button>
+                    </div>
                   )}
                 </div>
               )
@@ -3406,6 +3784,16 @@ export function StoryboardEditor() {
           danger
           onConfirm={confirmDeleteLayerNow}
           onCancel={() => setConfirmDeleteLayer(false)}
+        />
+      )}
+      {confirmDeleteTimedKeyId && (
+        <ConfirmModal
+          title="Delete timed key"
+          message="Delete this pose/state key from the layer timeline? The layer and its authored starting pose/state stay."
+          confirmLabel="Delete"
+          danger
+          onConfirm={confirmDeleteTimedKeyNow}
+          onCancel={() => setConfirmDeleteTimedKeyId(null)}
         />
       )}
     </div>

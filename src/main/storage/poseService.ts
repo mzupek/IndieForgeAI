@@ -9,6 +9,10 @@ import {
   collectPoseBindingUsage,
   formatBindingInUseError
 } from '../../shared/storyboard/eventValidation'
+import {
+  collectPoseTimedKeyUsage,
+  formatTimedKeyInUseError
+} from '../../shared/storyboard/timedKeys'
 
 function getPoseAssetsDir(projectId: string): string {
   const { app } = require('electron')
@@ -185,12 +189,14 @@ export async function removePose(
   if (!pose) {
     throw new Error(`Pose not found: ${poseId}`)
   }
-  const bindingUsage = collectPoseBindingUsage(
-    project.assetPipeline as unknown as AssetPipelineProject,
-    poseId
-  )
+  const pipeline = project.assetPipeline as unknown as AssetPipelineProject
+  const bindingUsage = collectPoseBindingUsage(pipeline, poseId)
   if (bindingUsage.labels.length > 0) {
     throw new Error(formatBindingInUseError('pose', pose.slot, bindingUsage.labels))
+  }
+  const keyUsage = collectPoseTimedKeyUsage(pipeline, poseId)
+  if (keyUsage.labels.length > 0) {
+    throw new Error(formatTimedKeyInUseError('pose', pose.slot, keyUsage.labels))
   }
 
   project.assetPipeline.poses = project.assetPipeline.poses.filter(

@@ -304,6 +304,13 @@ export interface StoryboardLayer {
   flipX: boolean
   opacity: number
   
+  /**
+   * P4: Timed pose/state keys on THIS layer (step/hold).
+   * Authored poseId/assetStateId remain the default; keys never write those fields.
+   * Not C.3c per-layer FX keys.
+   */
+  timedKeys?: LayerTimedKey[]
+
   /** Layer effects (Phase C.2) */
   fx?: {
     dropShadow?: {
@@ -320,6 +327,22 @@ export interface StoryboardLayer {
       strength?: number
     }
   }
+}
+
+/** P4: One pose or state change at a time on a layer timeline. */
+export type LayerTimedKeyAction =
+  | { type: 'setPose'; poseId: string }
+  | { type: 'setState'; stateId: string }
+
+/**
+ * P4: Timed pose/state key on a single shot layer.
+ * Step/hold: the latest key with t <= playhead holds until the next key.
+ */
+export interface LayerTimedKey {
+  id: string
+  t: number
+  action: LayerTimedKeyAction
+  schemaVersion: 1
 }
 
 /** P3: After a timed event action, return to authored default or hold the override. */
