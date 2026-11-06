@@ -256,6 +256,16 @@ const api: IndieForgeAPI = {
     setDefault: (assetId, stateId) =>
       ipcRenderer.invoke(IPC_CHANNELS.ASSET_STATE_SET_DEFAULT, assetId, stateId)
   },
+  audioAssets: {
+    list: (gameId) => ipcRenderer.invoke(IPC_CHANNELS.AUDIO_ASSET_LIST, gameId),
+    get: (audioId) => ipcRenderer.invoke(IPC_CHANNELS.AUDIO_ASSET_GET, audioId),
+    importFile: (sourcePath, options) =>
+      ipcRenderer.invoke(IPC_CHANNELS.AUDIO_ASSET_IMPORT, sourcePath, options),
+    update: (audioId, gameId, patch) =>
+      ipcRenderer.invoke(IPC_CHANNELS.AUDIO_ASSET_UPDATE, audioId, gameId, patch),
+    remove: (audioId, gameId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.AUDIO_ASSET_DELETE, audioId, gameId)
+  },
   events: {
     list: (gameId) => ipcRenderer.invoke(IPC_CHANNELS.EVENT_LIST, gameId),
     get: (eventId) => ipcRenderer.invoke(IPC_CHANNELS.EVENT_GET, eventId),

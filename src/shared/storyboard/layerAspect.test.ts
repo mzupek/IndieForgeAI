@@ -169,6 +169,7 @@ function makePipeline(): AssetPipelineProject {
     palettes: [],
     eventDefinitions: [],
     eventBindings: [],
+    audioAssets: [],
     createdAt: now,
     updatedAt: now
   }

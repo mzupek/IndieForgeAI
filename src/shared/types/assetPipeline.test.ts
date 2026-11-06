@@ -208,6 +208,7 @@ function testAssetPipelineProject() {
     palettes: [],
     eventDefinitions: [],
     eventBindings: [],
+    audioAssets: [],
     exportProfiles: [
       {
         id: 'export-1',
@@ -254,6 +255,7 @@ function testJsonSerialization() {
     palettes: [],
     eventDefinitions: [],
     eventBindings: [],
+    audioAssets: [],
     exportProfiles: [],
     createdAt: now,
     updatedAt: now

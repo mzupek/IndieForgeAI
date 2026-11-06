@@ -603,6 +603,26 @@ export interface IndieForgeAPI {
     detachPresetFromScene: (sceneId: string, presetId: string) => Promise<any>
     createSceneStoryboard: (sceneId: string, input: any) => Promise<{ scene: any; storyboardId: string }>
   }
+  audioAssets: {
+    list: (gameId: string) => Promise<any[]>
+    get: (audioId: string) => Promise<any | undefined>
+    importFile: (
+      sourcePath: string,
+      options: { gameId: string; kind: string; name?: string; tags?: string[]; engineNotes?: string }
+    ) => Promise<any>
+    update: (
+      audioId: string,
+      gameId: string,
+      patch: {
+        name?: string
+        kind?: string
+        tags?: string[]
+        engineNotes?: string | null
+        file?: string
+      }
+    ) => Promise<any>
+    remove: (audioId: string, gameId: string) => Promise<{ ok: true }>
+  }
   visualAssets: {
     list: (gameId: string) => Promise<any[]>
     get: (assetId: string) => Promise<any | undefined>

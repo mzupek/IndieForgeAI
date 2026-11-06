@@ -15,6 +15,7 @@ import * as status from './commands/status'
 import { registerStoryboardCommands } from './commands/storyboard'
 import { registerSceneCommands } from './commands/scene'
 import { registerEventCommands } from './commands/event'
+import { registerAudioCommands } from './commands/audio'
 import * as asset from './commands/asset'
 import * as assetState from './commands/asset-state'
 
@@ -383,5 +384,8 @@ registerEventCommands(program)
 
 // Scene commands (Phase C)
 registerSceneCommands(program)
+
+// A1: Game-scoped audio library
+registerAudioCommands(program)
 
 program.parse()

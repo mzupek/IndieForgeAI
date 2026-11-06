@@ -664,6 +664,58 @@ forge clip remove <clip-id> --json
 
 ---
 
+## Audio Commands (A1 catalog)
+
+Game-scoped imported audio library. Files are **copied into studio storage** (`audio/<id>/`). This is not storyboard mixer playback (A2) and does not call Suno/Runway.
+
+Supported: `mp3`, `wav`, `ogg`, `m4a`. Kind is `music` or `sfx`. `--engine-notes` is an optional mapping note for existing engine clips — not a playable substitute.
+
+### `forge audio import <files...>`
+
+```bash
+forge audio import hit.wav --game game-neon-recall --kind sfx --tags "battle,hit" [--json]
+
+forge audio import loop.ogg --game game-neon-recall --kind music --name "Neon Circuitry" --engine-notes "existing Unity loop" [--json]
+```
+
+**Options:**
+- `--game <id>` (required)
+- `--kind <kind>` (required) - `music` | `sfx`
+- `--name <name>` - display name (single file only; default: filename)
+- `--tags <tags>` - comma-separated tags
+- `--engine-notes <text>` - optional engine mapping note
+
+### `forge audio list`
+
+```bash
+forge audio list --game game-neon-recall [--kind sfx] [--json]
+```
+
+### `forge audio show <audio-id>`
+
+```bash
+forge audio show <audio-id> --game game-neon-recall [--json]
+```
+
+### `forge audio update <audio-id>`
+
+```bash
+forge audio update <audio-id> --game game-neon-recall --name "Hit" --tags "battle" [--json]
+forge audio update <audio-id> --game game-neon-recall --file ./new-hit.wav [--json]
+```
+
+`--file` replaces the studio-owned copy and re-probes duration. `--engine-notes ""` clears the note.
+
+### `forge audio remove <audio-id>`
+
+```bash
+forge audio remove <audio-id> --game game-neon-recall [--json]
+```
+
+Rejected if later shot audio blocks or event `playSfx` bindings reference it (A2/A3). Unused catalog entries can be removed.
+
+---
+
 ## Clip Moment Types
 
 - **intro**: Character introduction or entrance

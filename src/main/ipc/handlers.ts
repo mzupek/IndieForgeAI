@@ -71,6 +71,13 @@ import {
   updateClip
 } from '../storage/clipService'
 import {
+  importAudio,
+  listAudioAssets,
+  getAudioAsset,
+  updateAudio,
+  removeAudio
+} from '../storage/audioService'
+import {
   createPreset,
   updatePreset,
   removePreset
@@ -1288,6 +1295,37 @@ export function registerIpcHandlers(): void {
   )
   ipcMain.handle(IPC_CHANNELS.BINDING_DELETE, async (_e, bindingId: string) => {
     await removeBinding(bindingId)
+    return { ok: true as const }
+  })
+
+  // A1: Game-scoped audio catalog (no mixer, no generation providers)
+  ipcMain.handle(IPC_CHANNELS.AUDIO_ASSET_LIST, async (_e, gameId: string) => listAudioAssets(gameId))
+  ipcMain.handle(IPC_CHANNELS.AUDIO_ASSET_GET, async (_e, audioId: string) => getAudioAsset(audioId))
+  ipcMain.handle(
+    IPC_CHANNELS.AUDIO_ASSET_IMPORT,
+    async (
+      _e,
+      sourcePath: string,
+      options: { gameId: string; kind: string; name?: string; tags?: string[]; engineNotes?: string }
+    ) => importAudio(sourcePath, options)
+  )
+  ipcMain.handle(
+    IPC_CHANNELS.AUDIO_ASSET_UPDATE,
+    async (
+      _e,
+      audioId: string,
+      gameId: string,
+      patch: {
+        name?: string
+        kind?: string
+        tags?: string[]
+        engineNotes?: string | null
+        file?: string
+      }
+    ) => updateAudio(audioId, patch, { gameId })
+  )
+  ipcMain.handle(IPC_CHANNELS.AUDIO_ASSET_DELETE, async (_e, audioId: string, gameId: string) => {
+    await removeAudio(audioId, { gameId })
     return { ok: true as const }
   })
 }

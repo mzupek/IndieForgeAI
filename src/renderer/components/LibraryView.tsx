@@ -9,9 +9,10 @@ import React, { useState } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { AssetLibrary } from './AssetLibrary'
 import { AssetEditor } from './AssetEditor'
+import { AudioLibrary } from './AudioLibrary'
 import type { VisualAsset } from '@shared/types/assetPipeline'
 
-type TabId = 'visual-assets' | 'characters' | 'poses' | 'clips'
+type TabId = 'visual-assets' | 'audio' | 'characters' | 'poses' | 'clips'
 
 export function LibraryView() {
   const { gameId } = useParams<{ gameId: string }>()
@@ -33,8 +34,8 @@ export function LibraryView() {
   }
 
   const handleTabChange = (tab: TabId) => {
-    if (tab === 'visual-assets') {
-      navigate(`/studio/library/${gameId}?tab=visual-assets`)
+    if (tab === 'visual-assets' || tab === 'audio') {
+      navigate(`/studio/library/${gameId}?tab=${tab}`)
     } else {
       // Navigate to existing dedicated view
       navigate(`/studio/${tab}/${gameId}`)
@@ -43,6 +44,7 @@ export function LibraryView() {
 
   const tabs: { id: TabId; label: string; isExternal: boolean }[] = [
     { id: 'visual-assets', label: 'Visual Assets', isExternal: false },
+    { id: 'audio', label: 'Audio', isExternal: false },
     { id: 'characters', label: 'Characters', isExternal: true },
     { id: 'poses', label: 'Poses', isExternal: true },
     { id: 'clips', label: 'Clips', isExternal: true }
@@ -110,6 +112,8 @@ export function LibraryView() {
             reloadEpoch={libraryEpoch}
             onAssetEdit={(asset) => setEditingAsset(asset)}
           />
+        ) : activeTab === 'audio' ? (
+          <AudioLibrary gameId={gameId} />
         ) : (
           <div style={{ 
             padding: '2rem', 

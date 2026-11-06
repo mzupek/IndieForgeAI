@@ -82,7 +82,8 @@ export function StudioHome() {
     } else if (path.startsWith('/studio/clips/')) {
       navigate(`/studio/clips/${gameId}`)
     } else if (path.startsWith('/studio/library/') || path.startsWith('/studio/assets/')) {
-      navigate(`/studio/library/${gameId}`)
+      const tab = new URLSearchParams(location.search).get('tab')
+      navigate(tab ? `/studio/library/${gameId}?tab=${encodeURIComponent(tab)}` : `/studio/library/${gameId}`)
     } else if (path.startsWith('/studio/scenes/')) {
       navigate(`/studio/scenes/${gameId}`)
     } else if (path.startsWith('/studio/storyboards/')) {

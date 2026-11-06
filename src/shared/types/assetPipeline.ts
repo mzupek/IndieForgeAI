@@ -561,6 +561,30 @@ export interface Palette {
 }
 
 /**
+ * Game-scoped imported audio (A1 catalog).
+ * Playback mixer is A2 (must use HTMLAudioElement.play()/pause() or AudioContext;
+ * paused currentTime seeks do not produce sound). Event SFX is A3.
+ */
+export type AudioKind = 'music' | 'sfx'
+
+export interface AudioAsset {
+  id: string
+  gameId: string
+  name: string
+  kind: AudioKind
+  tags: string[]
+  /** Studio-owned copy of the imported file (not the original source path). */
+  file: string
+  /** Probed duration in seconds. */
+  durationSec: number
+  /** Optional mapping note for existing engine clips. Not a playable substitute. */
+  engineNotes?: string
+  schemaVersion: 1
+  createdAt: string
+  updatedAt: string
+}
+
+/**
  * Visual asset - generic reusable art asset with optional states
  * Distinct from character poses (which remain import-only 1024 PNGs)
  * P1: Generic visual assets (logos, symbols, items, weapons, props)
@@ -635,6 +659,8 @@ export interface AssetPipelineProject {
   eventDefinitions: EventDefinition[]
   /** P3: Shot-scoped event → layer bindings */
   eventBindings: EventBinding[]
+  /** A1: Game-scoped imported audio catalog */
+  audioAssets: AudioAsset[]
   createdAt: string
   updatedAt: string
 }

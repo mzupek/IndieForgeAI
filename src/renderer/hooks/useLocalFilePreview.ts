@@ -1,8 +1,16 @@
 import { useEffect, useState } from 'react'
 
-function isVideoFile(filePath: string): boolean {
+function needsForgeFileUrl(filePath: string): boolean {
   const ext = filePath.toLowerCase().split('.').pop()
-  return ext === 'mp4' || ext === 'mov' || ext === 'webm'
+  return (
+    ext === 'mp4' ||
+    ext === 'mov' ||
+    ext === 'webm' ||
+    ext === 'mp3' ||
+    ext === 'wav' ||
+    ext === 'ogg' ||
+    ext === 'm4a'
+  )
 }
 
 export function useLocalFilePreview(
@@ -19,7 +27,7 @@ export function useLocalFilePreview(
 
     let cancelled = false
     
-    if (isVideoFile(filePath)) {
+    if (needsForgeFileUrl(filePath)) {
       window.indieForge.files
         .getLocalUrl(filePath)
         .then(({ localUrl }) => {

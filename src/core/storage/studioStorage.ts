@@ -67,7 +67,8 @@ function createEmptyStudioData(): StudioData {
       palettes: [],
       eventDefinitions: [],
       eventBindings: [],
-    createdAt: now,
+      audioAssets: [],
+      createdAt: now,
       updatedAt: now
     },
     createdAt: now,
@@ -155,6 +156,9 @@ async function migrateFromProjects(dataDirOverride?: string): Promise<StudioData
     for (const binding of (project.assetPipeline as { eventBindings?: typeof studio.assetPipeline.eventBindings }).eventBindings || []) {
       studio.assetPipeline.eventBindings.push(binding)
     }
+    for (const audio of (project.assetPipeline as { audioAssets?: typeof studio.assetPipeline.audioAssets }).audioAssets || []) {
+      studio.assetPipeline.audioAssets.push(audio)
+    }
   }
   
   return studio
@@ -210,6 +214,11 @@ export async function loadStudio(dataDirOverride?: string): Promise<StudioData> 
       }
       if (!studio.assetPipeline.eventBindings) {
         studio.assetPipeline.eventBindings = []
+      }
+
+      // Migrate: ensure audioAssets exist (A1)
+      if (!studio.assetPipeline.audioAssets) {
+        studio.assetPipeline.audioAssets = []
       }
       
       // Migrate: ensure StoryboardLayer.visible exists (P2)
