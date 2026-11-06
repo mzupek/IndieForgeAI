@@ -81,8 +81,8 @@ export function StudioHome() {
       navigate(`/studio/poses/${gameId}`)
     } else if (path.startsWith('/studio/clips/')) {
       navigate(`/studio/clips/${gameId}`)
-    } else if (path.startsWith('/studio/assets/')) {
-      navigate(`/studio/assets/${gameId}`)
+    } else if (path.startsWith('/studio/library/') || path.startsWith('/studio/assets/')) {
+      navigate(`/studio/library/${gameId}`)
     } else if (path.startsWith('/studio/scenes/')) {
       navigate(`/studio/scenes/${gameId}`)
     } else if (path.startsWith('/studio/storyboards/')) {

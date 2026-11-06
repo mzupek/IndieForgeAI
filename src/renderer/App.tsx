@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { MemoryRouter, Navigate, Route, Routes, useLocation, Link } from 'react-router-dom'
+import { MemoryRouter, Navigate, Route, Routes, useLocation, Link, useParams } from 'react-router-dom'
 import { ForgeBackdrop } from './components/ForgeBackdrop'
 import { AppBrandHeader } from './components/AppBrandHeader'
 import { StudioHome } from './components/StudioHome'
@@ -10,25 +10,27 @@ import { ScenesView } from './components/ScenesView'
 import { StoryboardEditor } from './components/StoryboardEditor'
 import { GameDefinitionView } from './components/GameDefinitionView'
 import { ExportView } from './components/ExportView'
-import { AssetsView } from './components/AssetsView'
-import {
-  LibraryPlaceholder
-} from './components/ComingSoon'
+import { LibraryView } from './components/LibraryView'
 import { useProjectStore, useUIStore } from './state/indieForgeStore'
+
+// Backwards compatibility redirect for old /studio/assets routes
+function AssetsRedirect() {
+  const { gameId } = useParams<{ gameId: string }>()
+  return <Navigate to={`/studio/library/${gameId}`} replace />
+}
 
 function StudioLayout({ children }: { children: React.ReactNode }) {
   const location = useLocation()
 
   const nav = [
-    { path: '/studio/characters', label: 'Characters', phase: 1 },
-    { path: '/studio/poses', label: 'Poses', phase: 2, live: true },
-    { path: '/studio/clips', label: 'Clips', phase: 3, live: true },
-    { path: '/studio/assets', label: 'Assets', phase: 'P1', live: true },
-    { path: '/studio/scenes', label: 'Scenes', phase: 'C', live: true },
-    { path: '/studio/storyboards', label: 'Storyboards', phase: 4.5, live: true },
-    { path: '/studio/definitions', label: 'Game Definitions', phase: 'B', live: true },
-    { path: '/studio/library', label: 'Library', phase: 5 },
-    { path: '/studio/export', label: 'Export', phase: 6, live: true }
+    { path: '/studio/characters', label: 'Characters' },
+    { path: '/studio/poses', label: 'Poses' },
+    { path: '/studio/clips', label: 'Clips' },
+    { path: '/studio/library', label: 'Library' },
+    { path: '/studio/scenes', label: 'Scenes' },
+    { path: '/studio/storyboards', label: 'Storyboards' },
+    { path: '/studio/definitions', label: 'Game Definitions' },
+    { path: '/studio/export', label: 'Export' }
   ]
 
   return (
@@ -40,27 +42,8 @@ function StudioLayout({ children }: { children: React.ReactNode }) {
               key={item.path}
               to={item.path}
               className={location.pathname.startsWith(item.path) ? 'active' : ''}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between'
-              }}
             >
-              <span>{item.label}</span>
-              {item.phase > 1 && !('live' in item && item.live) && (
-                <span
-                  style={{
-                    fontSize: '0.7rem',
-                    padding: '0.125rem 0.375rem',
-                    background: 'var(--bg)',
-                    border: '1px solid var(--border)',
-                    borderRadius: '3px',
-                    color: 'var(--muted)'
-                  }}
-                >
-                  Phase {item.phase}
-                </span>
-              )}
+              {item.label}
             </Link>
           ))}
         </nav>
@@ -104,15 +87,17 @@ function AppRoutes() {
           <Route path="poses/:gameId" element={<PosesView />} />
           <Route path="clips" element={<Navigate to="/studio/clips/game-neon-recall" replace />} />
           <Route path="clips/:gameId" element={<ClipsView />} />
-          <Route path="assets" element={<Navigate to="/studio/assets/game-neon-recall" replace />} />
-          <Route path="assets/:gameId" element={<AssetsView />} />
+          <Route path="library" element={<Navigate to="/studio/library/game-neon-recall" replace />} />
+          <Route path="library/:gameId" element={<LibraryView />} />
+          {/* Backwards compatibility: redirect old /studio/assets to /studio/library */}
+          <Route path="assets" element={<Navigate to="/studio/library/game-neon-recall" replace />} />
+          <Route path="assets/:gameId" element={<AssetsRedirect />} />
           <Route path="scenes" element={<Navigate to="/studio/scenes/game-neon-recall" replace />} />
           <Route path="scenes/:gameId" element={<ScenesView />} />
           <Route path="storyboards" element={<Navigate to="/studio/storyboards/game-neon-recall" replace />} />
           <Route path="storyboards/:gameId" element={<StoryboardEditor />} />
           <Route path="definitions" element={<Navigate to="/studio/definitions/game-neon-recall" replace />} />
           <Route path="definitions/:gameId" element={<GameDefinitionView />} />
-          <Route path="library" element={<LibraryPlaceholder />} />
           <Route path="export" element={<Navigate to="/studio/export/game-neon-recall" replace />} />
           <Route path="export/:gameId" element={<ExportView />} />
         </Route>
