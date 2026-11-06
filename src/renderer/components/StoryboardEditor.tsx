@@ -357,6 +357,7 @@ export function StoryboardEditor() {
   const [playbackState, setPlaybackState] = useState<'stopped' | 'playing' | 'paused'>('stopped')
   const [playbackTime, setPlaybackTime] = useState(0)
   const [loopPlayback, setLoopPlayback] = useState(false)
+  const [sidebarTab, setSidebarTab] = useState<'background' | 'camera'>('background')
   
   const [dragMode, setDragMode] = useState<DragMode>(null)
   const [dragStart, setDragStart] = useState<any>(null)
@@ -1984,79 +1985,8 @@ export function StoryboardEditor() {
               })()}
             </div>
 
-              {/* Timeline & Key Inspector - unified stable area */}
+              {/* Timeline - inspector moved to sidebar */}
             <div style={{ marginTop: '1rem', padding: '1rem', background: 'var(--bg-secondary)', borderRadius: '8px' }}>
-              
-              {/* Stable Key Inspector Area - always reserved, prevents layout jumping */}
-              {(editingCamera || editingEffect) && (
-                <div style={{ 
-                  marginBottom: '1rem', 
-                  padding: '1rem', 
-                  background: 'var(--bg)', 
-                  borderRadius: '8px',
-                  border: editingCamera ? '2px solid #00AAFF' : '2px solid #FF6B6B',
-                  minHeight: '200px'
-                }}>
-                  {editingCamera && selectedCameraIndex !== null && selectedShot && selectedShot.cameraTrack[selectedCameraIndex] ? (
-                    <>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', paddingBottom: '0.5rem', borderBottom: '1px solid var(--border)' }}>
-                        <h4 style={{ margin: 0, color: '#00AAFF', fontSize: '0.9rem' }}>
-                          📷 Camera Key @ {selectedShot.cameraTrack[selectedCameraIndex].t.toFixed(2)}s
-                        </h4>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEditingCamera(false)
-                            setSelectedCameraIndex(null)
-                          }}
-                          style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem' }}
-                        >
-                          Close
-                        </button>
-                      </div>
-                      <CameraInspector
-                        keyframe={selectedShot.cameraTrack[selectedCameraIndex]}
-                        layers={selectedShot.layers}
-                        onSave={(updated) => handleUpdateCameraKeyframe(selectedCameraIndex, updated)}
-                        onClose={() => {
-                          setEditingCamera(false)
-                          setSelectedCameraIndex(null)
-                        }}
-                        onDelete={() => handleDeleteCameraKeyframe(selectedCameraIndex)}
-                      />
-                    </>
-                  ) : editingEffect && selectedEffectIndex !== null && selectedShot && selectedShot.effectsTrack[selectedEffectIndex] ? (
-                    <>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', paddingBottom: '0.5rem', borderBottom: '1px solid var(--border)' }}>
-                        <h4 style={{ margin: 0, color: '#FF6B6B', fontSize: '0.9rem' }}>
-                          ⚡ Effect @ {selectedShot.effectsTrack[selectedEffectIndex].t.toFixed(2)}s
-                        </h4>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEditingEffect(false)
-                            setSelectedEffectIndex(null)
-                          }}
-                          style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem' }}
-                        >
-                          Close
-                        </button>
-                      </div>
-                      <EffectInspector
-                        effect={selectedShot.effectsTrack[selectedEffectIndex]}
-                        presets={presets}
-                        onSave={(updated) => handleUpdateEffectMarker(selectedEffectIndex, updated)}
-                        onClose={() => {
-                          setEditingEffect(false)
-                          setSelectedEffectIndex(null)
-                        }}
-                        onDelete={() => handleDeleteMarker('effect', selectedEffectIndex)}
-                      />
-                    </>
-                  ) : null}
-                </div>
-              )}
-              
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', alignItems: 'center' }}>
                 <span style={{ fontSize: '0.9rem', fontWeight: 'bold' }}>Timeline</span>
                 <div style={{ display: 'flex', gap: '0.5rem', fontSize: '0.85rem', alignItems: 'center' }}>
@@ -2167,6 +2097,8 @@ export function StoryboardEditor() {
                         // Clear effect selection to show only one inspector
                         setEditingEffect(false)
                         setSelectedEffectIndex(null)
+                        // Auto-switch to Camera & Effects tab
+                        setSidebarTab('camera')
                       }}
                       onContextMenu={(e) => {
                         e.preventDefault()
@@ -2207,6 +2139,8 @@ export function StoryboardEditor() {
                         // Clear camera selection to show only one inspector
                         setEditingCamera(false)
                         setSelectedCameraIndex(null)
+                        // Auto-switch to Camera & Effects tab
+                        setSidebarTab('camera')
                       }}
                       onContextMenu={(e) => {
                         e.preventDefault()
@@ -2325,12 +2259,54 @@ export function StoryboardEditor() {
         )}
       </div>
 
-      {/* Right sidebar */}
+      {/* Right sidebar with tabs */}
       {selectedShot && (
-        <div style={{ width: '280px', borderLeft: '1px solid var(--border)', paddingLeft: '1rem', overflowY: 'auto' }}>
-          {/* Background Section */}
-          <div style={{ marginBottom: '1.5rem', paddingBottom: '1rem', borderBottom: '1px solid var(--border)' }}>
-            <h3 style={{ fontSize: '1rem', margin: '0 0 0.75rem 0' }}>Background</h3>
+        <div style={{ width: '280px', borderLeft: '1px solid var(--border)', display: 'flex', flexDirection: 'column', maxHeight: '100%' }}>
+          {/* Tab headers */}
+          <div style={{ display: 'flex', borderBottom: '2px solid var(--border)', flexShrink: 0 }}>
+            <button
+              type="button"
+              onClick={() => setSidebarTab('background')}
+              style={{
+                flex: 1,
+                padding: '0.75rem',
+                background: sidebarTab === 'background' ? 'var(--forge-gold)' : 'transparent',
+                color: sidebarTab === 'background' ? 'var(--bg)' : 'var(--text)',
+                border: 'none',
+                borderBottom: sidebarTab === 'background' ? '3px solid var(--forge-gold)' : '3px solid transparent',
+                cursor: 'pointer',
+                fontSize: '0.85rem',
+                fontWeight: 'bold'
+              }}
+            >
+              Background / Layers
+            </button>
+            <button
+              type="button"
+              onClick={() => setSidebarTab('camera')}
+              style={{
+                flex: 1,
+                padding: '0.75rem',
+                background: sidebarTab === 'camera' ? 'var(--forge-gold)' : 'transparent',
+                color: sidebarTab === 'camera' ? 'var(--bg)' : 'var(--text)',
+                border: 'none',
+                borderBottom: sidebarTab === 'camera' ? '3px solid var(--forge-gold)' : '3px solid transparent',
+                cursor: 'pointer',
+                fontSize: '0.85rem',
+                fontWeight: 'bold'
+              }}
+            >
+              Camera & Effects
+            </button>
+          </div>
+          
+          {/* Tab content */}
+          <div style={{ flex: 1, overflowY: 'auto', padding: '1rem' }}>
+            {sidebarTab === 'background' ? (
+              <>
+                {/* Background Section */}
+                <div style={{ marginBottom: '1.5rem', paddingBottom: '1rem', borderBottom: '1px solid var(--border)' }}>
+                  <h3 style={{ fontSize: '1rem', margin: '0 0 0.75rem 0' }}>Background</h3>
             
             {/* Background Image */}
             <div style={{ marginBottom: '0.75rem' }}>
@@ -2868,6 +2844,85 @@ export function StoryboardEditor() {
               </div>
             </div>
           )}
+              </>
+            ) : (
+              <>
+                {/* Camera & Effects Tab Content */}
+                <div>
+                  {(editingCamera || editingEffect) ? (
+                    <div style={{ 
+                      padding: '1rem', 
+                      background: 'var(--bg)', 
+                      borderRadius: '8px',
+                      border: editingCamera ? '2px solid #00AAFF' : '2px solid #FF6B6B'
+                    }}>
+                      {editingCamera && selectedCameraIndex !== null && selectedShot.cameraTrack[selectedCameraIndex] ? (
+                        <>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', paddingBottom: '0.5rem', borderBottom: '1px solid var(--border)' }}>
+                            <h4 style={{ margin: 0, color: '#00AAFF', fontSize: '0.9rem' }}>
+                              📷 Camera Key @ {selectedShot.cameraTrack[selectedCameraIndex].t.toFixed(2)}s
+                            </h4>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingCamera(false)
+                                setSelectedCameraIndex(null)
+                              }}
+                              style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem' }}
+                            >
+                              Close
+                            </button>
+                          </div>
+                          <CameraInspector
+                            keyframe={selectedShot.cameraTrack[selectedCameraIndex]}
+                            layers={selectedShot.layers}
+                            onSave={(updated) => handleUpdateCameraKeyframe(selectedCameraIndex, updated)}
+                            onClose={() => {
+                              setEditingCamera(false)
+                              setSelectedCameraIndex(null)
+                            }}
+                            onDelete={() => handleDeleteCameraKeyframe(selectedCameraIndex)}
+                          />
+                        </>
+                      ) : editingEffect && selectedEffectIndex !== null && selectedShot.effectsTrack[selectedEffectIndex] ? (
+                        <>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', paddingBottom: '0.5rem', borderBottom: '1px solid var(--border)' }}>
+                            <h4 style={{ margin: 0, color: '#FF6B6B', fontSize: '0.9rem' }}>
+                              ⚡ Effect @ {selectedShot.effectsTrack[selectedEffectIndex].t.toFixed(2)}s
+                            </h4>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingEffect(false)
+                                setSelectedEffectIndex(null)
+                              }}
+                              style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem' }}
+                            >
+                              Close
+                            </button>
+                          </div>
+                          <EffectInspector
+                            effect={selectedShot.effectsTrack[selectedEffectIndex]}
+                            presets={presets}
+                            onSave={(updated) => handleUpdateEffectMarker(selectedEffectIndex, updated)}
+                            onClose={() => {
+                              setEditingEffect(false)
+                              setSelectedEffectIndex(null)
+                            }}
+                            onDelete={() => handleDeleteMarker('effect', selectedEffectIndex)}
+                          />
+                        </>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--muted)', fontSize: '0.85rem' }}>
+                      Select a camera or effect marker on the timeline to edit
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
         </div>
       )}
     </div>
