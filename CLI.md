@@ -1065,6 +1065,25 @@ forge shot remove \
   [--json]
 ```
 
+### Timed clip blocks
+
+Clip blocks are **range bars** on `shot.clipTrack` (not instantaneous keys, not C.3c FX keys). `durationSec` equals `sourceOutSec - sourceInSec` at 1x (no stretch). Sampling is half-open `[t, t+duration)`: **before and after the block the clip is not drawn** (not freeze last frame). Legacy `layer.clipId` / `backgroundClipId` without an explicit block for that target still play implicitly from `0` for `min(clip.duration, shot.duration)` — they never silently extend the shot. An explicit block for the same layer or background replaces that implicit playback. Overflow past shot duration requires `--extend-shot` (never silent). Overlap on the same target is rejected. Game-scoped clips: unassigned, or the clip’s character belongs to the shot’s Game.
+
+This is **IndieForge authoring + export data**. Unity/Godot importers are unchanged; engine playback parity is not claimed.
+
+```bash
+forge shot clip add --shot <shotId> --clip <clipId> --time 0.5 [--role layer|background] [--layer <layerId>] [--source-in 0] [--source-out 1.2] [--extend-shot] [--json]
+forge shot clip list --shot <shotId> [--json]
+forge shot clip show --id <blockId> [--json]
+forge shot clip update --id <blockId> [--time 1.0] [--source-in 0.2] [--source-out 1.0] [--extend-shot] [--json]
+forge shot clip remove --id <blockId> [--json]
+forge shot clip sample --shot <shotId> --time 0.8 [--json]
+```
+
+`sample` prints active blocks (including implicit) at the playhead. It is preview-only and never persisted. Reverse seek and loop wrap are the same function of time: loop to `t=0` hides a block that starts later.
+
+Preview in Storyboard uses `forge-file://` video elements driven by `currentTime` from the playhead (paused; not `video.play()`), so scrubbing backwards is deterministic. Unsupported or missing media is shown as an error; it is not promised.
+
 ---
 
 ## Layer Management

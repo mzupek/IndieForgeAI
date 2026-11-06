@@ -195,6 +195,16 @@ const api: IndieForgeAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.EFFECT_MARKER_ADD, projectId, shotId, effect),
     removeEffectMarker: (projectId, shotId, t) =>
       ipcRenderer.invoke(IPC_CHANNELS.EFFECT_MARKER_REMOVE, projectId, shotId, t),
+    addShotClipBlock: (projectId, shotId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_CLIP_ADD, projectId, shotId, input),
+    listShotClipBlocks: (shotId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_CLIP_LIST, shotId),
+    getShotClipBlock: (blockId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_CLIP_GET, blockId),
+    updateShotClipBlock: (projectId, blockId, updates) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_CLIP_UPDATE, projectId, blockId, updates),
+    deleteShotClipBlock: (projectId, blockId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_CLIP_DELETE, projectId, blockId),
     createScene: (gameId, input) =>
       ipcRenderer.invoke(IPC_CHANNELS.SCENE_CREATE, gameId, input),
     getScene: (sceneId) =>

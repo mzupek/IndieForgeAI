@@ -98,7 +98,12 @@ import {
   listLayerTimedKeys,
   getLayerTimedKey,
   updateLayerTimedKey,
-  removeLayerTimedKey
+  removeLayerTimedKey,
+  addShotClipBlock,
+  listShotClipBlocks,
+  getShotClipBlock,
+  updateShotClipBlock,
+  removeShotClipBlock
 } from '../../core/storage/storyboardService'
 import {
   getVisualAssets,
@@ -1016,6 +1021,44 @@ export function registerIpcHandlers(): void {
     IPC_CHANNELS.EFFECT_MARKER_REMOVE,
     async (_e, projectId: string, shotId: string, t: number) => {
       await removeEffectMarker(shotId, t)
+      return await loadProject(projectId)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SHOT_CLIP_ADD,
+    async (_e, projectId: string, shotId: string, input: any) => {
+      await addShotClipBlock(shotId, input)
+      return await loadProject(projectId)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SHOT_CLIP_LIST,
+    async (_e, shotId: string) => {
+      return await listShotClipBlocks(shotId)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SHOT_CLIP_GET,
+    async (_e, blockId: string) => {
+      return await getShotClipBlock(blockId)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SHOT_CLIP_UPDATE,
+    async (_e, projectId: string, blockId: string, updates: any) => {
+      await updateShotClipBlock(blockId, updates)
+      return await loadProject(projectId)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SHOT_CLIP_DELETE,
+    async (_e, projectId: string, blockId: string) => {
+      await removeShotClipBlock(blockId)
       return await loadProject(projectId)
     }
   )

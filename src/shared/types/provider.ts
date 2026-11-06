@@ -571,6 +571,27 @@ export interface IndieForgeAPI {
     removeCameraKeyframe: (projectId: string, shotId: string, time: number) => Promise<any>
     addEffectMarker: (projectId: string, shotId: string, effect: any) => Promise<any>
     removeEffectMarker: (projectId: string, shotId: string, time: number) => Promise<any>
+    addShotClipBlock: (
+      projectId: string,
+      shotId: string,
+      input: {
+        clipId: string
+        role?: 'layer' | 'background'
+        layerId?: string | null
+        t: number
+        sourceInSec?: number
+        sourceOutSec?: number
+        extendShot?: boolean
+      }
+    ) => Promise<any>
+    listShotClipBlocks: (shotId: string) => Promise<any[]>
+    getShotClipBlock: (blockId: string) => Promise<any>
+    updateShotClipBlock: (
+      projectId: string,
+      blockId: string,
+      updates: { t?: number; sourceInSec?: number; sourceOutSec?: number; extendShot?: boolean }
+    ) => Promise<any>
+    deleteShotClipBlock: (projectId: string, blockId: string) => Promise<any>
     createScene: (gameId: string, input: any) => Promise<any>
     getScene: (sceneId: string) => Promise<any | undefined>
     listScenes: (gameId: string) => Promise<any[]>

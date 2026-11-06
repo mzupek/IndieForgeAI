@@ -10,6 +10,7 @@ import type {
   Clip,
   CameraKeyframe,
   EffectMarker,
+  ShotClipBlock,
   ScenePreset,
   ScenePresetType,
   VisualAsset,
@@ -49,6 +50,17 @@ import {
   planLayerDraw,
   TEXT_BASE_PX
 } from '@shared/storyboard/layerRender'
+import {
+  clipBlockEnd,
+  clipBlockIssues,
+  clipsForGame,
+  defaultSourceWindow,
+  isSupportedClipMedia,
+  resolveEffectiveClipBlocks,
+  sampleBackgroundClip,
+  sampleLayerClip,
+  unsupportedClipMediaMessage
+} from '@shared/storyboard/clipBlocks'
 
 type EditorMode = 'layout' | 'camera'
 type DragMode = 'move' | 'scale' | 'rotate' | 'framingRect' | 'cameraMarker' | 'effectMarker' | null
@@ -58,6 +70,17 @@ interface LoadedImage {
   url: string
   width: number
   height: number
+}
+
+type ClipVideoStatus = 'loading' | 'ready' | 'error' | 'unsupported' | 'missing'
+
+interface LoadedVideo {
+  element: HTMLVideoElement
+  url: string
+  clipId: string
+  status: ClipVideoStatus
+  message?: string
+  durationSec?: number
 }
 
 function lerp(a: number, b: number, t: number): number {
@@ -409,10 +432,13 @@ export function StoryboardEditor() {
   const [dragMode, setDragMode] = useState<DragMode>(null)
   const [dragStart, setDragStart] = useState<any>(null)
   const [draggedMarker, setDraggedMarker] = useState<{
-    type: 'camera' | 'effect' | 'timedKey'
+    type: 'camera' | 'effect' | 'timedKey' | 'clipBlock'
     index: number
     layerId?: string
     keyId?: string
+    blockId?: string
+    clipDrag?: 'move' | 'trimIn' | 'trimOut'
+    grabOffsetSec?: number
   } | null>(null)
   
   const [loadedImages, setLoadedImages] = useState<Map<string, LoadedImage>>(new Map())
@@ -430,6 +456,22 @@ export function StoryboardEditor() {
   const [selectedTimedKeyId, setSelectedTimedKeyId] = useState<string | null>(null)
   const [confirmDeleteTimedKeyId, setConfirmDeleteTimedKeyId] = useState<string | null>(null)
   const [timedKeyTimeDraft, setTimedKeyTimeDraft] = useState('')
+  const [selectedClipBlockId, setSelectedClipBlockId] = useState<string | null>(null)
+  const [showAddClip, setShowAddClip] = useState(false)
+  const [addClipId, setAddClipId] = useState('')
+  const [addClipRole, setAddClipRole] = useState<'layer' | 'background'>('layer')
+  const [addClipSourceIn, setAddClipSourceIn] = useState('0')
+  const [addClipSourceOut, setAddClipSourceOut] = useState('')
+  const [confirmDeleteClipBlockId, setConfirmDeleteClipBlockId] = useState<string | null>(null)
+  const [pendingExtend, setPendingExtend] = useState<{
+    message: string
+    run: () => Promise<void>
+  } | null>(null)
+  const [clipTimeDraft, setClipTimeDraft] = useState('')
+  const [clipInDraft, setClipInDraft] = useState('')
+  const [clipOutDraft, setClipOutDraft] = useState('')
+  const videosRef = useRef<Map<string, LoadedVideo>>(new Map())
+  const [videoEpoch, setVideoEpoch] = useState(0)
   const [previewSnapshot, setPreviewSnapshot] = useState<EventPreviewSnapshot>(EMPTY_PREVIEW_SNAPSHOT)
   const previewEngineRef = useRef(new EventPreviewEngine())
   const wasPlayingRef = useRef(false)
@@ -471,6 +513,7 @@ export function StoryboardEditor() {
   const fonts = (activeProject?.assetPipeline?.fonts ?? []).filter((f: Font) => f.gameId === gameId)
   const palettes = (activeProject?.assetPipeline?.palettes ?? []).filter((p: Palette) => p.gameId === gameId)
   const pipeline = activeProject?.assetPipeline as AssetPipelineProject | undefined
+  const gameClips = pipeline ? clipsForGame(pipeline, gameId) : clips
   const eventDefinitions: EventDefinition[] =
     pipeline?.eventDefinitions?.filter((e) => e.gameId === gameId) ?? []
   const eventBindings: EventBinding[] =
@@ -488,6 +531,8 @@ export function StoryboardEditor() {
 
   const timedKeyRows = selectedShot ? flattenShotTimedKeys(selectedShot) : []
   const selectedTimedKeyRow = timedKeyRows.find((row) => row.key.id === selectedTimedKeyId)
+  const clipBlocks = selectedShot ? resolveEffectiveClipBlocks(selectedShot, clips) : []
+  const selectedClipBlock = clipBlocks.find((b) => b.id === selectedClipBlockId)
 
   const timedKeyActionLabel = (key: LayerTimedKey): string => {
     if (key.action.type === 'setPose') {
@@ -572,11 +617,157 @@ export function StoryboardEditor() {
     setPlaybackTime(0)
     setSelectedTimedKeyId(null)
     setConfirmDeleteTimedKeyId(null)
+    setSelectedClipBlockId(null)
+    setConfirmDeleteClipBlockId(null)
+    setShowAddClip(false)
+    setPendingExtend(null)
   }, [selectedShotId])
 
   useEffect(() => {
     if (selectedTimedKeyRow) setTimedKeyTimeDraft(selectedTimedKeyRow.key.t.toFixed(2))
   }, [selectedTimedKeyId, selectedTimedKeyRow?.key.t])
+
+  useEffect(() => {
+    if (!selectedClipBlock) return
+    setClipTimeDraft(selectedClipBlock.t.toFixed(2))
+    setClipInDraft(selectedClipBlock.sourceInSec.toFixed(2))
+    setClipOutDraft(selectedClipBlock.sourceOutSec.toFixed(2))
+  }, [
+    selectedClipBlockId,
+    selectedClipBlock?.t,
+    selectedClipBlock?.sourceInSec,
+    selectedClipBlock?.sourceOutSec
+  ])
+
+  // Load clip videos via forge-file:// (never base64, never local-file://)
+  useEffect(() => {
+    if (!selectedShot) return
+    let cancelled = false
+    const needed = new Set(clipBlocks.map((b) => b.clipId))
+    const loadVideos = async () => {
+      for (const clipId of needed) {
+        if (cancelled) return
+        const existing = videosRef.current.get(clipId)
+        if (existing && (existing.status === 'ready' || existing.status === 'loading')) continue
+        const clip = clips.find((c) => c.id === clipId)
+        if (!clip) {
+          videosRef.current.set(clipId, {
+            element: document.createElement('video'),
+            url: '',
+            clipId,
+            status: 'missing',
+            message: `Clip not found: ${clipId}`
+          })
+          continue
+        }
+        if (!clip.file) {
+          videosRef.current.set(clipId, {
+            element: document.createElement('video'),
+            url: '',
+            clipId,
+            status: 'missing',
+            message: `Clip '${clip.moment}' has no media file`
+          })
+          continue
+        }
+        if (!isSupportedClipMedia(clip.file)) {
+          videosRef.current.set(clipId, {
+            element: document.createElement('video'),
+            url: '',
+            clipId,
+            status: 'unsupported',
+            message: unsupportedClipMediaMessage(clip.file)
+          })
+          continue
+        }
+        try {
+          const { localUrl } = await window.indieForge.files.getLocalUrl(clip.file)
+          if (cancelled) return
+          if (!localUrl || localUrl.startsWith('local-file:')) {
+            videosRef.current.set(clipId, {
+              element: document.createElement('video'),
+              url: localUrl || '',
+              clipId,
+              status: 'error',
+              message: 'Clip URL is not forge-file://; local-file:// is not supported'
+            })
+            continue
+          }
+          const video = document.createElement('video')
+          video.muted = true
+          video.preload = 'auto'
+          video.playsInline = true
+          const entry: LoadedVideo = {
+            element: video,
+            url: localUrl,
+            clipId,
+            status: 'loading'
+          }
+          video.addEventListener('loadedmetadata', () => {
+            entry.status = 'ready'
+            entry.durationSec = Number.isFinite(video.duration) ? video.duration : clip.durationSec
+            setVideoEpoch((n) => n + 1)
+          })
+          video.addEventListener('seeked', () => setVideoEpoch((n) => n + 1))
+          video.addEventListener('error', () => {
+            entry.status = 'error'
+            entry.message = 'Video failed to load (missing file, codec, or host decode)'
+            setVideoEpoch((n) => n + 1)
+          })
+          videosRef.current.set(clipId, entry)
+          video.src = localUrl
+        } catch (err) {
+          videosRef.current.set(clipId, {
+            element: document.createElement('video'),
+            url: '',
+            clipId,
+            status: 'error',
+            message: err instanceof Error ? err.message : 'Failed to resolve clip URL'
+          })
+        }
+      }
+      if (!cancelled) setVideoEpoch((n) => n + 1)
+    }
+    void loadVideos()
+    return () => {
+      cancelled = true
+    }
+  }, [selectedShot?.id, selectedShot?.clipTrack, selectedShot?.backgroundClipId, selectedShot?.layers, clips])
+
+  // Drive video.currentTime from the playhead (paused); supports reverse scrub.
+  useEffect(() => {
+    if (!selectedShot) return
+      const bg = sampleBackgroundClip(selectedShot, clips, playbackTime)
+      for (const layer of selectedShot.layers) {
+      const sample = sampleLayerClip(selectedShot, clips, layer.id, playbackTime)
+      if (sample) {
+        const entry = videosRef.current.get(sample.clipId)
+        if (entry?.status === 'ready') {
+          const v = entry.element
+          if (Math.abs(v.currentTime - sample.sourceTimeSec) > 0.03) {
+            try {
+              v.currentTime = sample.sourceTimeSec
+            } catch {
+              /* seek may throw before ready */
+            }
+          }
+        }
+      }
+    }
+    if (bg) {
+      const entry = videosRef.current.get(bg.clipId)
+      if (entry?.status === 'ready') {
+        const v = entry.element
+        if (Math.abs(v.currentTime - bg.sourceTimeSec) > 0.03) {
+          try {
+            v.currentTime = bg.sourceTimeSec
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+    }
+  }, [playbackTime, selectedShot, clips, videoEpoch])
 
   useEffect(() => {
     if (playbackState === 'stopped' && wasPlayingRef.current) {
@@ -746,6 +937,30 @@ export function StoryboardEditor() {
       ctx.translate(shakeX, shakeY)
     }
 
+    const drawCoverMedia = (
+      media: CanvasImageSource,
+      mediaW: number,
+      mediaH: number
+    ) => {
+      if (!mediaW || !mediaH) return
+      const mediaAspect = mediaW / mediaH
+      const canvasAspect = canvas.width / canvas.height
+      let drawWidth, drawHeight, drawX, drawY
+      if (mediaAspect > canvasAspect) {
+        drawHeight = canvas.height
+        drawWidth = drawHeight * mediaAspect
+        drawX = (canvas.width - drawWidth) / 2
+        drawY = 0
+      } else {
+        drawWidth = canvas.width
+        drawHeight = drawWidth / mediaAspect
+        drawX = 0
+        drawY = (canvas.height - drawHeight) / 2
+      }
+      ctx.drawImage(media, drawX, drawY, drawWidth, drawHeight)
+      return { drawX, drawY, drawWidth, drawHeight }
+    }
+
     // Draw background image if present (before camera transform)
     if (backgroundImage) {
       const bgAspect = backgroundImage.width / backgroundImage.height
@@ -768,7 +983,7 @@ export function StoryboardEditor() {
       }
       
       ctx.drawImage(backgroundImage.element, drawX, drawY, drawWidth, drawHeight)
-      
+
       // Apply stage treatment effects to background only (Phase C.1)
       if (selectedShot.stageTreatment) {
         const { bgDim, vignette } = selectedShot.stageTreatment
@@ -792,6 +1007,29 @@ export function StoryboardEditor() {
           ctx.fillStyle = gradient
           ctx.fillRect(0, 0, canvas.width, canvas.height)
         }
+      }
+    }
+
+    // Background clip overlay: only while the block is active (half-open). Not freeze-last-frame.
+    const bgClipSample = sampleBackgroundClip(selectedShot, clips, playbackTime)
+    if (bgClipSample) {
+      const entry = videosRef.current.get(bgClipSample.clipId)
+      if (entry?.status === 'ready' && entry.element.readyState >= 2 && entry.element.videoWidth) {
+        drawCoverMedia(entry.element, entry.element.videoWidth, entry.element.videoHeight)
+      } else if (entry?.status === 'loading') {
+        ctx.fillStyle = 'rgba(0, 40, 70, 0.45)'
+        ctx.fillRect(0, 0, canvas.width, canvas.height)
+        ctx.fillStyle = '#9ad'
+        ctx.font = '16px sans-serif'
+        ctx.textAlign = 'center'
+        ctx.fillText('Loading background clip…', canvas.width / 2, canvas.height / 2)
+      } else if (entry && entry.status !== 'ready') {
+        ctx.fillStyle = 'rgba(80, 16, 16, 0.55)'
+        ctx.fillRect(0, 0, canvas.width, canvas.height)
+        ctx.fillStyle = '#ffb4b4'
+        ctx.font = '14px sans-serif'
+        ctx.textAlign = 'center'
+        ctx.fillText(entry.message || 'Background clip unavailable', canvas.width / 2, canvas.height / 2)
       }
     }
 
@@ -828,9 +1066,17 @@ export function StoryboardEditor() {
       ctx.scale(layer.flipX ? -1 : 1, 1)
       
       const img = loadedImages.get(layer.id)
-      const pixel = plan?.pixelSize ?? getLayerPixelSize(layer, !!img)
+      const clipSample = sampleLayerClip(selectedShot, clips, layer.id, playbackTime)
+      const clipVideo = clipSample ? videosRef.current.get(clipSample.clipId) : undefined
+      const videoReady =
+        clipVideo?.status === 'ready' &&
+        clipVideo.element.readyState >= 2 &&
+        clipVideo.element.videoWidth > 0
+      const pixel = plan?.pixelSize ?? getLayerPixelSize(layer, !!(img || videoReady))
+      const hideClipLayer = !!layer.clipId && !clipSample
       
       const drawContent = () => {
+        if (hideClipLayer) return
         if (plan?.kind === 'text') {
           const fontSize = TEXT_BASE_PX * layer.scale
           ctx.font = `${fontSize}px ${plan.fontFamily || 'sans-serif'}, ${plan.fontFallback || 'sans-serif'}`
@@ -842,6 +1088,36 @@ export function StoryboardEditor() {
             ctx.font = '12px sans-serif'
             ctx.fillText(plan.error.slice(0, 48), 0, fontSize)
           }
+          return
+        }
+        if (clipSample && videoReady && clipVideo) {
+          ctx.drawImage(
+            clipVideo.element,
+            -pixel.width / 2,
+            -pixel.height / 2,
+            pixel.width,
+            pixel.height
+          )
+          return
+        }
+        if (clipSample && clipVideo?.status === 'loading') {
+          ctx.fillStyle = '#1a2a3a'
+          ctx.fillRect(-pixel.width / 2, -pixel.height / 2, pixel.width, pixel.height)
+          ctx.fillStyle = '#9ad'
+          ctx.font = '11px sans-serif'
+          ctx.textAlign = 'center'
+          ctx.textBaseline = 'middle'
+          ctx.fillText('Loading clip…', 0, 0)
+          return
+        }
+        if (clipSample && clipVideo && clipVideo.status !== 'ready') {
+          ctx.fillStyle = '#7a2020'
+          ctx.fillRect(-pixel.width / 2, -pixel.height / 2, pixel.width, pixel.height)
+          ctx.fillStyle = '#ffb4b4'
+          ctx.font = '11px sans-serif'
+          ctx.textAlign = 'center'
+          ctx.textBaseline = 'middle'
+          ctx.fillText((clipVideo.message || 'Clip unavailable').slice(0, 42), 0, 0)
           return
         }
         if (img) {
@@ -995,7 +1271,7 @@ export function StoryboardEditor() {
         ctx.fillRect(rectX + rectW - 2, rectY + rectH - handleSize + 2, 4, handleSize)
       }
     }
-  }, [selectedShot, selectedLayerId, mode, playbackTime, loadedImages, dragStart, getInterpolatedCamera, pipeline, gameId, previewSnapshot])
+  }, [selectedShot, selectedLayerId, mode, playbackTime, loadedImages, dragStart, getInterpolatedCamera, pipeline, gameId, previewSnapshot, clips, videoEpoch])
 
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (!canvasRef.current || !selectedShot) return
@@ -1190,8 +1466,8 @@ export function StoryboardEditor() {
     const clickTime = x * selectedShot.durationSec
     const near = (t: number) => Math.abs(x - t / selectedShot.durationSec) < 0.03
 
-    // Y-aware hit-test: camera / pose-state / effects thirds so overlapping x does not steal clicks
-    if (yRatio < 1 / 3) {
+    // Y-aware hit-test: camera / pose-state / effects / clips fourths
+    if (yRatio < 0.25) {
       for (let i = 0; i < selectedShot.cameraTrack.length; i++) {
         if (near(selectedShot.cameraTrack[i].t)) {
           setDraggedMarker({ type: 'camera', index: i })
@@ -1200,7 +1476,7 @@ export function StoryboardEditor() {
           return
         }
       }
-    } else if (yRatio < 2 / 3) {
+    } else if (yRatio < 0.5) {
       const rows = flattenShotTimedKeys(selectedShot)
       for (let i = rows.length - 1; i >= 0; i--) {
         if (near(rows[i].key.t)) {
@@ -1215,10 +1491,43 @@ export function StoryboardEditor() {
           return
         }
       }
-    } else {
+    } else if (yRatio < 0.75) {
       for (let i = 0; i < selectedShot.effectsTrack.length; i++) {
         if (near(selectedShot.effectsTrack[i].t)) {
           setDraggedMarker({ type: 'effect', index: i })
+          setDragMode('marker' as any)
+          e.currentTarget.setPointerCapture(e.pointerId)
+          return
+        }
+      }
+    } else {
+      const duration = selectedShot.durationSec || 1
+      for (let i = clipBlocks.length - 1; i >= 0; i--) {
+        const block = clipBlocks[i]
+        const x0 = block.t / duration
+        const x1 = clipBlockEnd(block) / duration
+        if (x >= x0 && x <= x1) {
+          setSelectedClipBlockId(block.id)
+          setSelectedTimedKeyId(null)
+          setEditingCamera(false)
+          setSelectedCameraIndex(null)
+          setEditingEffect(false)
+          setSelectedEffectIndex(null)
+          if (block.implicit) {
+            e.currentTarget.setPointerCapture(e.pointerId)
+            return
+          }
+          const edge = 0.012
+          let clipDrag: 'move' | 'trimIn' | 'trimOut' = 'move'
+          if (x - x0 < edge) clipDrag = 'trimIn'
+          else if (x1 - x < edge) clipDrag = 'trimOut'
+          setDraggedMarker({
+            type: 'clipBlock',
+            index: i,
+            blockId: block.id,
+            clipDrag,
+            grabOffsetSec: clickTime - block.t
+          })
           setDragMode('marker' as any)
           e.currentTarget.setPointerCapture(e.pointerId)
           return
@@ -1289,6 +1598,55 @@ export function StoryboardEditor() {
           }
           setActiveProject(updatedProject)
         }
+      } else if (draggedMarker.type === 'clipBlock' && draggedMarker.blockId) {
+        const orig = (selectedShot.clipTrack || []).find((b) => b.id === draggedMarker.blockId)
+        if (!orig) return
+        const clip = clips.find((c) => c.id === orig.clipId)
+        const clipDur = clip?.durationSec ?? orig.sourceOutSec
+        let next: ShotClipBlock = orig
+        if (draggedMarker.clipDrag === 'trimIn') {
+          const end = clipBlockEnd(orig)
+          const newT = Math.max(0, Math.min(end - 0.05, newTime))
+          const durationSec = end - newT
+          const sourceOutSec = orig.sourceOutSec
+          const sourceInSec = Math.max(0, sourceOutSec - durationSec)
+          next = {
+            ...orig,
+            t: newT,
+            durationSec: sourceOutSec - sourceInSec,
+            sourceInSec,
+            sourceOutSec
+          }
+        } else if (draggedMarker.clipDrag === 'trimOut') {
+          const maxEnd = selectedShot.durationSec
+          const newEnd = Math.max(orig.t + 0.05, Math.min(maxEnd, newTime))
+          const durationSec = newEnd - orig.t
+          const sourceOutSec = Math.min(clipDur, orig.sourceInSec + durationSec)
+          next = {
+            ...orig,
+            durationSec: sourceOutSec - orig.sourceInSec,
+            sourceOutSec
+          }
+        } else {
+          const maxT = Math.max(0, selectedShot.durationSec - orig.durationSec)
+          const rawT = newTime - (draggedMarker.grabOffsetSec || 0)
+          const newT = Math.max(0, Math.min(maxT, rawT))
+          next = { ...orig, t: newT }
+        }
+        if (activeProject && activeProject.assetPipeline) {
+          const updatedProject = {
+            ...activeProject,
+            assetPipeline: {
+              ...activeProject.assetPipeline,
+              storyboardShots: activeProject.assetPipeline.storyboardShots?.map((s) =>
+                s.id === selectedShotId
+                  ? { ...s, clipTrack: (s.clipTrack || []).map((b) => (b.id === next.id ? next : b)) }
+                  : s
+              )
+            }
+          }
+          setActiveProject(updatedProject)
+        }
       } else {
         const updated = [...selectedShot.effectsTrack]
         updated[draggedMarker.index] = { ...updated[draggedMarker.index], t: newTime }
@@ -1354,6 +1712,44 @@ export function StoryboardEditor() {
           setLayerError(null)
         } catch (err) {
           setLayerError(err instanceof Error ? err.message : 'Failed to move timed key')
+          const proj = await window.indieForge.projects.open(projectId!)
+          setActiveProject(proj)
+        }
+      } else if (draggedMarker.type === 'clipBlock' && draggedMarker.blockId) {
+        const block = (selectedShot.clipTrack || []).find((b) => b.id === draggedMarker.blockId)
+        try {
+          if (block) {
+            await window.indieForge.pipeline.updateShotClipBlock(projectId!, block.id, {
+              t: block.t,
+              sourceInSec: block.sourceInSec,
+              sourceOutSec: block.sourceOutSec
+            })
+          }
+          const proj = await window.indieForge.projects.open(projectId!)
+          setActiveProject(proj)
+          setSelectedClipBlockId(draggedMarker.blockId)
+          setLayerError(null)
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : 'Failed to move clip block'
+          if (msg.includes('--extend-shot') || msg.includes('never silent')) {
+            setPendingExtend({
+              message:
+                'This clip block would pass the shot end. Extend the shot to fit? Cancel keeps the current duration (never silent).',
+              run: async () => {
+                if (!block) return
+                await window.indieForge.pipeline.updateShotClipBlock(projectId!, block.id, {
+                  t: block.t,
+                  sourceInSec: block.sourceInSec,
+                  sourceOutSec: block.sourceOutSec,
+                  extendShot: true
+                })
+                const proj = await window.indieForge.projects.open(projectId!)
+                setActiveProject(proj)
+              }
+            })
+          } else {
+            setLayerError(msg)
+          }
           const proj = await window.indieForge.projects.open(projectId!)
           setActiveProject(proj)
         }
@@ -1804,6 +2200,120 @@ export function StoryboardEditor() {
       setLayerError(err instanceof Error ? err.message : 'Failed to delete timed key')
     } finally {
       setConfirmDeleteTimedKeyId(null)
+    }
+  }
+
+  const reloadProject = async () => {
+    const updated = await window.indieForge.projects.open(projectId!)
+    setActiveProject(updated)
+    return updated
+  }
+
+  const runClipWrite = async (fn: (extendShot: boolean) => Promise<void>): Promise<boolean> => {
+    try {
+      setLayerError(null)
+      await fn(false)
+      await reloadProject()
+      return true
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      if (msg.includes('--extend-shot') || msg.includes('never silent') || msg.includes('extend the shot')) {
+        setPendingExtend({
+          message:
+            'This clip block ends after the shot duration. Extend the shot to fit the block? Cancel keeps the current duration — Forge never silently extends.',
+          run: async () => {
+            await fn(true)
+            await reloadProject()
+          }
+        })
+        await reloadProject()
+        return false
+      }
+      setLayerError(msg)
+      await reloadProject()
+      return false
+    }
+  }
+
+  const handleAddClipBlock = async () => {
+    if (!selectedShot || !addClipId) {
+      setLayerError('Select a clip from this Game')
+      return
+    }
+    const clip = gameClips.find((c) => c.id === addClipId)
+    if (!clip) {
+      setLayerError('Clip is not in the selected Game')
+      return
+    }
+    const sourceInSec = Number(addClipSourceIn)
+    const sourceOutSec = addClipSourceOut === '' ? clip.durationSec : Number(addClipSourceOut)
+    const ok = await runClipWrite(async (extendShot) => {
+      await window.indieForge.pipeline.addShotClipBlock(projectId!, selectedShotId!, {
+        clipId: addClipId,
+        role: addClipRole,
+        t: playbackTime,
+        sourceInSec,
+        sourceOutSec,
+        extendShot
+      })
+    })
+    if (ok) setShowAddClip(false)
+  }
+
+  const handlePromoteImplicitBlock = async () => {
+    if (!selectedClipBlock || !selectedClipBlock.implicit) return
+    await runClipWrite(async (extendShot) => {
+      await window.indieForge.pipeline.addShotClipBlock(projectId!, selectedShotId!, {
+        clipId: selectedClipBlock.clipId,
+        role: selectedClipBlock.role,
+        layerId: selectedClipBlock.layerId || undefined,
+        t: selectedClipBlock.t,
+        sourceInSec: selectedClipBlock.sourceInSec,
+        sourceOutSec: selectedClipBlock.sourceOutSec,
+        extendShot
+      })
+    })
+  }
+
+  const handleCommitClipBlockEdits = async () => {
+    if (!selectedClipBlock || selectedClipBlock.implicit) return
+    const t = Number(clipTimeDraft)
+    const sourceInSec = Number(clipInDraft)
+    const sourceOutSec = Number(clipOutDraft)
+    await runClipWrite(async (extendShot) => {
+      await window.indieForge.pipeline.updateShotClipBlock(projectId!, selectedClipBlock.id, {
+        t,
+        sourceInSec,
+        sourceOutSec,
+        extendShot
+      })
+    })
+  }
+
+  const confirmDeleteClipBlockNow = async () => {
+    if (!confirmDeleteClipBlockId) return
+    try {
+      setLayerError(null)
+      await window.indieForge.pipeline.deleteShotClipBlock(projectId!, confirmDeleteClipBlockId)
+      await reloadProject()
+      if (selectedClipBlockId === confirmDeleteClipBlockId) setSelectedClipBlockId(null)
+    } catch (err) {
+      setLayerError(err instanceof Error ? err.message : 'Failed to delete clip block')
+    } finally {
+      setConfirmDeleteClipBlockId(null)
+    }
+  }
+
+  const confirmExtendShotNow = async () => {
+    if (!pendingExtend) return
+    try {
+      setLayerError(null)
+      await pendingExtend.run()
+    } catch (err) {
+      setLayerError(err instanceof Error ? err.message : 'Failed to extend shot')
+    } finally {
+      setPendingExtend(null)
+      setShowAddClip(false)
     }
   }
 
@@ -2366,6 +2876,41 @@ export function StoryboardEditor() {
                   </div>
                 )
               })()}
+              {(() => {
+                const bg = sampleBackgroundClip(selectedShot, clips, playbackTime)
+                const layerHits = selectedShot.layers
+                  .map((layer) => sampleLayerClip(selectedShot, clips, layer.id, playbackTime))
+                  .filter(Boolean)
+                const samples = [...(bg ? [bg] : []), ...layerHits]
+                if (samples.length === 0 && clipBlocks.length === 0) return null
+                if (samples.length === 0) {
+                  return (
+                    <div style={{ marginTop: '0.35rem', fontSize: '0.75rem', color: 'var(--muted)' }}>
+                      Clips: none active at {playbackTime.toFixed(2)}s (outside block = hidden)
+                    </div>
+                  )
+                }
+                return (
+                  <div style={{ marginTop: '0.35rem', fontSize: '0.75rem', color: '#C9A0FF' }}>
+                    {samples.map((s, i) => {
+                      const video = videosRef.current.get(s!.clipId)
+                      const clip = clips.find((c) => c.id === s!.clipId)
+                      return (
+                        <span key={`${s!.blockId}-${i}`}>
+                          {i > 0 ? ' · ' : ''}
+                          {s!.role} {clip?.moment || s!.clipId} src {s!.sourceTimeSec.toFixed(2)}s
+                          {s!.implicit ? ' (implicit)' : ''}
+                          {video?.status === 'ready'
+                            ? ''
+                            : video
+                              ? ` [${video.status}]`
+                              : ''}
+                        </span>
+                      )
+                    })}
+                  </div>
+                )
+              })()}
             </div>
 
               {/* Timeline - inspector moved to sidebar */}
@@ -2403,6 +2948,21 @@ export function StoryboardEditor() {
                   >
                     + Pose/State @ {playbackTime.toFixed(1)}s
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowAddClip(true)
+                      setAddClipId(gameClips[0]?.id || '')
+                      setAddClipRole('layer')
+                      setAddClipSourceIn('0')
+                      const first = gameClips[0]
+                      setAddClipSourceOut(first ? String(first.durationSec) : '')
+                    }}
+                    style={{ fontSize: '0.8rem', padding: '0.25rem 0.5rem' }}
+                    title="Place a timed clip block with visible duration (not an instantaneous key)"
+                  >
+                    + Clip @ {playbackTime.toFixed(1)}s
+                  </button>
                   <span style={{ color: 'var(--muted)' }}>
                     {playbackTime.toFixed(2)}s / {selectedShot.durationSec}s
                   </span>
@@ -2412,7 +2972,7 @@ export function StoryboardEditor() {
               <div 
                 style={{ 
                   position: 'relative', 
-                  height: '120px', 
+                  height: '160px', 
                   background: 'var(--bg)', 
                   borderRadius: '4px', 
                   cursor: 'pointer',
@@ -2430,13 +2990,17 @@ export function StoryboardEditor() {
                 <div style={{ position: 'absolute', left: '0.5rem', top: '45px', fontSize: '0.7rem', fontWeight: 'bold', color: '#7CFFB2', zIndex: 5, pointerEvents: 'none' }}>
                   Pose/State
                 </div>
-                <div style={{ position: 'absolute', left: '0.5rem', bottom: '5px', fontSize: '0.7rem', fontWeight: 'bold', color: '#FF6B6B', zIndex: 5, pointerEvents: 'none' }}>
+                <div style={{ position: 'absolute', left: '0.5rem', top: '85px', fontSize: '0.7rem', fontWeight: 'bold', color: '#FF6B6B', zIndex: 5, pointerEvents: 'none' }}>
                   Effects
+                </div>
+                <div style={{ position: 'absolute', left: '0.5rem', top: '125px', fontSize: '0.7rem', fontWeight: 'bold', color: '#C9A0FF', zIndex: 5, pointerEvents: 'none' }}>
+                  Clips
                 </div>
                 
                 {/* Track Dividers */}
                 <div style={{ position: 'absolute', left: 0, right: 0, top: '40px', height: '1px', background: 'rgba(255,255,255,0.1)', pointerEvents: 'none' }} />
                 <div style={{ position: 'absolute', left: 0, right: 0, top: '80px', height: '1px', background: 'rgba(255,255,255,0.1)', pointerEvents: 'none' }} />
+                <div style={{ position: 'absolute', left: 0, right: 0, top: '120px', height: '1px', background: 'rgba(255,255,255,0.1)', pointerEvents: 'none' }} />
                 
                 {/* Playhead - visual indicator, clicks handled by timeline */}
                 <div
@@ -2573,7 +3137,7 @@ export function StoryboardEditor() {
                       style={{
                         position: 'absolute',
                         left: `${(ef.t / selectedShot.durationSec) * 100}%`,
-                        bottom: '15px',
+                        top: '90px',
                         width: '20px',
                         height: '20px',
                         background: selectedEffectIndex === idx ? '#FFD700' : '#FF6B6B',
@@ -2586,6 +3150,67 @@ export function StoryboardEditor() {
                       }}
                       title={`${label} @ ${ef.t.toFixed(1)}s (drag to move, right-click to delete)`}
                     />
+                  )
+                })}
+
+                {clipBlocks.map((block) => {
+                  const duration = selectedShot.durationSec || 1
+                  const left = (block.t / duration) * 100
+                  const width = Math.max(0.8, (block.durationSec / duration) * 100)
+                  const selected = selectedClipBlockId === block.id
+                  const clip = clips.find((c) => c.id === block.clipId)
+                  const issue = pipeline && !block.implicit
+                    ? clipBlockIssues(block, selectedShot, pipeline, selectedShot.id)
+                    : null
+                  const video = videosRef.current.get(block.clipId)
+                  const mediaNote =
+                    video?.status === 'ready'
+                      ? 'ready'
+                      : video?.status === 'loading'
+                        ? 'loading'
+                        : video?.message || (clip ? '' : 'missing clip')
+                  const tooltip = `${block.implicit ? 'Implicit (legacy) ' : ''}${block.role} ${clip?.moment || block.clipId}\n${block.t.toFixed(2)}s–${clipBlockEnd(block).toFixed(2)}s\nsrc ${block.sourceInSec.toFixed(2)}–${block.sourceOutSec.toFixed(2)}\n${mediaNote}${issue ? `\n${issue}` : ''}\nBefore/after block: hidden (not last frame)`
+                  return (
+                    <div
+                      key={block.id}
+                      onPointerDown={() => {
+                        setSelectedClipBlockId(block.id)
+                        if (block.layerId) setSelectedLayerId(block.layerId)
+                        setSidebarTab('background')
+                        setEditingCamera(false)
+                        setSelectedCameraIndex(null)
+                        setEditingEffect(false)
+                        setSelectedEffectIndex(null)
+                        setSelectedTimedKeyId(null)
+                      }}
+                      style={{
+                        position: 'absolute',
+                        left: `${left}%`,
+                        top: '128px',
+                        width: `${width}%`,
+                        height: '26px',
+                        background: selected ? '#E2C6FF' : block.implicit ? 'transparent' : issue ? '#C44' : '#7B4DFF',
+                        border: block.implicit
+                          ? `2px dashed ${selected ? '#FFF' : '#C9A0FF'}`
+                          : selected
+                            ? '3px solid #FFF'
+                            : '2px solid #fff',
+                        borderRadius: '4px',
+                        cursor: block.implicit ? 'pointer' : 'ew-resize',
+                        boxSizing: 'border-box',
+                        zIndex: selected ? 11 : 5,
+                        overflow: 'hidden',
+                        fontSize: '0.65rem',
+                        color: selected || block.implicit ? '#1a1a1a' : '#fff',
+                        padding: '2px 4px',
+                        lineHeight: 1.1,
+                        whiteSpace: 'nowrap',
+                        textOverflow: 'ellipsis'
+                      }}
+                      title={tooltip}
+                    >
+                      {(clip?.moment || block.role).slice(0, 12)}
+                    </div>
                   )
                 })}
               </div>
@@ -2605,6 +3230,213 @@ export function StoryboardEditor() {
                   {' @ '}
                   {selectedTimedKeyRow.key.t.toFixed(2)}s
                   {' (step/hold; authored starting pose/state unchanged)'}
+                </div>
+              )}
+
+              {showAddClip && (
+                <div style={{ marginTop: '0.5rem', padding: '0.75rem', background: 'var(--bg)', borderRadius: '4px', border: '2px solid #C9A0FF' }}>
+                  <div style={{ fontWeight: 'bold', marginBottom: '0.35rem', fontSize: '0.9rem' }}>
+                    Add clip block at {playbackTime.toFixed(2)}s
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--muted)', marginBottom: '0.5rem' }}>
+                    Range bar with duration (not a key). Playhead drives video time so reverse scrub works.
+                    Overflow needs an explicit extend — never silent. Before/after the block the clip is hidden.
+                  </div>
+                  {gameClips.length === 0 ? (
+                    <div style={{ fontSize: '0.8rem', marginBottom: '0.5rem' }}>
+                      No clips in this Game. Import mp4/webm (mov attempted) in Clips first.
+                    </div>
+                  ) : (
+                    <>
+                      <label style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.35rem' }}>
+                        Clip
+                        <select
+                          value={addClipId}
+                          onChange={(e) => {
+                            setAddClipId(e.target.value)
+                            const c = gameClips.find((x) => x.id === e.target.value)
+                            if (c) setAddClipSourceOut(String(c.durationSec))
+                          }}
+                          style={{ width: '100%', marginTop: '0.2rem', fontSize: '0.85rem' }}
+                        >
+                          {gameClips.map((c) => (
+                            <option key={c.id} value={c.id}>
+                              {c.moment} ({c.durationSec}s){isSupportedClipMedia(c.file) ? '' : ' — unsupported'}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.35rem' }}>
+                        Role
+                        <select
+                          value={addClipRole}
+                          onChange={(e) => setAddClipRole(e.target.value as 'layer' | 'background')}
+                          style={{ width: '100%', marginTop: '0.2rem', fontSize: '0.85rem' }}
+                        >
+                          <option value="layer">Layer (creates clip layer if needed)</option>
+                          <option value="background">Background</option>
+                        </select>
+                      </label>
+                      <div style={{ display: 'flex', gap: '0.5rem' }}>
+                        <label style={{ flex: 1, fontSize: '0.75rem' }}>
+                          Source in
+                          <input
+                            type="number"
+                            step="0.05"
+                            min="0"
+                            value={addClipSourceIn}
+                            onChange={(e) => setAddClipSourceIn(e.target.value)}
+                            style={{ width: '100%', marginTop: '0.2rem', fontSize: '0.85rem' }}
+                          />
+                        </label>
+                        <label style={{ flex: 1, fontSize: '0.75rem' }}>
+                          Source out
+                          <input
+                            type="number"
+                            step="0.05"
+                            min="0"
+                            value={addClipSourceOut}
+                            onChange={(e) => setAddClipSourceOut(e.target.value)}
+                            style={{ width: '100%', marginTop: '0.2rem', fontSize: '0.85rem' }}
+                          />
+                        </label>
+                      </div>
+                      {(() => {
+                        const c = gameClips.find((x) => x.id === addClipId)
+                        if (!c) return null
+                        const win = defaultSourceWindow(
+                          { ...c, durationSec: Number(addClipSourceOut || c.durationSec) - Number(addClipSourceIn || 0) > 0
+                            ? c.durationSec
+                            : c.durationSec },
+                          selectedShot.durationSec,
+                          playbackTime
+                        )
+                        const end = playbackTime + (Number(addClipSourceOut || c.durationSec) - Number(addClipSourceIn || 0))
+                        if (end > selectedShot.durationSec) {
+                          return (
+                            <div style={{ fontSize: '0.75rem', color: '#e8c36a', marginTop: '0.35rem' }}>
+                              Block would end at {end.toFixed(2)}s (shot {selectedShot.durationSec}s). You will be asked to extend — never silent.
+                            </div>
+                          )
+                        }
+                        return win.needsExtend ? (
+                          <div style={{ fontSize: '0.75rem', color: '#e8c36a', marginTop: '0.35rem' }}>
+                            Clip is longer than remaining shot time. Extend is opt-in.
+                          </div>
+                        ) : null
+                      })()}
+                    </>
+                  )}
+                  <div style={{ display: 'flex', gap: '0.35rem', marginTop: '0.5rem' }}>
+                    <button
+                      type="button"
+                      onClick={handleAddClipBlock}
+                      disabled={!addClipId}
+                      style={{ flex: 1, fontSize: '0.85rem', background: '#7B4DFF', color: '#fff' }}
+                    >
+                      Place block
+                    </button>
+                    <button type="button" onClick={() => setShowAddClip(false)} style={{ flex: 1, fontSize: '0.85rem' }}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {selectedClipBlock && selectedShot && (
+                <div style={{ marginTop: '0.5rem', padding: '0.6rem', background: 'var(--bg)', borderRadius: '4px', fontSize: '0.8rem' }}>
+                  <div>
+                    <strong>{selectedClipBlock.implicit ? 'Implicit clip (legacy)' : 'Clip block'}</strong>
+                    {' · '}
+                    {selectedClipBlock.role}
+                    {' · '}
+                    {clips.find((c) => c.id === selectedClipBlock.clipId)?.moment || selectedClipBlock.clipId}
+                    {' · '}
+                    {selectedClipBlock.t.toFixed(2)}s–{clipBlockEnd(selectedClipBlock).toFixed(2)}s
+                  </div>
+                  <div style={{ color: 'var(--muted)', marginTop: '0.2rem', fontSize: '0.75rem' }}>
+                    Half-open [t, t+duration). Outside the bar the clip is not drawn (not freeze-frame).
+                    {selectedClipBlock.implicit
+                      ? ' Legacy layer.clipId / backgroundClipId plays from 0 without extending the shot until you convert it to an explicit block.'
+                      : ' Drag the bar to move (clamped inside the shot). Drag edges to trim. Play/pause/stop/loop and reverse scrub seek source time.'}
+                  </div>
+                  {(() => {
+                    const video = videosRef.current.get(selectedClipBlock.clipId)
+                    const clip = clips.find((c) => c.id === selectedClipBlock.clipId)
+                    if (!clip) return <div style={{ color: '#ff8a8a', marginTop: '0.25rem' }}>Missing clip library item</div>
+                    if (video?.status === 'loading') return <div style={{ color: '#9ad', marginTop: '0.25rem' }}>Loading media… seeking when ready</div>
+                    if (video && video.status !== 'ready') {
+                      return <div style={{ color: '#ff8a8a', marginTop: '0.25rem' }}>{video.message}</div>
+                    }
+                    if (video?.status === 'ready' && video.durationSec && Math.abs(video.durationSec - clip.durationSec) > 0.2) {
+                      return (
+                        <div style={{ color: '#e8c36a', marginTop: '0.25rem' }}>
+                          Host duration {video.durationSec.toFixed(2)}s vs library {clip.durationSec}s — using library trim window
+                        </div>
+                      )
+                    }
+                    return video?.status === 'ready' ? (
+                      <div style={{ color: '#9ad', marginTop: '0.25rem' }}>Seek-ready · forge-file preview</div>
+                    ) : null
+                  })()}
+                  {selectedClipBlock.implicit ? (
+                    <button
+                      type="button"
+                      onClick={handlePromoteImplicitBlock}
+                      style={{ marginTop: '0.4rem', fontSize: '0.8rem' }}
+                    >
+                      Convert to explicit block
+                    </button>
+                  ) : (
+                    <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.4rem', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                      <label style={{ fontSize: '0.75rem' }}>
+                        Start
+                        <input
+                          type="number"
+                          step="0.05"
+                          min="0"
+                          value={clipTimeDraft}
+                          onChange={(e) => setClipTimeDraft(e.target.value)}
+                          onBlur={handleCommitClipBlockEdits}
+                          style={{ width: '4.5rem', marginLeft: '0.25rem' }}
+                        />
+                      </label>
+                      <label style={{ fontSize: '0.75rem' }}>
+                        In
+                        <input
+                          type="number"
+                          step="0.05"
+                          min="0"
+                          value={clipInDraft}
+                          onChange={(e) => setClipInDraft(e.target.value)}
+                          onBlur={handleCommitClipBlockEdits}
+                          style={{ width: '4.5rem', marginLeft: '0.25rem' }}
+                        />
+                      </label>
+                      <label style={{ fontSize: '0.75rem' }}>
+                        Out
+                        <input
+                          type="number"
+                          step="0.05"
+                          min="0"
+                          value={clipOutDraft}
+                          onChange={(e) => setClipOutDraft(e.target.value)}
+                          onBlur={handleCommitClipBlockEdits}
+                          style={{ width: '4.5rem', marginLeft: '0.25rem' }}
+                        />
+                      </label>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>
+                        {selectedClipBlock.durationSec.toFixed(2)}s
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmDeleteClipBlockId(selectedClipBlock.id)}
+                        style={{ fontSize: '0.75rem', background: 'var(--danger)', color: 'white' }}
+                      >
+                        Delete block
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
               
@@ -2813,17 +3645,17 @@ export function StoryboardEditor() {
                 }}
               >
                 <option value="">None</option>
-                {clips.map(clip => (
+                {gameClips.map(clip => (
                   <option key={clip.id} value={clip.id}>
-                    {clip.moment || 'clip'} ({clip.durationSec}s)
+                    {clip.moment || 'clip'} ({clip.durationSec}s){isSupportedClipMedia(clip.file) ? '' : ' — unsupported'}
                   </option>
                 ))}
               </select>
-              {selectedShot.backgroundImage && selectedShot.backgroundClipId && (
-                <div style={{ fontSize: '0.7rem', marginTop: '0.25rem', color: 'var(--muted)', fontStyle: 'italic' }}>
-                  Clip plays over static image
-                </div>
-              )}
+              <div style={{ fontSize: '0.7rem', marginTop: '0.25rem', color: 'var(--muted)', fontStyle: 'italic' }}>
+                Dropdown sets legacy backgroundClipId (implicit play from 0, never extends the shot).
+                Timed placement lives on the Clips timeline track. An explicit background block replaces implicit playback.
+                {selectedShot.backgroundImage && selectedShot.backgroundClipId ? ' Clip draws over the static image while the block is active.' : ''}
+              </div>
             </div>
             
             {/* Stage Treatment (Phase C.1) */}
@@ -3091,6 +3923,25 @@ export function StoryboardEditor() {
                         : 'default / static'}
                     </div>
                   )}
+                  {layer.clipId && (() => {
+                    const sample = sampleLayerClip(selectedShot, clips, layer.id, playbackTime)
+                    const video = videosRef.current.get(layer.clipId)
+                    if (!sample) {
+                      return (
+                        <div style={{ fontSize: '0.75rem', marginTop: '0.15rem', opacity: 0.8 }}>
+                          CLIP hidden (outside block)
+                        </div>
+                      )
+                    }
+                    return (
+                      <div style={{ fontSize: '0.75rem', marginTop: '0.15rem', opacity: 0.9 }}>
+                        CLIP src {sample.sourceTimeSec.toFixed(2)}s
+                        {sample.implicit ? ' (implicit)' : ''}
+                        {video?.status === 'loading' ? ' · loading' : ''}
+                        {video && video.status !== 'ready' && video.status !== 'loading' ? ' · unavailable' : ''}
+                      </div>
+                    )
+                  })()}
                   {(() => {
                     const sample = sampleLayerTimedKeys(layer, playbackTime)
                     if (!sample) return null
@@ -3794,6 +4645,25 @@ export function StoryboardEditor() {
           danger
           onConfirm={confirmDeleteTimedKeyNow}
           onCancel={() => setConfirmDeleteTimedKeyId(null)}
+        />
+      )}
+      {confirmDeleteClipBlockId && (
+        <ConfirmModal
+          title="Delete clip block"
+          message="Remove this timed clip block from the shot? The library clip is not deleted. Legacy layer.clipId / backgroundClipId may still play implicitly from 0."
+          confirmLabel="Delete"
+          danger
+          onConfirm={confirmDeleteClipBlockNow}
+          onCancel={() => setConfirmDeleteClipBlockId(null)}
+        />
+      )}
+      {pendingExtend && (
+        <ConfirmModal
+          title="Extend shot?"
+          message={pendingExtend.message}
+          confirmLabel="Extend shot"
+          onConfirm={confirmExtendShotNow}
+          onCancel={() => setPendingExtend(null)}
         />
       )}
     </div>

@@ -20,7 +20,12 @@ import {
   listLayerTimedKeys,
   getLayerTimedKey,
   updateLayerTimedKey,
-  removeLayerTimedKey
+  removeLayerTimedKey,
+  addShotClipBlock,
+  listShotClipBlocks,
+  getShotClipBlock,
+  updateShotClipBlock,
+  removeShotClipBlock
 } from '../../core/storage/storyboardService'
 import type {
   CameraKeyframe,
@@ -32,6 +37,10 @@ import {
   applyEffectiveLayer,
   describeTimedKeyAction
 } from '../../shared/storyboard/timedKeys'
+import {
+  describeClipBlock,
+  sampleClipBlocks
+} from '../../shared/storyboard/clipBlocks'
 import { simulateEventFire } from '../../shared/storyboard/eventPreview'
 import { getAssetPipeline } from '../../core/storage/studioStorage'
 import { getDataDir } from '../../core/storage/dataDir'
@@ -183,7 +192,7 @@ export function registerStoryboardCommands(program: Command): void {
     })
 
   // Shot commands
-  const shotCmd = program.command('shot').description('Manage shots in storyboards')
+  const shotCmd = program.command('shot').description('Manage shots, clip blocks, and cinematography')
 
   shotCmd
     .command('add')
@@ -299,6 +308,194 @@ export function registerStoryboardCommands(program: Command): void {
           console.log(JSON.stringify({ removed: true }, null, 2))
         } else {
           console.log(`✓ Removed shot: ${options.id}`)
+        }
+      } catch (err) {
+        console.error('Error:', err instanceof Error ? err.message : err)
+        process.exit(1)
+      }
+    })
+
+  const shotClipCmd = shotCmd
+    .command('clip')
+    .description('Timed clip blocks on a shot (range playback; not C.3c FX keys)')
+
+  shotClipCmd
+    .command('add')
+    .description('Place a clip block on the shot timeline (creates a clip layer if needed)')
+    .requiredOption('--shot <shotId>', 'Shot ID')
+    .requiredOption('--clip <clipId>', 'Library clip ID')
+    .requiredOption('--time <seconds>', 'Shot start time')
+    .option('--role <role>', 'layer (default) or background', 'layer')
+    .option('--layer <layerId>', 'Existing clip layer (layer role)')
+    .option('--source-in <seconds>', 'Source trim in (default 0)')
+    .option('--source-out <seconds>', 'Source trim out (default clip duration)')
+    .option('--extend-shot', 'If the block pasts the shot end, extend the shot (never silent)')
+    .option('--json', 'Output as JSON')
+    .action(async (options, cmd) => {
+      try {
+        const mergedOpts = { ...cmd.parent!.parent!.parent!.opts(), ...options }
+        const role = options.role === 'background' ? 'background' : 'layer'
+        const result = await addShotClipBlock(
+          options.shot,
+          {
+            clipId: options.clip,
+            role,
+            layerId: options.layer,
+            t: options.time,
+            sourceInSec: options.sourceIn,
+            sourceOutSec: options.sourceOut,
+            extendShot: !!options.extendShot
+          },
+          getDataDir(mergedOpts.dataDir)
+        )
+        if (mergedOpts.json) {
+          console.log(JSON.stringify({ ...result.block, shotDurationSec: result.shotDurationSec, extended: result.extended, layerId: result.layerId }, null, 2))
+        } else {
+          console.log(
+            `✓ Added clip block ${result.block.id} ${describeClipBlock(result.block)}${result.extended ? ` (shot extended to ${result.shotDurationSec}s)` : ''}`
+          )
+        }
+      } catch (err) {
+        console.error('Error:', err instanceof Error ? err.message : err)
+        process.exit(1)
+      }
+    })
+
+  shotClipCmd
+    .command('list')
+    .description('List authored clip blocks on a shot')
+    .requiredOption('--shot <shotId>', 'Shot ID')
+    .option('--json', 'Output as JSON')
+    .action(async (options, cmd) => {
+      try {
+        const mergedOpts = { ...cmd.parent!.parent!.parent!.opts(), ...options }
+        const rows = await listShotClipBlocks(options.shot, getDataDir(mergedOpts.dataDir))
+        if (mergedOpts.json) {
+          console.log(JSON.stringify(rows, null, 2))
+        } else if (rows.length === 0) {
+          console.log('No clip blocks (legacy layer.clipId / backgroundClipId may still play implicitly)')
+        } else {
+          console.log(`Clip blocks (${rows.length}):`)
+          for (const row of rows) {
+            console.log(`  ${row.id}  ${describeClipBlock(row)}`)
+          }
+        }
+      } catch (err) {
+        console.error('Error:', err instanceof Error ? err.message : err)
+        process.exit(1)
+      }
+    })
+
+  shotClipCmd
+    .command('show')
+    .description('Show a clip block')
+    .requiredOption('--id <blockId>', 'Clip block ID')
+    .option('--json', 'Output as JSON')
+    .action(async (options, cmd) => {
+      try {
+        const mergedOpts = { ...cmd.parent!.parent!.parent!.opts(), ...options }
+        const found = await getShotClipBlock(options.id, getDataDir(mergedOpts.dataDir))
+        if (!found) {
+          console.error(`Clip block not found: ${options.id}`)
+          process.exit(1)
+        }
+        if (mergedOpts.json) {
+          console.log(JSON.stringify({ ...found.block, shotId: found.shotId }, null, 2))
+        } else {
+          console.log(`${found.block.id}  shot=${found.shotId}  ${describeClipBlock(found.block)}`)
+        }
+      } catch (err) {
+        console.error('Error:', err instanceof Error ? err.message : err)
+        process.exit(1)
+      }
+    })
+
+  shotClipCmd
+    .command('update')
+    .description('Move or trim a clip block')
+    .requiredOption('--id <blockId>', 'Clip block ID')
+    .option('--time <seconds>', 'New shot start time')
+    .option('--source-in <seconds>', 'Source trim in')
+    .option('--source-out <seconds>', 'Source trim out')
+    .option('--extend-shot', 'If the block pasts the shot end, extend the shot (never silent)')
+    .option('--json', 'Output as JSON')
+    .action(async (options, cmd) => {
+      try {
+        const mergedOpts = { ...cmd.parent!.parent!.parent!.opts(), ...options }
+        const result = await updateShotClipBlock(
+          options.id,
+          {
+            t: options.time,
+            sourceInSec: options.sourceIn,
+            sourceOutSec: options.sourceOut,
+            extendShot: !!options.extendShot
+          },
+          getDataDir(mergedOpts.dataDir)
+        )
+        if (mergedOpts.json) {
+          console.log(JSON.stringify({ ...result.block, shotDurationSec: result.shotDurationSec, extended: result.extended }, null, 2))
+        } else {
+          console.log(`✓ Updated clip block ${result.block.id}${result.extended ? ` (shot extended to ${result.shotDurationSec}s)` : ''}`)
+        }
+      } catch (err) {
+        console.error('Error:', err instanceof Error ? err.message : err)
+        process.exit(1)
+      }
+    })
+
+  shotClipCmd
+    .command('remove')
+    .description('Remove a clip block (does not delete the library clip)')
+    .requiredOption('--id <blockId>', 'Clip block ID')
+    .option('--json', 'Output as JSON')
+    .action(async (options, cmd) => {
+      try {
+        const mergedOpts = { ...cmd.parent!.parent!.parent!.opts(), ...options }
+        await removeShotClipBlock(options.id, getDataDir(mergedOpts.dataDir))
+        if (mergedOpts.json) {
+          console.log(JSON.stringify({ deleted: true, blockId: options.id }, null, 2))
+        } else {
+          console.log(`✓ Removed clip block: ${options.id}`)
+        }
+      } catch (err) {
+        console.error('Error:', err instanceof Error ? err.message : err)
+        process.exit(1)
+      }
+    })
+
+  shotClipCmd
+    .command('sample')
+    .description('Print which clip blocks are active at a playhead time (preview timing, never persisted)')
+    .requiredOption('--shot <shotId>', 'Shot ID')
+    .requiredOption('--time <seconds>', 'Playhead time in seconds')
+    .option('--json', 'Output as JSON')
+    .action(async (options, cmd) => {
+      try {
+        const mergedOpts = { ...cmd.parent!.parent!.parent!.opts(), ...options }
+        const dataDir = getDataDir(mergedOpts.dataDir)
+        const pipeline = await getAssetPipeline(dataDir)
+        const shot = await getShot(options.shot, dataDir)
+        if (!shot) throw new Error(`Shot not found: ${options.shot}`)
+        const timeSec = Number(options.time)
+        if (!Number.isFinite(timeSec)) throw new Error('--time must be a number')
+        const samples = sampleClipBlocks(shot, pipeline.clips || [], timeSec)
+        const result = {
+          timeSec,
+          samples,
+          authoredBlockCount: (shot.clipTrack || []).length,
+          persisted: false,
+          note: 'Half-open [t, t+duration). Outside the block the clip is not drawn. Legacy layer.clipId / backgroundClipId without a block play implicitly from 0 without extending the shot.'
+        }
+        if (mergedOpts.json) {
+          console.log(JSON.stringify(result, null, 2))
+        } else if (samples.length === 0) {
+          console.log(`t=${timeSec}s  (no active clip block)`)
+        } else {
+          for (const sample of samples) {
+            console.log(
+              `t=${timeSec}s  ${sample.role} clip=${sample.clipId} source=${sample.sourceTimeSec.toFixed(3)}s${sample.implicit ? ' (implicit)' : ''}`
+            )
+          }
         }
       } catch (err) {
         console.error('Error:', err instanceof Error ? err.message : err)

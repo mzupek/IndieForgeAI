@@ -254,7 +254,7 @@ async function generateManifest(
   }))
   
   // Build storyboards for export (v2)
-  const storyboards = pipeline.storyboards?.filter(sb => sb.gameId === gameId) ?? []
+  const storyboards = pipeline.storyboards?.filter(sb => sb.gameId === game.id) ?? []
   const manifestStoryboards = storyboards.map(sb => {
     const shots = pipeline.storyboardShots?.filter(shot => sb.shotIds.includes(shot.id)) ?? []
     
@@ -297,6 +297,21 @@ async function generateManifest(
           
           return resolved
         })
+
+        const clipTrack = (shot.clipTrack || []).map((block) => {
+          const blockClip = pipeline.clips.find((c) => c.id === block.clipId)
+          return {
+            id: block.id,
+            clipId: block.clipId,
+            clipFile: blockClip ? `clips/${basename(blockClip.file)}` : undefined,
+            role: block.role,
+            layerId: block.layerId ?? null,
+            t: block.t,
+            durationSec: block.durationSec,
+            sourceInSec: block.sourceInSec,
+            sourceOutSec: block.sourceOutSec
+          }
+        })
         
         return {
           id: shot.id,
@@ -308,6 +323,7 @@ async function generateManifest(
           layers,
           cameraTrack: shot.cameraTrack,
           effectsTrack: shot.effectsTrack,
+          clipTrack: clipTrack.length > 0 ? clipTrack : undefined,
           notes: shot.notes,
           thumbnail: shot.thumbnail
         }

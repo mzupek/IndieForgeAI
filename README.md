@@ -77,6 +77,9 @@ forge layer add --shot $SHOT_ID --z 1 --character char-drone-001 --pose pose-rea
 # Timed pose/state keys on that same layer (P4 step/hold; not a duplicate layer)
 forge layer key add --shot $SHOT_ID --layer $LAYER_ID --time 1.0 --pose pose-hurt-001
 
+# Timed clip block (range playback on the shot; not an instantaneous key)
+forge shot clip add --shot $SHOT_ID --clip $CLIP_ID --time 0.5 --source-in 0 --source-out 1.2
+
 # Add camera keyframe (framing example)
 forge camera add --shot $SHOT_ID --time 0.0 --target char-drone-001 --zoom 1.5
 
@@ -94,7 +97,7 @@ forge effect add --shot $SHOT_ID --time 1.2 --moment hit --preset shake-impact-0
 - **Stage Treatment** (Phase C.1) - `--bg-dim 0.35 --vignette 0.4` darkens background (0-1) without affecting character layers
 - **Layer Effects** (Phase C.2) - `--glow-blur 12 --glow-alpha 0.8 --glow-color '#00ffff'` for outer glow; `--shadow-x 4 --shadow-y 6 --shadow-blur 10 --shadow-alpha 0.5` for drop shadow
 
-See `forge scene --help`, `forge storyboard --help`, `forge shot --help`, `forge layer --help`, `forge layer key --help` for full CLI.
+See `forge scene --help`, `forge storyboard --help`, `forge shot --help`, `forge shot clip --help`, `forge layer --help`, `forge layer key --help` for full CLI.
 
 ## Workflow
 

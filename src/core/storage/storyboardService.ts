@@ -6,7 +6,8 @@ import type {
   CameraKeyframe,
   EffectMarker,
   LayerTimedKey,
-  LayerTimedKeyAction
+  LayerTimedKeyAction,
+  ShotClipBlock
 } from '@shared/types/assetPipeline'
 import { getAssetPipeline, updateAssetPipeline } from './studioStorage'
 import { validateLayerReferences } from '../../shared/storyboard/layerValidation'
@@ -18,6 +19,13 @@ import {
   parseTimedKeyTime,
   validateLayerTimedKey
 } from '../../shared/storyboard/timedKeys'
+import {
+  assertShotDurationFitsClipBlocks,
+  clipBlockEnd,
+  findClipBlock,
+  parseClipTime,
+  validateShotClipBlock
+} from '../../shared/storyboard/clipBlocks'
 
 /**
  * Create a new storyboard
@@ -151,6 +159,7 @@ export async function createShot(
     layers: [],
     cameraTrack: [],
     effectsTrack: [],
+    clipTrack: [],
     notes: input.notes,
     createdAt: now,
     updatedAt: now
@@ -192,6 +201,7 @@ export async function updateShot(
       | 'layers'
       | 'cameraTrack'
       | 'effectsTrack'
+      | 'clipTrack'
       | 'notes'
       | 'thumbnail'
     >
@@ -214,6 +224,13 @@ export async function updateShot(
     layers: updates.layers ?? pipeline.storyboardShots[index].layers
   }
   assertShotDurationFitsTimedKeys(durationCheckShot, nextDuration)
+  assertShotDurationFitsClipBlocks(
+    {
+      ...durationCheckShot,
+      clipTrack: updates.clipTrack ?? pipeline.storyboardShots[index].clipTrack
+    },
+    nextDuration
+  )
   
   pipeline.storyboardShots[index] = {
     ...pipeline.storyboardShots[index],
@@ -339,6 +356,7 @@ export async function removeLayer(
   }
   
   shot.layers = shot.layers.filter((l) => l.id !== layerId)
+  shot.clipTrack = (shot.clipTrack || []).filter((b) => b.layerId !== layerId)
   shot.updatedAt = new Date().toISOString()
   purgeBindingsForLayers(pipeline, [layerId])
   
@@ -508,6 +526,162 @@ export async function removeLayerTimedKey(
   const found = findTimedKey(pipeline, keyId)
   if (!found) throw new Error(`Timed key not found: ${keyId}`)
   found.layer.timedKeys = (found.layer.timedKeys || []).filter((k) => k.id !== keyId)
+  found.shot.updatedAt = new Date().toISOString()
+  await updateAssetPipeline(pipeline, dataDirOverride)
+}
+
+export async function addShotClipBlock(
+  shotId: string,
+  input: {
+    clipId: string
+    role?: ShotClipBlock['role']
+    layerId?: string | null
+    t: number | string
+    sourceInSec?: number | string
+    sourceOutSec?: number | string
+    extendShot?: boolean
+  },
+  dataDirOverride?: string
+): Promise<{ block: ShotClipBlock; layerId?: string; shotDurationSec: number; extended: boolean }> {
+  const pipeline = await getAssetPipeline(dataDirOverride)
+  const shot = pipeline.storyboardShots.find((s) => s.id === shotId)
+  if (!shot) throw new Error(`Shot not found: ${shotId}`)
+  if (!shot.clipTrack) shot.clipTrack = []
+
+  const clip = (pipeline.clips || []).find((c) => c.id === input.clipId)
+  if (!clip) throw new Error(`Clip not found: ${input.clipId}`)
+
+  const role = input.role || 'layer'
+  let layerId = input.layerId || null
+  if (role === 'layer' && !layerId) {
+    const zOrder =
+      shot.layers.reduce((max, l) => Math.max(max, l.zOrder), 0) + 1
+    const layer: StoryboardLayer = {
+      id: randomUUID(),
+      zOrder,
+      clipId: input.clipId,
+      visible: true,
+      x: 0.5,
+      y: 0.5,
+      scale: 1,
+      rotation: 0,
+      flipX: false,
+      opacity: 1,
+      timedKeys: []
+    }
+    validateLayerReferences(layer, pipeline, shotId)
+    shot.layers.push(layer)
+    layerId = layer.id
+  }
+
+  const sourceInSec =
+    input.sourceInSec !== undefined ? parseClipTime(input.sourceInSec, 'source in') : 0
+  const sourceOutSec =
+    input.sourceOutSec !== undefined
+      ? parseClipTime(input.sourceOutSec, 'source out')
+      : clip.durationSec
+  const t = parseClipTime(input.t, 'block start')
+  const block: ShotClipBlock = {
+    id: randomUUID(),
+    clipId: input.clipId,
+    role,
+    layerId: role === 'background' ? null : layerId,
+    t,
+    durationSec: sourceOutSec - sourceInSec,
+    sourceInSec,
+    sourceOutSec,
+    schemaVersion: 1
+  }
+
+  validateShotClipBlock(block, shot, pipeline, shotId, { extendShot: !!input.extendShot })
+  const end = clipBlockEnd(block)
+  let extended = false
+  if (input.extendShot && end > shot.durationSec) {
+    shot.durationSec = end
+    extended = true
+  }
+  shot.clipTrack.push(block)
+  shot.clipTrack.sort((a, b) => a.t - b.t || a.id.localeCompare(b.id))
+  if (role === 'background') {
+    shot.backgroundClipId = input.clipId
+  }
+  shot.updatedAt = new Date().toISOString()
+  await updateAssetPipeline(pipeline, dataDirOverride)
+  return { block, layerId: block.layerId || undefined, shotDurationSec: shot.durationSec, extended }
+}
+
+export async function listShotClipBlocks(
+  shotId: string,
+  dataDirOverride?: string
+): Promise<ShotClipBlock[]> {
+  const shot = await getShot(shotId, dataDirOverride)
+  if (!shot) throw new Error(`Shot not found: ${shotId}`)
+  return [...(shot.clipTrack || [])].sort((a, b) => a.t - b.t || a.id.localeCompare(b.id))
+}
+
+export async function getShotClipBlock(
+  blockId: string,
+  dataDirOverride?: string
+): Promise<{ shotId: string; block: ShotClipBlock } | undefined> {
+  const pipeline = await getAssetPipeline(dataDirOverride)
+  const found = findClipBlock(pipeline, blockId)
+  if (!found) return undefined
+  return { shotId: found.shot.id, block: found.block }
+}
+
+export async function updateShotClipBlock(
+  blockId: string,
+  patch: {
+    t?: number | string
+    sourceInSec?: number | string
+    sourceOutSec?: number | string
+    extendShot?: boolean
+  },
+  dataDirOverride?: string
+): Promise<{ block: ShotClipBlock; shotDurationSec: number; extended: boolean }> {
+  const pipeline = await getAssetPipeline(dataDirOverride)
+  const found = findClipBlock(pipeline, blockId)
+  if (!found) throw new Error(`Clip block not found: ${blockId}`)
+  const sourceInSec =
+    patch.sourceInSec !== undefined
+      ? parseClipTime(patch.sourceInSec, 'source in')
+      : found.block.sourceInSec
+  const sourceOutSec =
+    patch.sourceOutSec !== undefined
+      ? parseClipTime(patch.sourceOutSec, 'source out')
+      : found.block.sourceOutSec
+  const next: ShotClipBlock = {
+    ...found.block,
+    t: patch.t !== undefined ? parseClipTime(patch.t, 'block start') : found.block.t,
+    sourceInSec,
+    sourceOutSec,
+    durationSec: sourceOutSec - sourceInSec
+  }
+  validateShotClipBlock(next, found.shot, pipeline, found.shot.id, {
+    excludeBlockId: blockId,
+    extendShot: !!patch.extendShot
+  })
+  const end = clipBlockEnd(next)
+  let extended = false
+  if (patch.extendShot && end > found.shot.durationSec) {
+    found.shot.durationSec = end
+    extended = true
+  }
+  found.shot.clipTrack = (found.shot.clipTrack || []).map((b) => (b.id === blockId ? next : b))
+  found.shot.clipTrack.sort((a, b) => a.t - b.t || a.id.localeCompare(b.id))
+  found.shot.updatedAt = new Date().toISOString()
+  await updateAssetPipeline(pipeline, dataDirOverride)
+  return { block: next, shotDurationSec: found.shot.durationSec, extended }
+}
+
+export async function removeShotClipBlock(
+  blockId: string,
+  dataDirOverride?: string
+): Promise<void> {
+  const pipeline = await getAssetPipeline(dataDirOverride)
+  const found = findClipBlock(pipeline, blockId)
+  if (!found) throw new Error(`Clip block not found: ${blockId}`)
+  found.shot.clipTrack = (found.shot.clipTrack || []).filter((b) => b.id !== blockId)
   found.shot.updatedAt = new Date().toISOString()
   await updateAssetPipeline(pipeline, dataDirOverride)
 }

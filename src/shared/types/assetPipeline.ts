@@ -408,6 +408,31 @@ export interface CameraKeyframe {
 }
 
 /**
+ * Timed clip block on a shot timeline (not an instantaneous key).
+ * Plays source [sourceInSec, sourceOutSec) at shot time [t, t+durationSec).
+ * durationSec must equal sourceOutSec - sourceInSec (1x, no stretch).
+ * Not C.3c FX keys. Engine importers are unchanged.
+ */
+export type ClipBlockRole = 'layer' | 'background'
+
+export interface ShotClipBlock {
+  id: string
+  clipId: string
+  role: ClipBlockRole
+  /** Required when role is layer: the clip layer that supplies transform/z-order */
+  layerId?: string | null
+  /** Shot time when the block starts */
+  t: number
+  /** Visible duration on the shot (seconds) */
+  durationSec: number
+  /** Inclusive source trim start (seconds) */
+  sourceInSec: number
+  /** Exclusive source trim end (seconds) */
+  sourceOutSec: number
+  schemaVersion: 1
+}
+
+/**
  * Effect marker for timeline - references preset or inline definition
  */
 export interface EffectMarker {
@@ -454,6 +479,12 @@ export interface StoryboardShot {
   
   /** Effects timeline */
   effectsTrack: EffectMarker[]
+
+  /**
+   * Timed clip blocks (range bars). Legacy `backgroundClipId` and `layer.clipId`
+   * without a block still play as implicit [0, min(clip, shot)) during preview.
+   */
+  clipTrack?: ShotClipBlock[]
   
   /** Notes for engineer */
   notes?: string
