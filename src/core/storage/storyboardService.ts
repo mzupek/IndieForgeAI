@@ -7,6 +7,7 @@ import type {
   EffectMarker
 } from '@shared/types/assetPipeline'
 import { getAssetPipeline, updateAssetPipeline } from './studioStorage'
+import { validateLayerReferences } from '../../shared/storyboard/layerValidation'
 
 /**
  * Create a new storyboard
@@ -243,8 +244,11 @@ export async function addLayer(
   
   const newLayer: StoryboardLayer = {
     id: randomUUID(),
-    ...layer
+    ...layer,
+    visible: layer.visible !== false
   }
+
+  validateLayerReferences(newLayer, pipeline, shotId)
   
   shot.layers.push(newLayer)
   shot.updatedAt = new Date().toISOString()
@@ -275,10 +279,14 @@ export async function updateLayer(
     throw new Error(`Layer not found: ${layerId}`)
   }
   
-  shot.layers[layerIndex] = {
+  const merged: StoryboardLayer = {
     ...shot.layers[layerIndex],
     ...updates
   }
+
+  validateLayerReferences(merged, pipeline, shotId)
+
+  shot.layers[layerIndex] = merged
   shot.updatedAt = new Date().toISOString()
   
   await updateAssetPipeline(pipeline, dataDirOverride)

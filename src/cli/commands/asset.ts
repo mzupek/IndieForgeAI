@@ -90,6 +90,7 @@ export async function show(assetId: string, options: Options): Promise<void> {
       console.log(`  Category: ${asset.category}`)
       if (asset.tags.length > 0) console.log(`  Tags: ${asset.tags.join(', ')}`)
       console.log(`  Default State: ${asset.defaultStateId || 'none (single-state)'}`)
+      if (asset.image) console.log(`  Image: ${asset.image}`)
       if (asset.thumbnail) console.log(`  Thumbnail: ${asset.thumbnail}`)
       console.log(`  Schema Version: ${asset.schemaVersion}`)
       console.log(`  Created: ${asset.createdAt}`)
@@ -154,7 +155,7 @@ export async function create(options: Options): Promise<void> {
         .png()
         .toFile(thumbPath)
       
-      // Set thumbnail path on asset
+      asset.image = imagePath
       asset.thumbnail = thumbPath
     }
     
@@ -233,7 +234,7 @@ export async function update(assetId: string, options: Options): Promise<void> {
         .png()
         .toFile(thumbPath)
       
-      // Update thumbnail path
+      asset.image = imagePath
       asset.thumbnail = thumbPath
     }
     

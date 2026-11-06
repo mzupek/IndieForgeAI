@@ -216,7 +216,9 @@ const api: IndieForgeAPI = {
     update: (asset) =>
       ipcRenderer.invoke(IPC_CHANNELS.VISUAL_ASSET_UPDATE, asset),
     delete: (assetId) =>
-      ipcRenderer.invoke(IPC_CHANNELS.VISUAL_ASSET_DELETE, assetId)
+      ipcRenderer.invoke(IPC_CHANNELS.VISUAL_ASSET_DELETE, assetId),
+    importImage: (assetId, sourcePath) =>
+      ipcRenderer.invoke(IPC_CHANNELS.VISUAL_ASSET_IMPORT_IMAGE, assetId, sourcePath)
   },
   assetStates: {
     list: (assetId) =>

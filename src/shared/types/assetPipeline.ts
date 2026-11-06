@@ -288,9 +288,9 @@ export interface StoryboardLayer {
   
   /** P2: Text content */
   text?: string
-  /** P2: Font reference (ID from Game Definition fonts or "default") */
+  /** P2: Font reference (Font id, Game Definition themeSlot id, or "default") */
   fontRef?: string
-  /** P2: Palette reference (ID from Game Definition palettes or "default") */
+  /** P2: Palette reference (Palette id, Game Definition themeSlot id, or "default") */
   paletteRef?: string
   
   /** P2: Visibility flag */
@@ -416,8 +416,12 @@ export interface Storyboard {
  */
 export interface Font {
   id: string
+  /** Game this font belongs to (required for selected-Game scoping) */
+  gameId: string
   name: string
   family: string
+  /** System fallback family when `family` is unavailable */
+  fallback?: string
   weight?: string
   style?: string
   source: 'system' | 'custom'
@@ -432,6 +436,8 @@ export interface Font {
  */
 export interface Palette {
   id: string
+  /** Game this palette belongs to (required for selected-Game scoping) */
+  gameId: string
   name: string
   colors: {
     primary: string
@@ -458,8 +464,10 @@ export interface VisualAsset {
   category: 'logo' | 'symbol' | 'item' | 'weapon' | 'prop'
   /** Tags for library search */
   tags: string[]
-  /** Default state ID (null if single-state asset) */
+  /** Default state ID (null if single-state / static asset) */
   defaultStateId: string | null
+  /** Full-size static image path (single-state assets; no dummy AssetState required) */
+  image?: string
   /** Thumbnail path for library preview */
   thumbnail?: string
   schemaVersion: number

@@ -1088,6 +1088,14 @@ export function registerIpcHandlers(): void {
     }
   )
 
+  ipcMain.handle(
+    IPC_CHANNELS.VISUAL_ASSET_IMPORT_IMAGE,
+    async (_e, assetId: string, sourcePath: string) => {
+      const { importStaticAssetImage } = await import('../../core/storage/visualAssetMedia')
+      return await importStaticAssetImage(assetId, sourcePath)
+    }
+  )
+
   // P1: Asset States
   ipcMain.handle(
     IPC_CHANNELS.ASSET_STATE_LIST,

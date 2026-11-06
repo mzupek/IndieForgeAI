@@ -5,10 +5,17 @@
 
 import { mkdir, readFile, writeFile } from 'fs/promises'
 import { join } from 'path'
-import type { AssetPipelineProject } from '@shared/types/assetPipeline'
+import type { AssetPipelineProject, Font, Palette } from '@shared/types/assetPipeline'
 import { getDataDir } from './dataDir'
 import { withLock, atomicWriteFile } from './fileLock'
 import { listProjects as listLegacyProjects } from './projectStorage'
+import {
+  collectAssetLayerUsage,
+  collectAssetStateLayerUsage,
+  collectFontLayerUsage,
+  collectPaletteLayerUsage,
+  formatInUseError
+} from '../../shared/storyboard/layerValidation'
 
 interface StudioData {
   schemaVersion: number
@@ -33,6 +40,9 @@ function createEmptyStudioData(): StudioData {
     schemaVersion: 1,
     assetPipeline: {
       schemaVersion: 1,
+      id: 'studio',
+      name: 'Studio',
+      description: '',
       games: [],
       characters: [],
       poses: [],
@@ -44,7 +54,11 @@ function createEmptyStudioData(): StudioData {
       exportProfiles: [],
       gameDefinitions: [],
       visualAssets: [],
-      assetStates: []
+      assetStates: [],
+      fonts: [],
+      palettes: [],
+      createdAt: now,
+      updatedAt: now
     },
     createdAt: now,
     updatedAt: now
@@ -366,7 +380,7 @@ export async function updateVisualAsset(asset: import('@shared/types/assetPipeli
  * Delete a visual asset
  * Returns the count of cascade-deleted states
  */
-export async function deleteVisualAsset(assetId: string, dataDirOverride?: string): Promise<{ statesDeleted: number }> {
+export async function deleteVisualAsset(assetId: string, dataDirOverride?: string, force: boolean = false): Promise<{ statesDeleted: number }> {
   const pipeline = await getAssetPipeline(dataDirOverride)
   if (!pipeline.visualAssets) pipeline.visualAssets = []
   if (!pipeline.assetStates) pipeline.assetStates = []
@@ -375,6 +389,15 @@ export async function deleteVisualAsset(assetId: string, dataDirOverride?: strin
   const assetIndex = pipeline.visualAssets.findIndex(a => a.id === assetId)
   if (assetIndex === -1) {
     throw new Error(`Visual asset not found: ${assetId}`)
+  }
+  
+  // P2: Check if asset is in use by any layer
+  if (!force) {
+    const usage = collectAssetLayerUsage(pipeline, assetId)
+    if (usage.labels.length > 0) {
+      const asset = pipeline.visualAssets[assetIndex]
+      throw new Error(formatInUseError('asset', asset.name, usage.labels))
+    }
   }
   
   // Remove asset
@@ -453,7 +476,7 @@ export async function updateAssetState(state: import('@shared/types/assetPipelin
  * Delete an asset state
  * Rejects if this is the asset's default state
  */
-export async function deleteAssetState(stateId: string, dataDirOverride?: string): Promise<void> {
+export async function deleteAssetState(stateId: string, dataDirOverride?: string, force: boolean = false): Promise<void> {
   const pipeline = await getAssetPipeline(dataDirOverride)
   if (!pipeline.visualAssets) pipeline.visualAssets = []
   if (!pipeline.assetStates) pipeline.assetStates = []
@@ -470,8 +493,59 @@ export async function deleteAssetState(stateId: string, dataDirOverride?: string
     throw new Error(`Cannot delete default state '${state.name}' for asset '${asset.name}'. Set a different default state first.`)
   }
   
+  // P2: Check if state is in use by any layer
+  if (!force) {
+    const usage = collectAssetStateLayerUsage(pipeline, stateId)
+    if (usage.labels.length > 0) {
+      throw new Error(formatInUseError('state', state.name, usage.labels))
+    }
+  }
+  
   // Remove state
   pipeline.assetStates = pipeline.assetStates.filter(s => s.id !== stateId)
   
+  await updateAssetPipeline(pipeline, dataDirOverride)
+}
+
+/**
+ * P2: Fonts / palettes — resolution + in-use deletion only (no library UI).
+ */
+export async function getFonts(gameId: string, dataDirOverride?: string): Promise<Font[]> {
+  const pipeline = await getAssetPipeline(dataDirOverride)
+  return (pipeline.fonts || []).filter((f) => f.gameId === gameId)
+}
+
+export async function getPalettes(gameId: string, dataDirOverride?: string): Promise<Palette[]> {
+  const pipeline = await getAssetPipeline(dataDirOverride)
+  return (pipeline.palettes || []).filter((p) => p.gameId === gameId)
+}
+
+export async function deleteFont(fontId: string, dataDirOverride?: string): Promise<void> {
+  const pipeline = await getAssetPipeline(dataDirOverride)
+  if (!pipeline.fonts) pipeline.fonts = []
+  const font = pipeline.fonts.find((f) => f.id === fontId)
+  if (!font) {
+    throw new Error(`Font not found: ${fontId}`)
+  }
+  const usage = collectFontLayerUsage(pipeline, fontId)
+  if (usage.labels.length > 0) {
+    throw new Error(formatInUseError('font', font.name, usage.labels))
+  }
+  pipeline.fonts = pipeline.fonts.filter((f) => f.id !== fontId)
+  await updateAssetPipeline(pipeline, dataDirOverride)
+}
+
+export async function deletePalette(paletteId: string, dataDirOverride?: string): Promise<void> {
+  const pipeline = await getAssetPipeline(dataDirOverride)
+  if (!pipeline.palettes) pipeline.palettes = []
+  const palette = pipeline.palettes.find((p) => p.id === paletteId)
+  if (!palette) {
+    throw new Error(`Palette not found: ${paletteId}`)
+  }
+  const usage = collectPaletteLayerUsage(pipeline, paletteId)
+  if (usage.labels.length > 0) {
+    throw new Error(formatInUseError('palette', palette.name, usage.labels))
+  }
+  pipeline.palettes = pipeline.palettes.filter((p) => p.id !== paletteId)
   await updateAssetPipeline(pipeline, dataDirOverride)
 }

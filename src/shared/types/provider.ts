@@ -563,6 +563,7 @@ export interface IndieForgeAPI {
     create: (asset: any) => Promise<any>
     update: (asset: any) => Promise<any>
     delete: (assetId: string) => Promise<{ ok: true; statesDeleted: number }>
+    importImage: (assetId: string, sourcePath: string) => Promise<any>
   }
   assetStates: {
     list: (assetId: string) => Promise<any[]>

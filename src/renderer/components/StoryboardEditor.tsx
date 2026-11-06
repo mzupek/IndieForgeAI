@@ -11,8 +11,28 @@ import type {
   CameraKeyframe,
   EffectMarker,
   ScenePreset,
-  ScenePresetType
+  ScenePresetType,
+  VisualAsset,
+  AssetState,
+  Font,
+  Palette,
+  AssetPipelineProject
 } from '@shared/types/assetPipeline'
+import { ConfirmModal } from './ConfirmModal'
+import {
+  getLayerKind,
+  resolveLayerImagePath,
+  resolveTextStyle,
+  DEFAULT_FONT_REF,
+  DEFAULT_PALETTE_REF
+} from '@shared/storyboard/layerValidation'
+import {
+  describeLayerLabel,
+  getLayerPixelSize,
+  hitTestLayer,
+  planLayerDraw,
+  TEXT_BASE_PX
+} from '@shared/storyboard/layerRender'
 
 type EditorMode = 'layout' | 'camera'
 type DragMode = 'move' | 'scale' | 'rotate' | 'framingRect' | 'cameraMarker' | 'effectMarker' | null
@@ -139,7 +159,7 @@ function CameraInspector({
             <option value="">Center (no layer)</option>
             {layers.map(layer => (
               <option key={layer.id} value={layer.id}>
-                z{layer.zOrder} - {layer.characterId ? 'Character' : layer.clipId ? 'Clip' : 'Image'}
+                z{layer.zOrder} - {layer.visualAssetId ? 'Asset' : layer.text != null && layer.text !== '' ? 'Text' : layer.characterId ? 'Character' : layer.clipId ? 'Clip' : 'Image'}
               </option>
             ))}
           </select>
@@ -377,6 +397,17 @@ export function StoryboardEditor() {
   const [loadedImages, setLoadedImages] = useState<Map<string, LoadedImage>>(new Map())
   const [backgroundImage, setBackgroundImage] = useState<LoadedImage | null>(null)
   const [showAddCharacter, setShowAddCharacter] = useState(false)
+  const [showAddAsset, setShowAddAsset] = useState(false)
+  const [showAddText, setShowAddText] = useState(false)
+  const [addAssetId, setAddAssetId] = useState('')
+  const [addAssetStateId, setAddAssetStateId] = useState('')
+  const [addTextContent, setAddTextContent] = useState('New text')
+  const [addTextFont, setAddTextFont] = useState(DEFAULT_FONT_REF)
+  const [addTextPalette, setAddTextPalette] = useState(DEFAULT_PALETTE_REF)
+  const [layerError, setLayerError] = useState<string | null>(null)
+  const [confirmDeleteLayer, setConfirmDeleteLayer] = useState(false)
+  const [libraryAssets, setLibraryAssets] = useState<VisualAsset[]>([])
+  const [libraryStates, setLibraryStates] = useState<AssetState[]>([])
   const [showAddEffect, setShowAddEffect] = useState(false)
   const [editingNotes, setEditingNotes] = useState(false)
   const [notesText, setNotesText] = useState('')
@@ -407,6 +438,11 @@ export function StoryboardEditor() {
   const clips = activeProject?.assetPipeline?.clips ?? []
   const presets = activeProject?.assetPipeline?.scenePresets ?? []
   const scenes = activeProject?.assetPipeline?.scenes ?? []
+  const visualAssets = activeProject?.assetPipeline?.visualAssets?.filter(a => a.gameId === gameId) ?? []
+  const assetStates = activeProject?.assetPipeline?.assetStates ?? []
+  const fonts = (activeProject?.assetPipeline?.fonts ?? []).filter((f: Font) => f.gameId === gameId)
+  const palettes = (activeProject?.assetPipeline?.palettes ?? []).filter((p: Palette) => p.gameId === gameId)
+  const pipeline = activeProject?.assetPipeline as AssetPipelineProject | undefined
   
   // Phase C: Find scene attached to this storyboard
   const attachedScene = selectedStoryboard?.sceneId 
@@ -478,20 +514,22 @@ export function StoryboardEditor() {
 
     const loadAllImages = async () => {
       const newImages = new Map<string, LoadedImage>()
+      const pipe = activeProject?.assetPipeline
       
       for (const layer of selectedShot.layers) {
-        if (layer.poseId) {
-          const pose = poses.find(p => p.id === layer.poseId)
-          if (pose?.file) {
-            const loaded = await loadImage(pose.file)
-            if (loaded) newImages.set(layer.id, loaded)
-          }
+        if (layer.visible === false) continue
+        let path: string | undefined
+        if (pipe && (layer.visualAssetId || layer.poseId || layer.clipId || layer.imagePath)) {
+          const resolved = resolveLayerImagePath(layer, pipe)
+          path = resolved.path
+        } else if (layer.poseId) {
+          path = poses.find(p => p.id === layer.poseId)?.file
         } else if (layer.clipId) {
-          const clip = clips.find(c => c.id === layer.clipId)
-          if (clip?.thumbnail) {
-            const loaded = await loadImage(clip.thumbnail)
-            if (loaded) newImages.set(layer.id, loaded)
-          }
+          path = clips.find(c => c.id === layer.clipId)?.thumbnail
+        }
+        if (path) {
+          const loaded = await loadImage(path)
+          if (loaded) newImages.set(layer.id, loaded)
         }
       }
       
@@ -499,7 +537,7 @@ export function StoryboardEditor() {
     }
 
     loadAllImages()
-  }, [selectedShot, poses, clips])
+  }, [selectedShot, poses, clips, activeProject?.assetPipeline])
 
   // Get interpolated camera state
   const getInterpolatedCamera = useCallback((time: number): { target: {x: number, y: number}, zoom: number, framingRect?: any } | null => {
@@ -660,6 +698,11 @@ export function StoryboardEditor() {
     const sortedLayers = [...selectedShot.layers].sort((a, b) => a.zOrder - b.zOrder)
     
     for (const layer of sortedLayers) {
+      if (layer.visible === false) continue
+
+      const plan = pipeline
+        ? planLayerDraw(layer, pipeline, gameId)
+        : null
       ctx.save()
       
       const stageX = layer.x * canvas.width
@@ -670,10 +713,38 @@ export function StoryboardEditor() {
       ctx.scale(layer.flipX ? -1 : 1, 1)
       
       const img = loadedImages.get(layer.id)
-      const size = img ? 200 * layer.scale : 100 * layer.scale
+      const pixel = plan?.pixelSize ?? getLayerPixelSize(layer, !!img)
       
+      const drawContent = () => {
+        if (plan?.kind === 'text') {
+          const fontSize = TEXT_BASE_PX * layer.scale
+          ctx.font = `${fontSize}px ${plan.fontFamily || 'sans-serif'}, ${plan.fontFallback || 'sans-serif'}`
+          ctx.textAlign = 'center'
+          ctx.textBaseline = 'middle'
+          ctx.fillStyle = plan.error ? '#ff4d4d' : (plan.color || '#ffffff')
+          ctx.fillText(plan.text || '', 0, 0)
+          if (plan.error) {
+            ctx.font = '12px sans-serif'
+            ctx.fillText(plan.error.slice(0, 48), 0, fontSize)
+          }
+          return
+        }
+        if (img) {
+          ctx.drawImage(img.element, -pixel.width / 2, -pixel.height / 2, pixel.width, pixel.height)
+          return
+        }
+        ctx.fillStyle = plan?.error ? '#7a2020' : (layer.id === selectedLayerId ? '#FFC800' : '#4a4a4a')
+        ctx.fillRect(-pixel.width / 2, -pixel.height / 2, pixel.width, pixel.height)
+        if (plan?.error) {
+          ctx.fillStyle = '#ffb4b4'
+          ctx.font = '11px sans-serif'
+          ctx.textAlign = 'center'
+          ctx.textBaseline = 'middle'
+          ctx.fillText('Missing media', 0, 0)
+        }
+      }
+
       // Phase C.3a: Dual-pass rendering for outerGlow + dropShadow
-      // Pass 1: Outer glow (if present)
       if (layer.fx?.outerGlow) {
         const glow = layer.fx.outerGlow
         ctx.shadowBlur = glow.blur
@@ -681,28 +752,18 @@ export function StoryboardEditor() {
         ctx.shadowOffsetX = 0
         ctx.shadowOffsetY = 0
         ctx.globalAlpha = layer.opacity * glow.alpha
-        
-        if (img) {
-          ctx.drawImage(img.element, -size / 2, -size / 2, size, size)
-          // Draw again for stronger glow if strength > 1
-          if (glow.strength && glow.strength > 1) {
-            for (let i = 1; i < glow.strength; i++) {
-              ctx.drawImage(img.element, -size / 2, -size / 2, size, size)
-            }
+        drawContent()
+        if (img && glow.strength && glow.strength > 1) {
+          for (let i = 1; i < glow.strength; i++) {
+            ctx.drawImage(img.element, -pixel.width / 2, -pixel.height / 2, pixel.width, pixel.height)
           }
-        } else {
-          ctx.fillStyle = layer.id === selectedLayerId ? '#FFC800' : '#4a4a4a'
-          ctx.fillRect(-size / 2, -size / 2, size, size)
         }
-        
-        // Clear shadow state for next pass
         ctx.shadowBlur = 0
         ctx.shadowOffsetX = 0
         ctx.shadowOffsetY = 0
         ctx.shadowColor = 'transparent'
       }
       
-      // Pass 2: Drop shadow (if present)
       if (layer.fx?.dropShadow) {
         const shadow = layer.fx.dropShadow
         ctx.shadowOffsetX = shadow.offsetX
@@ -710,61 +771,39 @@ export function StoryboardEditor() {
         ctx.shadowBlur = shadow.blur
         ctx.shadowColor = shadow.color
         ctx.globalAlpha = layer.opacity * shadow.alpha
-        
-        if (img) {
-          ctx.drawImage(img.element, -size / 2, -size / 2, size, size)
-        } else {
-          ctx.fillStyle = layer.id === selectedLayerId ? '#FFC800' : '#4a4a4a'
-          ctx.fillRect(-size / 2, -size / 2, size, size)
-        }
-        
-        // Clear shadow state
+        drawContent()
         ctx.shadowBlur = 0
         ctx.shadowOffsetX = 0
         ctx.shadowOffsetY = 0
         ctx.shadowColor = 'transparent'
       }
       
-      // Pass 3: No effects (if neither glow nor shadow)
       if (!layer.fx?.outerGlow && !layer.fx?.dropShadow) {
         ctx.globalAlpha = layer.opacity
-        if (img) {
-          ctx.drawImage(img.element, -size / 2, -size / 2, size, size)
-        } else {
-          ctx.fillStyle = layer.id === selectedLayerId ? '#FFC800' : '#4a4a4a'
-          ctx.fillRect(-size / 2, -size / 2, size, size)
-        }
+        drawContent()
       }
       
       ctx.restore()
 
-      // Selection handles (Phase C.3a: account for rotation)
       if (layer.id === selectedLayerId && mode === 'layout' && playbackState === 'stopped') {
-        const size = (img ? 200 : 100) * layer.scale
         const cx = stageX
         const cy = stageY
         const rotRad = (layer.rotation * Math.PI) / 180
-        
         const handleSize = 10 / (getInterpolatedCamera(playbackTime)?.zoom || 1)
         ctx.strokeStyle = '#FFC800'
         ctx.lineWidth = 2 / (getInterpolatedCamera(playbackTime)?.zoom || 1)
         ctx.fillStyle = '#FFC800'
         
-        // Draw rotated bounding box
         ctx.save()
         ctx.translate(cx, cy)
         ctx.rotate(rotRad)
-        ctx.strokeRect(-size / 2, -size / 2, size, size)
-        
-        // Corner handles (scale) - at rotated corners
-        ctx.fillRect(-size / 2 - handleSize / 2, -size / 2 - handleSize / 2, handleSize, handleSize)
-        ctx.fillRect(size / 2 - handleSize / 2, -size / 2 - handleSize / 2, handleSize, handleSize)
-        ctx.fillRect(-size / 2 - handleSize / 2, size / 2 - handleSize / 2, handleSize, handleSize)
-        ctx.fillRect(size / 2 - handleSize / 2, size / 2 - handleSize / 2, handleSize, handleSize)
-        
-        // Rotation handle - above top edge
+        ctx.strokeRect(-pixel.width / 2, -pixel.height / 2, pixel.width, pixel.height)
+        ctx.fillRect(-pixel.width / 2 - handleSize / 2, -pixel.height / 2 - handleSize / 2, handleSize, handleSize)
+        ctx.fillRect(pixel.width / 2 - handleSize / 2, -pixel.height / 2 - handleSize / 2, handleSize, handleSize)
+        ctx.fillRect(-pixel.width / 2 - handleSize / 2, pixel.height / 2 - handleSize / 2, handleSize, handleSize)
+        ctx.fillRect(pixel.width / 2 - handleSize / 2, pixel.height / 2 - handleSize / 2, handleSize, handleSize)
         ctx.beginPath()
-        ctx.arc(0, -size / 2 - 20, 6 / (getInterpolatedCamera(playbackTime)?.zoom || 1), 0, Math.PI * 2)
+        ctx.arc(0, -pixel.height / 2 - 20, 6 / (getInterpolatedCamera(playbackTime)?.zoom || 1), 0, Math.PI * 2)
         ctx.fill()
         ctx.restore()
       }
@@ -841,7 +880,7 @@ export function StoryboardEditor() {
         ctx.fillRect(rectX + rectW - 2, rectY + rectH - handleSize + 2, 4, handleSize)
       }
     }
-  }, [selectedShot, selectedLayerId, mode, playbackTime, loadedImages, dragStart, getInterpolatedCamera])
+  }, [selectedShot, selectedLayerId, mode, playbackTime, loadedImages, dragStart, getInterpolatedCamera, pipeline, gameId])
 
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (!canvasRef.current || !selectedShot) return
@@ -854,7 +893,8 @@ export function StoryboardEditor() {
 
     if (mode === 'layout' && selectedLayer) {
       const img = loadedImages.get(selectedLayerId!)
-      const size = ((img ? 200 : 100) * selectedLayer.scale) / canvas.width
+      const pixel = getLayerPixelSize(selectedLayer, !!img)
+      const size = Math.max(pixel.width, pixel.height) / canvas.width
       const handleSize = 20 / canvas.width
       
       const lx = selectedLayer.x
@@ -919,8 +959,7 @@ export function StoryboardEditor() {
       const sortedLayers = [...selectedShot.layers].sort((a, b) => b.zOrder - a.zOrder)
       for (const layer of sortedLayers) {
         const img = loadedImages.get(layer.id)
-        const size = ((img ? 200 : 100) * layer.scale) / canvas.width
-        if (Math.abs(x - layer.x) <= size / 2 && Math.abs(y - layer.y) <= size / 2) {
+        if (hitTestLayer(layer, x, y, canvas.width, !!img)) {
           setSelectedLayerId(layer.id)
           return
         }
@@ -1300,6 +1339,7 @@ export function StoryboardEditor() {
       zOrder: Math.max(...selectedShot.layers.map(l => l.zOrder), 0) + 1,
       characterId,
       poseId: approvedPoses[0].id,
+      visible: true,
       x: 0.5,
       y: 0.5,
       scale: 1.0,
@@ -1308,10 +1348,74 @@ export function StoryboardEditor() {
       opacity: 1.0
     }
     
-    await window.indieForge.pipeline.addLayer(projectId!, selectedShotId!, layer)
-    const updated = await window.indieForge.projects.open(projectId!)
-    setActiveProject(updated)
-    setShowAddCharacter(false)
+    try {
+      setLayerError(null)
+      await window.indieForge.pipeline.addLayer(projectId!, selectedShotId!, layer)
+      const updated = await window.indieForge.projects.open(projectId!)
+      setActiveProject(updated)
+      setShowAddCharacter(false)
+    } catch (err) {
+      setLayerError(err instanceof Error ? err.message : 'Failed to add character layer')
+    }
+  }
+
+  const handleAddAssetLayer = async () => {
+    if (!selectedShot || !addAssetId) {
+      setLayerError('Select a Library visual asset')
+      return
+    }
+    const layer: Omit<StoryboardLayer, 'id'> = {
+      zOrder: Math.max(...selectedShot.layers.map(l => l.zOrder), 0) + 1,
+      visualAssetId: addAssetId,
+      assetStateId: addAssetStateId || null,
+      visible: true,
+      x: 0.5,
+      y: 0.5,
+      scale: 1.0,
+      rotation: 0,
+      flipX: false,
+      opacity: 1.0
+    }
+    try {
+      setLayerError(null)
+      await window.indieForge.pipeline.addLayer(projectId!, selectedShotId!, layer)
+      const updated = await window.indieForge.projects.open(projectId!)
+      setActiveProject(updated)
+      setShowAddAsset(false)
+      setAddAssetId('')
+      setAddAssetStateId('')
+    } catch (err) {
+      setLayerError(err instanceof Error ? err.message : 'Failed to add asset layer')
+    }
+  }
+
+  const handleAddTextLayer = async () => {
+    if (!selectedShot) return
+    const layer: Omit<StoryboardLayer, 'id'> = {
+      zOrder: Math.max(...selectedShot.layers.map(l => l.zOrder), 0) + 1,
+      text: addTextContent,
+      fontRef: addTextFont || DEFAULT_FONT_REF,
+      paletteRef: addTextPalette || DEFAULT_PALETTE_REF,
+      visible: true,
+      x: 0.5,
+      y: 0.5,
+      scale: 1.0,
+      rotation: 0,
+      flipX: false,
+      opacity: 1.0
+    }
+    try {
+      setLayerError(null)
+      await window.indieForge.pipeline.addLayer(projectId!, selectedShotId!, layer)
+      const updated = await window.indieForge.projects.open(projectId!)
+      setActiveProject(updated)
+      setShowAddText(false)
+      setAddTextContent('New text')
+      setAddTextFont(DEFAULT_FONT_REF)
+      setAddTextPalette(DEFAULT_PALETTE_REF)
+    } catch (err) {
+      setLayerError(err instanceof Error ? err.message : 'Failed to add text layer')
+    }
   }
 
   const handleChangePose = async (poseId: string) => {
@@ -1434,11 +1538,23 @@ export function StoryboardEditor() {
   }
 
   const handleDeleteLayer = async () => {
-    if (!selectedLayerId || !confirm('Delete this layer?')) return
-    await window.indieForge.pipeline.deleteLayer(projectId!, selectedShotId!, selectedLayerId)
-    const updated = await window.indieForge.projects.open(projectId!)
-    setActiveProject(updated)
-    setSelectedLayerId(null)
+    if (!selectedLayerId) return
+    setConfirmDeleteLayer(true)
+  }
+
+  const confirmDeleteLayerNow = async () => {
+    if (!selectedLayerId) return
+    try {
+      setLayerError(null)
+      await window.indieForge.pipeline.deleteLayer(projectId!, selectedShotId!, selectedLayerId)
+      const updated = await window.indieForge.projects.open(projectId!)
+      setActiveProject(updated)
+      setSelectedLayerId(null)
+    } catch (err) {
+      setLayerError(err instanceof Error ? err.message : 'Failed to delete layer')
+    } finally {
+      setConfirmDeleteLayer(false)
+    }
   }
 
   const handleSaveNotes = async () => {
@@ -2464,20 +2580,53 @@ export function StoryboardEditor() {
             </div>
           </div>
 
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', gap: '0.35rem', flexWrap: 'wrap' }}>
             <h3 style={{ fontSize: '1rem', margin: 0 }}>Layers</h3>
-            <button 
-              type="button" 
-              onClick={() => setShowAddCharacter(true)} 
-              style={{ fontSize: '0.85rem', padding: '0.25rem 0.5rem' }}
-            >
-              + Character
-            </button>
+            <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
+              <button 
+                type="button" 
+                onClick={() => { setShowAddCharacter(true); setShowAddAsset(false); setShowAddText(false) }} 
+                style={{ fontSize: '0.75rem', padding: '0.25rem 0.4rem' }}
+              >
+                + Character / Pose
+              </button>
+              <button 
+                type="button" 
+                onClick={async () => {
+                  setShowAddAsset(true); setShowAddCharacter(false); setShowAddText(false)
+                  try {
+                    const assets = await window.indieForge.visualAssets.list(gameId)
+                    setLibraryAssets(assets)
+                  } catch (err) {
+                    setLayerError(err instanceof Error ? err.message : 'Failed to list assets')
+                  }
+                }} 
+                style={{ fontSize: '0.75rem', padding: '0.25rem 0.4rem' }}
+              >
+                + Asset
+              </button>
+              <button 
+                type="button" 
+                onClick={() => { setShowAddText(true); setShowAddCharacter(false); setShowAddAsset(false) }} 
+                style={{ fontSize: '0.75rem', padding: '0.25rem 0.4rem' }}
+              >
+                + Text
+              </button>
+            </div>
           </div>
+
+          {layerError && (
+            <div style={{ marginBottom: '0.75rem', padding: '0.5rem', background: 'var(--danger, #7a2020)', color: '#fff', borderRadius: '4px', fontSize: '0.8rem' }}>
+              {layerError}
+            </div>
+          )}
           
           {showAddCharacter && (
             <div style={{ marginBottom: '1rem', padding: '0.75rem', background: 'var(--bg)', borderRadius: '4px', border: '2px solid var(--forge-gold)' }}>
-              <div style={{ fontWeight: 'bold', marginBottom: '0.5rem', fontSize: '0.9rem' }}>Add Character</div>
+              <div style={{ fontWeight: 'bold', marginBottom: '0.5rem', fontSize: '0.9rem' }}>Add Character / Pose</div>
+              <div style={{ fontSize: '0.75rem', color: 'var(--muted)', marginBottom: '0.5rem' }}>
+                Adds the character with its first approved pose. Change the starting pose after adding.
+              </div>
               {characters.map(char => (
                 <button
                   key={char.id}
@@ -2493,12 +2642,107 @@ export function StoryboardEditor() {
               </button>
             </div>
           )}
+
+          {showAddAsset && (
+            <div style={{ marginBottom: '1rem', padding: '0.75rem', background: 'var(--bg)', borderRadius: '4px', border: '2px solid var(--forge-gold)' }}>
+              <div style={{ fontWeight: 'bold', marginBottom: '0.5rem', fontSize: '0.9rem' }}>Add Visual Asset</div>
+              <select
+                value={addAssetId}
+                onChange={async (e) => {
+                  const id = e.target.value
+                  setAddAssetId(id)
+                  setAddAssetStateId('')
+                  if (!id) { setLibraryStates([]); return }
+                  try {
+                    const states = await window.indieForge.assetStates.list(id)
+                    setLibraryStates(states)
+                  } catch {
+                    setLibraryStates(assetStates.filter(s => s.assetId === id))
+                  }
+                }}
+                style={{ width: '100%', marginBottom: '0.5rem', fontSize: '0.85rem' }}
+              >
+                <option value="">Select asset…</option>
+                {(libraryAssets.length ? libraryAssets : visualAssets).map(asset => (
+                  <option key={asset.id} value={asset.id}>{asset.name} ({asset.category})</option>
+                ))}
+              </select>
+              <label style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.5rem' }}>
+                Starting state
+                <select
+                  value={addAssetStateId}
+                  onChange={(e) => setAddAssetStateId(e.target.value)}
+                  style={{ width: '100%', marginTop: '0.25rem', fontSize: '0.85rem' }}
+                >
+                  <option value="">Default / static image</option>
+                  {libraryStates.map(state => (
+                    <option key={state.id} value={state.id}>{state.name}</option>
+                  ))}
+                </select>
+              </label>
+              <button type="button" onClick={handleAddAssetLayer} style={{ width: '100%', fontSize: '0.85rem', background: 'var(--forge-gold)', color: '#000' }}>
+                Add to shot
+              </button>
+              <button type="button" onClick={() => setShowAddAsset(false)} style={{ width: '100%', marginTop: '0.35rem', fontSize: '0.85rem' }}>
+                Cancel
+              </button>
+            </div>
+          )}
+
+          {showAddText && (
+            <div style={{ marginBottom: '1rem', padding: '0.75rem', background: 'var(--bg)', borderRadius: '4px', border: '2px solid var(--forge-gold)' }}>
+              <div style={{ fontWeight: 'bold', marginBottom: '0.5rem', fontSize: '0.9rem' }}>Add Text</div>
+              <textarea
+                value={addTextContent}
+                onChange={(e) => setAddTextContent(e.target.value)}
+                rows={3}
+                style={{ width: '100%', marginBottom: '0.5rem', fontSize: '0.85rem' }}
+              />
+              <label style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.5rem' }}>
+                Font
+                <select
+                  value={addTextFont}
+                  onChange={(e) => setAddTextFont(e.target.value)}
+                  style={{ width: '100%', marginTop: '0.25rem', fontSize: '0.85rem' }}
+                >
+                  <option value={DEFAULT_FONT_REF}>default (system sans-serif)</option>
+                  {fonts.map(font => (
+                    <option key={font.id} value={font.id}>{font.name}</option>
+                  ))}
+                </select>
+              </label>
+              <label style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.5rem' }}>
+                Palette
+                <select
+                  value={addTextPalette}
+                  onChange={(e) => setAddTextPalette(e.target.value)}
+                  style={{ width: '100%', marginTop: '0.25rem', fontSize: '0.85rem' }}
+                >
+                  <option value={DEFAULT_PALETTE_REF}>default (#ffffff)</option>
+                  {palettes.map(pal => (
+                    <option key={pal.id} value={pal.id}>{pal.name}</option>
+                  ))}
+                </select>
+              </label>
+              <button type="button" onClick={handleAddTextLayer} style={{ width: '100%', fontSize: '0.85rem', background: 'var(--forge-gold)', color: '#000' }}>
+                Add to shot
+              </button>
+              <button type="button" onClick={() => setShowAddText(false)} style={{ width: '100%', marginTop: '0.35rem', fontSize: '0.85rem' }}>
+                Cancel
+              </button>
+            </div>
+          )}
           
           {selectedShot.layers
             .sort((a, b) => b.zOrder - a.zOrder)
             .map(layer => {
               const character = layer.characterId ? characters.find(c => c.id === layer.characterId) : null
               const pose = layer.poseId ? poses.find(p => p.id === layer.poseId) : null
+              const kind = getLayerKind(layer)
+              const label = pipeline ? describeLayerLabel(layer, pipeline) : kind
+              const mediaErr = pipeline && kind !== 'text' ? resolveLayerImagePath(layer, pipeline).error : undefined
+              const textErr = pipeline && kind === 'text' ? resolveTextStyle(layer, pipeline, gameId) : null
+              const refError = mediaErr || textErr?.fontError || textErr?.paletteError
               
               return (
                 <div
@@ -2511,35 +2755,76 @@ export function StoryboardEditor() {
                     color: selectedLayerId === layer.id ? 'var(--bg)' : 'var(--text)',
                     borderRadius: '4px',
                     cursor: 'pointer',
-                    fontSize: '0.85rem'
+                    fontSize: '0.85rem',
+                    opacity: layer.visible === false ? 0.45 : 1
                   }}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
-                    <span style={{ fontWeight: 'bold' }}>z{layer.zOrder}</span>
+                    <span style={{ fontWeight: 'bold' }}>z{layer.zOrder} {layer.visible === false ? '(hidden)' : ''}</span>
                     <span style={{ opacity: 0.7 }}>{layer.scale.toFixed(2)}x • {layer.rotation.toFixed(0)}°</span>
                   </div>
-                  {character && <div style={{ fontSize: '0.9rem', fontWeight: 'bold' }}>{character.name}</div>}
-                  {pose && <div style={{ fontSize: '0.8rem', opacity: 0.8 }}>{pose.slot}</div>}
+                  <div style={{ fontSize: '0.9rem', fontWeight: 'bold' }}>{label}</div>
+                  {character && pose && <div style={{ fontSize: '0.8rem', opacity: 0.8 }}>Starting pose: {pose.slot}</div>}
+                  {refError && (
+                    <div style={{ fontSize: '0.75rem', color: selectedLayerId === layer.id ? '#5a0000' : '#ff8a8a', marginTop: '0.25rem' }}>
+                      {refError}
+                    </div>
+                  )}
                   {selectedLayerId === layer.id && character && (
-                    <select
-                      value={layer.poseId || ''}
-                      onChange={(e) => handleChangePose(e.target.value)}
-                      onClick={(e) => e.stopPropagation()}
-                      style={{
-                        width: '100%',
-                        marginTop: '0.5rem',
-                        padding: '0.25rem',
-                        fontSize: '0.8rem',
-                        background: 'var(--bg)',
-                        border: '1px solid var(--border)',
-                        borderRadius: '4px',
-                        color: 'var(--text)'
-                      }}
-                    >
-                      {poses.filter(p => p.characterId === character.id && p.status === 'approved').map(p => (
-                        <option key={p.id} value={p.id}>{p.slot}</option>
-                      ))}
-                    </select>
+                    <label style={{ display: 'block', marginTop: '0.5rem', fontSize: '0.75rem' }}>
+                      Starting pose
+                      <select
+                        value={layer.poseId || ''}
+                        onChange={(e) => handleChangePose(e.target.value)}
+                        onClick={(e) => e.stopPropagation()}
+                        style={{
+                          width: '100%',
+                          marginTop: '0.25rem',
+                          padding: '0.25rem',
+                          fontSize: '0.8rem',
+                          background: 'var(--bg)',
+                          border: '1px solid var(--border)',
+                          borderRadius: '4px',
+                          color: 'var(--text)'
+                        }}
+                      >
+                        {poses.filter(p => p.characterId === character.id && p.status === 'approved').map(p => (
+                          <option key={p.id} value={p.id}>{p.slot}</option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                  {selectedLayerId === layer.id && layer.visualAssetId && (
+                    <label style={{ display: 'block', marginTop: '0.5rem', fontSize: '0.75rem' }}>
+                      Starting state
+                      <select
+                        value={layer.assetStateId || ''}
+                        onChange={async (e) => {
+                          const value = e.target.value
+                          await window.indieForge.pipeline.updateLayer(projectId!, selectedShotId!, layer.id, {
+                            assetStateId: value ? value : null
+                          })
+                          const updated = await window.indieForge.projects.open(projectId!)
+                          setActiveProject(updated)
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                        style={{
+                          width: '100%',
+                          marginTop: '0.25rem',
+                          padding: '0.25rem',
+                          fontSize: '0.8rem',
+                          background: 'var(--bg)',
+                          border: '1px solid var(--border)',
+                          borderRadius: '4px',
+                          color: 'var(--text)'
+                        }}
+                      >
+                        <option value="">Default / static image</option>
+                        {assetStates.filter(s => s.assetId === layer.visualAssetId).map(s => (
+                          <option key={s.id} value={s.id}>{s.name}</option>
+                        ))}
+                      </select>
+                    </label>
                   )}
                 </div>
               )
@@ -2624,6 +2909,79 @@ export function StoryboardEditor() {
                 </div>
               </div>
               
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem', fontSize: '0.85rem' }}>
+                <input
+                  type="checkbox"
+                  checked={selectedLayer.visible !== false}
+                  onChange={async (e) => {
+                    await window.indieForge.pipeline.updateLayer(projectId!, selectedShotId!, selectedLayer.id, {
+                      visible: e.target.checked
+                    })
+                    const updated = await window.indieForge.projects.open(projectId!)
+                    setActiveProject(updated)
+                  }}
+                />
+                Visible
+              </label>
+
+              {getLayerKind(selectedLayer) === 'text' && (
+                <div style={{ marginBottom: '0.75rem', paddingBottom: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+                  <label style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.35rem' }}>
+                    Text
+                    <textarea
+                      value={selectedLayer.text || ''}
+                      onChange={async (e) => {
+                        await window.indieForge.pipeline.updateLayer(projectId!, selectedShotId!, selectedLayer.id, {
+                          text: e.target.value
+                        })
+                        const updated = await window.indieForge.projects.open(projectId!)
+                        setActiveProject(updated)
+                      }}
+                      rows={3}
+                      style={{ width: '100%', marginTop: '0.25rem', fontSize: '0.85rem' }}
+                    />
+                  </label>
+                  <label style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.35rem' }}>
+                    Font
+                    <select
+                      value={selectedLayer.fontRef || DEFAULT_FONT_REF}
+                      onChange={async (e) => {
+                        await window.indieForge.pipeline.updateLayer(projectId!, selectedShotId!, selectedLayer.id, {
+                          fontRef: e.target.value
+                        })
+                        const updated = await window.indieForge.projects.open(projectId!)
+                        setActiveProject(updated)
+                      }}
+                      style={{ width: '100%', marginTop: '0.25rem', fontSize: '0.85rem' }}
+                    >
+                      <option value={DEFAULT_FONT_REF}>default (system sans-serif)</option>
+                      {fonts.map(font => (
+                        <option key={font.id} value={font.id}>{font.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label style={{ display: 'block', fontSize: '0.75rem' }}>
+                    Palette
+                    <select
+                      value={selectedLayer.paletteRef || DEFAULT_PALETTE_REF}
+                      onChange={async (e) => {
+                        await window.indieForge.pipeline.updateLayer(projectId!, selectedShotId!, selectedLayer.id, {
+                          paletteRef: e.target.value
+                        })
+                        const updated = await window.indieForge.projects.open(projectId!)
+                        setActiveProject(updated)
+                      }}
+                      style={{ width: '100%', marginTop: '0.25rem', fontSize: '0.85rem' }}
+                    >
+                      <option value={DEFAULT_PALETTE_REF}>default (#ffffff)</option>
+                      {palettes.map(pal => (
+                        <option key={pal.id} value={pal.id}>{pal.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              )}
+
               <button type="button" onClick={handleFlipLayer} style={{ width: '100%', marginBottom: '0.5rem', fontSize: '0.85rem' }}>
                 {selectedLayer.flipX ? 'Unflip' : 'Flip'} Horizontal
               </button>
@@ -2931,6 +3289,16 @@ export function StoryboardEditor() {
             )}
           </div>
         </div>
+      )}
+      {confirmDeleteLayer && (
+        <ConfirmModal
+          title="Delete layer"
+          message="Delete this layer from the shot? This does not delete the Library asset, character, or pose."
+          confirmLabel="Delete"
+          danger
+          onConfirm={confirmDeleteLayerNow}
+          onCancel={() => setConfirmDeleteLayer(false)}
+        />
       )}
     </div>
   )

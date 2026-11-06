@@ -46,6 +46,21 @@ export function AssetEditor({ asset, onSave, onClose }: AssetEditorProps) {
     }
   }
 
+  async function handleImportStaticImage() {
+    const { filePath } = await window.indieForge.files.chooseImage()
+    if (!filePath) return
+    try {
+      setError(null)
+      setSaving(true)
+      const updated = await window.indieForge.visualAssets.importImage(asset.id, filePath)
+      onSave(updated)
+    } catch (err: any) {
+      setError(`Failed to import image: ${err.message}`)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   async function handleSave() {
     try {
       setSaving(true)
@@ -72,15 +87,15 @@ export function AssetEditor({ asset, onSave, onClose }: AssetEditorProps) {
     setShowStateNameModal(false)
     
     // Open file picker
-    const files = await window.indieForge.files.chooseImage()
-    if (!files || files.length === 0) return
+    const { filePath } = await window.indieForge.files.chooseImage()
+    if (!filePath) return
 
     try {
       setError(null)
       const newState = await window.indieForge.assetStates.create(
         asset.id,
         name,
-        files[0]
+        filePath
       )
       
       await loadStates()
@@ -227,6 +242,25 @@ export function AssetEditor({ asset, onSave, onClose }: AssetEditorProps) {
                   </option>
                 ))}
               </select>
+            </label>
+
+            <label style={{ display: 'block', marginBottom: '0.75rem' }}>
+              <span style={{ display: 'block', marginBottom: '0.25rem', fontSize: '0.85rem' }}>
+                Static image (no dummy state required)
+              </span>
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '0.5rem' }}>
+                <button
+                  type="button"
+                  onClick={handleImportStaticImage}
+                  disabled={saving}
+                  style={{ fontSize: '0.85rem', padding: '0.35rem 0.75rem' }}
+                >
+                  {asset.image || asset.thumbnail ? 'Replace Image' : 'Import Image'}
+                </button>
+                {(asset.image || asset.thumbnail) && (
+                  <span style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>Image on file</span>
+                )}
+              </div>
             </label>
 
             <label style={{ display: 'block', marginBottom: '0.75rem' }}>

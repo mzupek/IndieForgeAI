@@ -295,14 +295,82 @@ export function registerStoryboardCommands(program: Command): void {
   const layerCmd = program.command('layer').description('Manage layers in shots')
 
   layerCmd
+    .command('list')
+    .description('List layers in a shot')
+    .requiredOption('--shot <shotId>', 'Shot ID')
+    .action(async (options, cmd) => {
+      try {
+        const mergedOpts = { ...cmd.parent!.parent!.opts(), ...options }
+        const shot = await getShot(options.shot, getDataDir(mergedOpts.dataDir))
+        if (!shot) {
+          console.error(`Shot not found: ${options.shot}`)
+          process.exit(1)
+        }
+        const layers = shot.layers || []
+        if (mergedOpts.json) {
+          console.log(JSON.stringify(layers, null, 2))
+        } else if (layers.length === 0) {
+          console.log('No layers found')
+        } else {
+          console.log(`Layers (${layers.length}):`)
+          for (const layer of layers) {
+            const bits = [`z${layer.zOrder}`, layer.visible === false ? 'hidden' : 'visible']
+            if (layer.visualAssetId) bits.push(`asset=${layer.visualAssetId}`)
+            if (layer.assetStateId) bits.push(`state=${layer.assetStateId}`)
+            if (layer.characterId) bits.push(`character=${layer.characterId}`)
+            if (layer.poseId) bits.push(`pose=${layer.poseId}`)
+            if (layer.text !== undefined) bits.push(`text="${layer.text.slice(0, 40)}"`)
+            if (layer.fontRef) bits.push(`font=${layer.fontRef}`)
+            if (layer.paletteRef) bits.push(`palette=${layer.paletteRef}`)
+            console.log(`  ${layer.id}  ${bits.join(' ')}`)
+          }
+        }
+      } catch (err) {
+        console.error('Error:', err instanceof Error ? err.message : err)
+        process.exit(1)
+      }
+    })
+
+  layerCmd
+    .command('show')
+    .description('Show a layer')
+    .requiredOption('--shot <shotId>', 'Shot ID')
+    .requiredOption('--id <layerId>', 'Layer ID')
+    .action(async (options, cmd) => {
+      try {
+        const mergedOpts = { ...cmd.parent!.parent!.opts(), ...options }
+        const shot = await getShot(options.shot, getDataDir(mergedOpts.dataDir))
+        if (!shot) {
+          console.error(`Shot not found: ${options.shot}`)
+          process.exit(1)
+        }
+        const layer = (shot.layers || []).find((l) => l.id === options.id)
+        if (!layer) {
+          console.error(`Layer not found: ${options.id}`)
+          process.exit(1)
+        }
+        console.log(JSON.stringify(layer, null, 2))
+      } catch (err) {
+        console.error('Error:', err instanceof Error ? err.message : err)
+        process.exit(1)
+      }
+    })
+
+  layerCmd
     .command('add')
-    .description('Add a layer to a shot (character pose, clip, or image)')
+    .description('Add a layer to a shot (visual asset, character pose, text, clip, or image)')
     .requiredOption('--shot <shotId>', 'Shot ID')
     .requiredOption('--z <zOrder>', 'Z-order (higher = closer to camera)', '1')
+    .option('--asset <assetId>', 'Visual asset ID (Library asset layer)')
+    .option('--state <stateId>', 'Asset state ID (omit to use asset default / static image)')
     .option('--character <characterId>', 'Character ID (use with --pose)')
     .option('--pose <poseId>', 'Pose ID (creates character pose layer)')
+    .option('--text <content>', 'Editable text content (text layer)')
+    .option('--font <fontRef>', 'Font id, Game Definition theme slot id, or "default"', 'default')
+    .option('--palette <paletteRef>', 'Palette id, Game Definition theme slot id, or "default"', 'default')
     .option('--clip <clipId>', 'Clip ID (creates animated clip layer)')
     .option('--image <path>', 'Image path (creates static image layer)')
+    .option('--visible <bool>', 'Visibility (true/false)', 'true')
     .option('--x <coord>', 'X coordinate (0-1)', '0.5')
     .option('--y <coord>', 'Y coordinate (0-1)', '0.5')
     .option('--scale <factor>', 'Scale factor', '1.0')
@@ -319,6 +387,12 @@ export function registerStoryboardCommands(program: Command): void {
           poseId: options.pose,
           clipId: options.clip,
           imagePath: options.image,
+          visualAssetId: options.asset,
+          assetStateId: options.asset ? (options.state || null) : undefined,
+          text: options.text,
+          fontRef: options.text ? options.font : undefined,
+          paletteRef: options.text ? options.palette : undefined,
+          visible: options.visible !== 'false',
           x: parseFloat(options.x),
           y: parseFloat(options.y),
           scale: parseFloat(options.scale),
@@ -346,7 +420,15 @@ export function registerStoryboardCommands(program: Command): void {
     .requiredOption('--shot <shotId>', 'Shot ID')
     .requiredOption('--id <layerId>', 'Layer ID')
     .option('--z <zOrder>', 'Z-order')
+    .option('--asset <assetId>', 'Visual asset ID')
+    .option('--state <stateId>', 'Asset state ID')
+    .option('--clear-state', 'Use asset default / static image (clears authored state)')
+    .option('--character <characterId>', 'Character ID')
     .option('--pose <poseId>', 'Pose ID')
+    .option('--text <content>', 'Text content')
+    .option('--font <fontRef>', 'Font id, theme slot id, or "default"')
+    .option('--palette <paletteRef>', 'Palette id, theme slot id, or "default"')
+    .option('--visible <bool>', 'Visibility (true/false)')
     .option('--x <coord>', 'X coordinate (0-1)')
     .option('--y <coord>', 'Y coordinate (0-1)')
     .option('--scale <factor>', 'Scale factor')
@@ -367,7 +449,15 @@ export function registerStoryboardCommands(program: Command): void {
         const mergedOpts = { ...cmd.parent!.parent!.opts(), ...options }
         const updates: any = {}
         if (options.z !== undefined) updates.zOrder = parseInt(options.z)
+        if (options.asset) updates.visualAssetId = options.asset
+        if (options.clearState) updates.assetStateId = null
+        else if (options.state) updates.assetStateId = options.state
+        if (options.character) updates.characterId = options.character
         if (options.pose) updates.poseId = options.pose
+        if (options.text !== undefined) updates.text = options.text
+        if (options.font !== undefined) updates.fontRef = options.font
+        if (options.palette !== undefined) updates.paletteRef = options.palette
+        if (options.visible !== undefined) updates.visible = options.visible !== 'false'
         if (options.x !== undefined) updates.x = parseFloat(options.x)
         if (options.y !== undefined) updates.y = parseFloat(options.y)
         if (options.scale !== undefined) updates.scale = parseFloat(options.scale)

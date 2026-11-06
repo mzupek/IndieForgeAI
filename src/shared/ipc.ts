@@ -106,6 +106,7 @@ export const IPC_CHANNELS = {
   VISUAL_ASSET_CREATE: 'visualAsset:create',
   VISUAL_ASSET_UPDATE: 'visualAsset:update',
   VISUAL_ASSET_DELETE: 'visualAsset:delete',
+  VISUAL_ASSET_IMPORT_IMAGE: 'visualAsset:importImage',
   ASSET_STATE_LIST: 'assetState:list',
   ASSET_STATE_GET: 'assetState:get',
   ASSET_STATE_CREATE: 'assetState:create',
