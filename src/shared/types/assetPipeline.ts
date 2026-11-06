@@ -397,6 +397,46 @@ export interface Storyboard {
 }
 
 /**
+ * Visual asset - generic reusable art asset with optional states
+ * Distinct from character poses (which remain import-only 1024 PNGs)
+ * P1: Generic visual assets (logos, symbols, items, weapons, props)
+ */
+export interface VisualAsset {
+  id: string
+  gameId: string
+  name: string
+  /** Asset category for organization */
+  category: 'logo' | 'symbol' | 'item' | 'weapon' | 'prop'
+  /** Tags for library search */
+  tags: string[]
+  /** Default state ID (null if single-state asset) */
+  defaultStateId: string | null
+  /** Thumbnail path for library preview */
+  thumbnail?: string
+  schemaVersion: number
+  createdAt: string
+  updatedAt: string
+}
+
+/**
+ * Asset state - named variation of a visual asset
+ * Examples: crate "open"/"closed", weapon "ready"/"firing"
+ * P1: Multi-state asset support
+ */
+export interface AssetState {
+  id: string
+  assetId: string
+  name: string
+  /** Path to image file (PNG with transparency) */
+  file: string
+  /** Optional bounding box override */
+  boundingBox?: { width: number; height: number }
+  schemaVersion: number
+  createdAt: string
+  updatedAt: string
+}
+
+/**
  * Main project structure for Adventure Lens Games pipeline
  * This extends/replaces the old IndieForgeProject structure
  */
@@ -415,6 +455,10 @@ export interface AssetPipelineProject {
   storyboardShots: StoryboardShot[]
   exportProfiles: ExportProfile[]
   gameDefinitions: GameDefinition[]
+  /** P1: Generic visual assets */
+  visualAssets: VisualAsset[]
+  /** P1: Asset states for multi-state assets */
+  assetStates: AssetState[]
   createdAt: string
   updatedAt: string
 }

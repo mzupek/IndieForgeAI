@@ -42,7 +42,9 @@ function createEmptyStudioData(): StudioData {
       storyboards: [],
       storyboardShots: [],
       exportProfiles: [],
-      gameDefinitions: []
+      gameDefinitions: [],
+      visualAssets: [],
+      assetStates: []
     },
     createdAt: now,
     updatedAt: now
@@ -278,4 +280,139 @@ export async function updateAssetPipeline(
   const studio = await loadStudio(dataDirOverride)
   studio.assetPipeline = pipeline
   await saveStudio(studio, dataDirOverride)
+}
+
+/**
+ * P1: Visual Assets CRUD
+ */
+
+/**
+ * Get visual assets for a game
+ */
+export async function getVisualAssets(gameId: string, dataDirOverride?: string): Promise<import('@shared/types/assetPipeline').VisualAsset[]> {
+  const pipeline = await getAssetPipeline(dataDirOverride)
+  return pipeline.visualAssets.filter(a => a.gameId === gameId)
+}
+
+/**
+ * Get a single visual asset by ID
+ */
+export async function getVisualAsset(assetId: string, dataDirOverride?: string): Promise<import('@shared/types/assetPipeline').VisualAsset | undefined> {
+  const pipeline = await getAssetPipeline(dataDirOverride)
+  return pipeline.visualAssets.find(a => a.id === assetId)
+}
+
+/**
+ * Add a new visual asset
+ */
+export async function addVisualAsset(asset: import('@shared/types/assetPipeline').VisualAsset, dataDirOverride?: string): Promise<void> {
+  const pipeline = await getAssetPipeline(dataDirOverride)
+  pipeline.visualAssets.push(asset)
+  await updateAssetPipeline(pipeline, dataDirOverride)
+}
+
+/**
+ * Update an existing visual asset
+ */
+export async function updateVisualAsset(asset: import('@shared/types/assetPipeline').VisualAsset, dataDirOverride?: string): Promise<void> {
+  const pipeline = await getAssetPipeline(dataDirOverride)
+  const index = pipeline.visualAssets.findIndex(a => a.id === asset.id)
+  if (index === -1) {
+    throw new Error(`Visual asset not found: ${asset.id}`)
+  }
+  pipeline.visualAssets[index] = asset
+  await updateAssetPipeline(pipeline, dataDirOverride)
+}
+
+/**
+ * Delete a visual asset
+ * Returns the count of cascade-deleted states
+ */
+export async function deleteVisualAsset(assetId: string, dataDirOverride?: string): Promise<{ statesDeleted: number }> {
+  const pipeline = await getAssetPipeline(dataDirOverride)
+  
+  // Check if asset exists
+  const assetIndex = pipeline.visualAssets.findIndex(a => a.id === assetId)
+  if (assetIndex === -1) {
+    throw new Error(`Visual asset not found: ${assetId}`)
+  }
+  
+  // Remove asset
+  pipeline.visualAssets.splice(assetIndex, 1)
+  
+  // Cascade delete owned states
+  const statesBefore = pipeline.assetStates.length
+  pipeline.assetStates = pipeline.assetStates.filter(s => s.assetId !== assetId)
+  const statesDeleted = statesBefore - pipeline.assetStates.length
+  
+  await updateAssetPipeline(pipeline, dataDirOverride)
+  
+  return { statesDeleted }
+}
+
+/**
+ * P1: Asset States CRUD
+ */
+
+/**
+ * Get asset states for an asset
+ */
+export async function getAssetStates(assetId: string, dataDirOverride?: string): Promise<import('@shared/types/assetPipeline').AssetState[]> {
+  const pipeline = await getAssetPipeline(dataDirOverride)
+  return pipeline.assetStates.filter(s => s.assetId === assetId)
+}
+
+/**
+ * Get a single asset state by ID
+ */
+export async function getAssetState(stateId: string, dataDirOverride?: string): Promise<import('@shared/types/assetPipeline').AssetState | undefined> {
+  const pipeline = await getAssetPipeline(dataDirOverride)
+  return pipeline.assetStates.find(s => s.id === stateId)
+}
+
+/**
+ * Add a new asset state
+ */
+export async function addAssetState(state: import('@shared/types/assetPipeline').AssetState, dataDirOverride?: string): Promise<void> {
+  const pipeline = await getAssetPipeline(dataDirOverride)
+  pipeline.assetStates.push(state)
+  await updateAssetPipeline(pipeline, dataDirOverride)
+}
+
+/**
+ * Update an existing asset state
+ */
+export async function updateAssetState(state: import('@shared/types/assetPipeline').AssetState, dataDirOverride?: string): Promise<void> {
+  const pipeline = await getAssetPipeline(dataDirOverride)
+  const index = pipeline.assetStates.findIndex(s => s.id === state.id)
+  if (index === -1) {
+    throw new Error(`Asset state not found: ${state.id}`)
+  }
+  pipeline.assetStates[index] = state
+  await updateAssetPipeline(pipeline, dataDirOverride)
+}
+
+/**
+ * Delete an asset state
+ * Rejects if this is the asset's default state
+ */
+export async function deleteAssetState(stateId: string, dataDirOverride?: string): Promise<void> {
+  const pipeline = await getAssetPipeline(dataDirOverride)
+  
+  // Check if state exists
+  const state = pipeline.assetStates.find(s => s.id === stateId)
+  if (!state) {
+    throw new Error(`Asset state not found: ${stateId}`)
+  }
+  
+  // Check if this is the default state for its asset
+  const asset = pipeline.visualAssets.find(a => a.id === state.assetId)
+  if (asset && asset.defaultStateId === stateId) {
+    throw new Error(`Cannot delete default state '${state.name}' for asset '${asset.name}'. Set a different default state first.`)
+  }
+  
+  // Remove state
+  pipeline.assetStates = pipeline.assetStates.filter(s => s.id !== stateId)
+  
+  await updateAssetPipeline(pipeline, dataDirOverride)
 }
