@@ -158,6 +158,14 @@ export async function loadStudio(dataDirOverride?: string): Promise<StudioData> 
         studio.assetPipeline.gameDefinitions = []
       }
       
+      // Migrate: ensure visualAssets and assetStates exist (P1)
+      if (!studio.assetPipeline.visualAssets) {
+        studio.assetPipeline.visualAssets = []
+      }
+      if (!studio.assetPipeline.assetStates) {
+        studio.assetPipeline.assetStates = []
+      }
+      
       // Migrate: ensure scenes field exists (Phase C)
       if (!studio.assetPipeline.scenes) {
         studio.assetPipeline.scenes = []
@@ -291,7 +299,7 @@ export async function updateAssetPipeline(
  */
 export async function getVisualAssets(gameId: string, dataDirOverride?: string): Promise<import('@shared/types/assetPipeline').VisualAsset[]> {
   const pipeline = await getAssetPipeline(dataDirOverride)
-  return pipeline.visualAssets.filter(a => a.gameId === gameId)
+  return (pipeline.visualAssets || []).filter(a => a.gameId === gameId)
 }
 
 /**
@@ -299,7 +307,7 @@ export async function getVisualAssets(gameId: string, dataDirOverride?: string):
  */
 export async function getVisualAsset(assetId: string, dataDirOverride?: string): Promise<import('@shared/types/assetPipeline').VisualAsset | undefined> {
   const pipeline = await getAssetPipeline(dataDirOverride)
-  return pipeline.visualAssets.find(a => a.id === assetId)
+  return (pipeline.visualAssets || []).find(a => a.id === assetId)
 }
 
 /**
@@ -307,6 +315,7 @@ export async function getVisualAsset(assetId: string, dataDirOverride?: string):
  */
 export async function addVisualAsset(asset: import('@shared/types/assetPipeline').VisualAsset, dataDirOverride?: string): Promise<void> {
   const pipeline = await getAssetPipeline(dataDirOverride)
+  if (!pipeline.visualAssets) pipeline.visualAssets = []
   pipeline.visualAssets.push(asset)
   await updateAssetPipeline(pipeline, dataDirOverride)
 }
@@ -316,6 +325,7 @@ export async function addVisualAsset(asset: import('@shared/types/assetPipeline'
  */
 export async function updateVisualAsset(asset: import('@shared/types/assetPipeline').VisualAsset, dataDirOverride?: string): Promise<void> {
   const pipeline = await getAssetPipeline(dataDirOverride)
+  if (!pipeline.visualAssets) pipeline.visualAssets = []
   const index = pipeline.visualAssets.findIndex(a => a.id === asset.id)
   if (index === -1) {
     throw new Error(`Visual asset not found: ${asset.id}`)
@@ -337,6 +347,8 @@ export async function updateVisualAsset(asset: import('@shared/types/assetPipeli
  */
 export async function deleteVisualAsset(assetId: string, dataDirOverride?: string): Promise<{ statesDeleted: number }> {
   const pipeline = await getAssetPipeline(dataDirOverride)
+  if (!pipeline.visualAssets) pipeline.visualAssets = []
+  if (!pipeline.assetStates) pipeline.assetStates = []
   
   // Check if asset exists
   const assetIndex = pipeline.visualAssets.findIndex(a => a.id === assetId)
@@ -366,7 +378,7 @@ export async function deleteVisualAsset(assetId: string, dataDirOverride?: strin
  */
 export async function getAssetStates(assetId: string, dataDirOverride?: string): Promise<import('@shared/types/assetPipeline').AssetState[]> {
   const pipeline = await getAssetPipeline(dataDirOverride)
-  return pipeline.assetStates.filter(s => s.assetId === assetId)
+  return (pipeline.assetStates || []).filter(s => s.assetId === assetId)
 }
 
 /**
@@ -374,7 +386,7 @@ export async function getAssetStates(assetId: string, dataDirOverride?: string):
  */
 export async function getAssetState(stateId: string, dataDirOverride?: string): Promise<import('@shared/types/assetPipeline').AssetState | undefined> {
   const pipeline = await getAssetPipeline(dataDirOverride)
-  return pipeline.assetStates.find(s => s.id === stateId)
+  return (pipeline.assetStates || []).find(s => s.id === stateId)
 }
 
 /**
@@ -382,6 +394,8 @@ export async function getAssetState(stateId: string, dataDirOverride?: string): 
  */
 export async function addAssetState(state: import('@shared/types/assetPipeline').AssetState, dataDirOverride?: string): Promise<void> {
   const pipeline = await getAssetPipeline(dataDirOverride)
+  if (!pipeline.visualAssets) pipeline.visualAssets = []
+  if (!pipeline.assetStates) pipeline.assetStates = []
   
   // Guard: validate parent asset exists
   const parentAsset = pipeline.visualAssets.find(a => a.id === state.assetId)
@@ -398,6 +412,7 @@ export async function addAssetState(state: import('@shared/types/assetPipeline')
  */
 export async function updateAssetState(state: import('@shared/types/assetPipeline').AssetState, dataDirOverride?: string): Promise<void> {
   const pipeline = await getAssetPipeline(dataDirOverride)
+  if (!pipeline.assetStates) pipeline.assetStates = []
   const index = pipeline.assetStates.findIndex(s => s.id === state.id)
   if (index === -1) {
     throw new Error(`Asset state not found: ${state.id}`)
@@ -419,6 +434,8 @@ export async function updateAssetState(state: import('@shared/types/assetPipelin
  */
 export async function deleteAssetState(stateId: string, dataDirOverride?: string): Promise<void> {
   const pipeline = await getAssetPipeline(dataDirOverride)
+  if (!pipeline.visualAssets) pipeline.visualAssets = []
+  if (!pipeline.assetStates) pipeline.assetStates = []
   
   // Check if state exists
   const state = pipeline.assetStates.find(s => s.id === stateId)
