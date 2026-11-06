@@ -9,6 +9,7 @@ import React, { useState, useEffect } from 'react'
 import type { VisualAsset } from '@shared/types/assetPipeline'
 import { CreateAssetModal } from './CreateAssetModal'
 import { ConfirmModal } from './ConfirmModal'
+import { AssetThumbnail } from './AssetThumbnail'
 
 interface AssetLibraryProps {
   gameId: string
@@ -206,28 +207,9 @@ export function AssetLibrary({ gameId, onAssetSelect, onAssetEdit }: AssetLibrar
                   alignItems: 'center',
                   justifyContent: 'center',
                   marginBottom: '0.5rem',
-                  fontSize: '2rem',
                   overflow: 'hidden'
                 }}>
-                  {asset.thumbnail ? (
-                    <img 
-                      src={`local-file://${asset.thumbnail}`} 
-                      alt={asset.name}
-                      style={{ 
-                        maxWidth: '100%', 
-                        maxHeight: '100%', 
-                        objectFit: 'contain' 
-                      }}
-                    />
-                  ) : (
-                    <>
-                      {asset.category === 'logo' && '🏷️'}
-                      {asset.category === 'symbol' && '⚡'}
-                      {asset.category === 'item' && '📦'}
-                      {asset.category === 'weapon' && '⚔️'}
-                      {asset.category === 'prop' && '🎨'}
-                    </>
-                  )}
+                  <AssetThumbnail asset={asset} />
                 </div>
                 
                 {/* Asset info */}
