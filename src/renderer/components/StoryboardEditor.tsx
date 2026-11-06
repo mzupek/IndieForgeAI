@@ -1065,36 +1065,36 @@ export function StoryboardEditor() {
         const updated = [...selectedShot.cameraTrack]
         updated[draggedMarker.index] = { ...updated[draggedMarker.index], t: newTime }
         
-        // Update local state immediately for visual feedback - MUST preserve all nested properties
-        setActiveProject(prev => {
-          if (!prev || !prev.assetPipeline) return prev
-          return {
-            ...prev,
+        // Update local state immediately - setActiveProject takes object, not function!
+        if (activeProject && activeProject.assetPipeline) {
+          const updatedProject = {
+            ...activeProject,
             assetPipeline: {
-              ...prev.assetPipeline,
-              storyboardShots: prev.assetPipeline.storyboardShots?.map(s => 
+              ...activeProject.assetPipeline,
+              storyboardShots: activeProject.assetPipeline.storyboardShots?.map(s => 
                 s.id === selectedShotId ? { ...s, cameraTrack: updated } : s
               )
             }
           }
-        })
+          setActiveProject(updatedProject)
+        }
       } else {
         const updated = [...selectedShot.effectsTrack]
         updated[draggedMarker.index] = { ...updated[draggedMarker.index], t: newTime }
         
-        // Update local state immediately for visual feedback - MUST preserve all nested properties
-        setActiveProject(prev => {
-          if (!prev || !prev.assetPipeline) return prev
-          return {
-            ...prev,
+        // Update local state immediately - setActiveProject takes object, not function!
+        if (activeProject && activeProject.assetPipeline) {
+          const updatedProject = {
+            ...activeProject,
             assetPipeline: {
-              ...prev.assetPipeline,
-              storyboardShots: prev.assetPipeline.storyboardShots?.map(s => 
+              ...activeProject.assetPipeline,
+              storyboardShots: activeProject.assetPipeline.storyboardShots?.map(s => 
                 s.id === selectedShotId ? { ...s, effectsTrack: updated } : s
               )
             }
           }
-        })
+          setActiveProject(updatedProject)
+        }
       }
     }
   }
