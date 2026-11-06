@@ -7,6 +7,8 @@
 
 import React, { useState, useEffect } from 'react'
 import type { VisualAsset } from '@shared/types/assetPipeline'
+import { CreateAssetModal } from './CreateAssetModal'
+import { ConfirmModal } from './ConfirmModal'
 
 interface AssetLibraryProps {
   gameId: string
@@ -21,6 +23,8 @@ export function AssetLibrary({ gameId, onAssetSelect, onAssetEdit }: AssetLibrar
   const [searchTerm, setSearchTerm] = useState('')
   const [categoryFilter, setCategoryFilter] = useState<string>('all')
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null)
+  const [showCreateModal, setShowCreateModal] = useState(false)
+  const [deleteConfirm, setDeleteConfirm] = useState<VisualAsset | null>(null)
 
   const categories = ['all', 'logo', 'symbol', 'item', 'weapon', 'prop']
 
@@ -43,60 +47,30 @@ export function AssetLibrary({ gameId, onAssetSelect, onAssetEdit }: AssetLibrar
     }
   }
 
-  async function handleCreate() {
-    const name = prompt('Asset name:')
-    if (!name) return
-
-    const category = prompt('Category (logo/symbol/item/weapon/prop):')
-    if (!category || !['logo', 'symbol', 'item', 'weapon', 'prop'].includes(category)) {
-      alert('Invalid category. Must be: logo, symbol, item, weapon, or prop')
-      return
-    }
-
-    try {
-      const now = new Date().toISOString()
-      const asset: VisualAsset = {
-        id: crypto.randomUUID(),
-        gameId,
-        name,
-        category: category as any,
-        tags: [],
-        defaultStateId: null,
-        schemaVersion: 1,
-        createdAt: now,
-        updatedAt: now
-      }
-
-      await window.indieForge.visualAssets.create(asset)
-      await loadAssets()
-      
-      // Auto-open editor for new asset
-      if (onAssetEdit) {
-        onAssetEdit(asset)
-      }
-    } catch (err: any) {
-      alert(`Failed to create asset: ${err.message}`)
+  async function handleCreateSave(asset: VisualAsset) {
+    await loadAssets()
+    
+    // Auto-open editor for new asset
+    if (onAssetEdit) {
+      onAssetEdit(asset)
     }
   }
 
-  async function handleDelete(asset: VisualAsset) {
-    if (!confirm(`Delete asset "${asset.name}"? This will also delete all its states.`)) {
-      return
-    }
+  async function confirmDelete() {
+    if (!deleteConfirm) return
 
     try {
-      const result = await window.indieForge.visualAssets.delete(asset.id)
+      const result = await window.indieForge.visualAssets.delete(deleteConfirm.id)
       if (result.ok) {
         await loadAssets()
-        if (selectedAssetId === asset.id) {
+        if (selectedAssetId === deleteConfirm.id) {
           setSelectedAssetId(null)
         }
-        if (result.statesDeleted > 0) {
-          alert(`Deleted asset and ${result.statesDeleted} state(s)`)
-        }
       }
+      setDeleteConfirm(null)
     } catch (err: any) {
-      alert(`Failed to delete asset: ${err.message}`)
+      setError(`Failed to delete asset: ${err.message}`)
+      setDeleteConfirm(null)
     }
   }
 
@@ -167,7 +141,7 @@ export function AssetLibrary({ gameId, onAssetSelect, onAssetEdit }: AssetLibrar
           </select>
         </div>
         <button 
-          onClick={handleCreate}
+          onClick={() => setShowCreateModal(true)}
           style={{ 
             width: '100%', 
             padding: '0.5rem',
@@ -303,7 +277,7 @@ export function AssetLibrary({ gameId, onAssetSelect, onAssetEdit }: AssetLibrar
                     <button
                       onClick={(e) => {
                         e.stopPropagation()
-                        handleDelete(asset)
+                        setDeleteConfirm(asset)
                       }}
                       style={{ 
                         flex: 1, 
@@ -335,6 +309,28 @@ export function AssetLibrary({ gameId, onAssetSelect, onAssetEdit }: AssetLibrar
         {searchTerm && ` matching "${searchTerm}"`}
         {categoryFilter !== 'all' && ` in ${categoryFilter}`}
       </div>
+
+      {/* Create Modal */}
+      {showCreateModal && (
+        <CreateAssetModal
+          gameId={gameId}
+          onSave={handleCreateSave}
+          onClose={() => setShowCreateModal(false)}
+        />
+      )}
+
+      {/* Delete Confirmation */}
+      {deleteConfirm && (
+        <ConfirmModal
+          title="Delete Asset"
+          message={`Delete "${deleteConfirm.name}"? This will also delete all its states.`}
+          confirmLabel="Delete"
+          cancelLabel="Cancel"
+          danger={true}
+          onConfirm={confirmDelete}
+          onCancel={() => setDeleteConfirm(null)}
+        />
+      )}
     </div>
   )
 }

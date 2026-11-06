@@ -7,6 +7,8 @@
 
 import React, { useState, useEffect } from 'react'
 import type { VisualAsset, AssetState } from '@shared/types/assetPipeline'
+import { StateNameModal } from './StateNameModal'
+import { ConfirmModal } from './ConfirmModal'
 
 interface AssetEditorProps {
   asset: VisualAsset
@@ -21,6 +23,9 @@ export function AssetEditor({ asset, onSave, onClose }: AssetEditorProps) {
   const [states, setStates] = useState<AssetState[]>([])
   const [loadingStates, setLoadingStates] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [showStateNameModal, setShowStateNameModal] = useState(false)
+  const [deleteStateConfirm, setDeleteStateConfirm] = useState<AssetState | null>(null)
 
   const categories: Array<'logo' | 'symbol' | 'item' | 'weapon' | 'prop'> = 
     ['logo', 'symbol', 'item', 'weapon', 'prop']
@@ -44,6 +49,7 @@ export function AssetEditor({ asset, onSave, onClose }: AssetEditorProps) {
   async function handleSave() {
     try {
       setSaving(true)
+      setError(null)
       
       const updated: VisualAsset = {
         ...asset,
@@ -56,21 +62,21 @@ export function AssetEditor({ asset, onSave, onClose }: AssetEditorProps) {
       await window.indieForge.visualAssets.update(updated)
       onSave(updated)
     } catch (err: any) {
-      alert(`Failed to save: ${err.message}`)
+      setError(`Failed to save: ${err.message}`)
     } finally {
       setSaving(false)
     }
   }
 
-  async function handleAddState() {
-    const name = prompt('State name (e.g., "open", "closed"):')
-    if (!name) return
-
+  async function handleStateNameSubmit(name: string) {
+    setShowStateNameModal(false)
+    
     // Open file picker
     const files = await window.indieForge.files.chooseImage()
     if (!files || files.length === 0) return
 
     try {
+      setError(null)
       const newState = await window.indieForge.assetStates.create(
         asset.id,
         name,
@@ -89,12 +95,13 @@ export function AssetEditor({ asset, onSave, onClose }: AssetEditorProps) {
         }
       }
     } catch (err: any) {
-      alert(`Failed to add state: ${err.message}`)
+      setError(`Failed to add state: ${err.message}`)
     }
   }
 
   async function handleSetDefault(stateId: string) {
     try {
+      setError(null)
       await window.indieForge.assetStates.setDefault(asset.id, stateId)
       
       // Reload asset to get updated defaultStateId
@@ -105,18 +112,21 @@ export function AssetEditor({ asset, onSave, onClose }: AssetEditorProps) {
       
       await loadStates()
     } catch (err: any) {
-      alert(`Failed to set default state: ${err.message}`)
+      setError(`Failed to set default state: ${err.message}`)
     }
   }
 
-  async function handleDeleteState(state: AssetState) {
-    if (!confirm(`Delete state "${state.name}"?`)) return
+  async function confirmDeleteState() {
+    if (!deleteStateConfirm) return
 
     try {
-      await window.indieForge.assetStates.delete(state.id)
+      setError(null)
+      await window.indieForge.assetStates.delete(deleteStateConfirm.id)
       await loadStates()
+      setDeleteStateConfirm(null)
     } catch (err: any) {
-      alert(`Failed to delete state: ${err.message}`)
+      setError(`Failed to delete state: ${err.message}`)
+      setDeleteStateConfirm(null)
     }
   }
 
@@ -172,6 +182,20 @@ export function AssetEditor({ asset, onSave, onClose }: AssetEditorProps) {
           overflowY: 'auto', 
           padding: '1rem'
         }}>
+          {/* Error Display */}
+          {error && (
+            <div style={{
+              padding: '0.75rem',
+              background: 'var(--danger)',
+              color: 'white',
+              borderRadius: '4px',
+              marginBottom: '1rem',
+              fontSize: '0.9rem'
+            }}>
+              {error}
+            </div>
+          )}
+
           {/* Metadata */}
           <div style={{ marginBottom: '1.5rem' }}>
             <h4 style={{ marginTop: 0, marginBottom: '0.75rem' }}>Metadata</h4>
@@ -229,7 +253,7 @@ export function AssetEditor({ asset, onSave, onClose }: AssetEditorProps) {
             }}>
               <h4 style={{ margin: 0 }}>States</h4>
               <button
-                onClick={handleAddState}
+                onClick={() => setShowStateNameModal(true)}
                 style={{ 
                   padding: '0.25rem 0.75rem',
                   fontSize: '0.85rem',
@@ -338,7 +362,7 @@ export function AssetEditor({ asset, onSave, onClose }: AssetEditorProps) {
                           </button>
                         )}
                         <button
-                          onClick={() => handleDeleteState(state)}
+                          onClick={() => setDeleteStateConfirm(state)}
                           disabled={isDefault}
                           style={{ 
                             padding: '0.25rem 0.5rem',
@@ -389,6 +413,27 @@ export function AssetEditor({ asset, onSave, onClose }: AssetEditorProps) {
           </button>
         </div>
       </div>
+
+      {/* State Name Modal */}
+      {showStateNameModal && (
+        <StateNameModal
+          onSave={handleStateNameSubmit}
+          onClose={() => setShowStateNameModal(false)}
+        />
+      )}
+
+      {/* Delete State Confirmation */}
+      {deleteStateConfirm && (
+        <ConfirmModal
+          title="Delete State"
+          message={`Delete state "${deleteStateConfirm.name}"?`}
+          confirmLabel="Delete"
+          cancelLabel="Cancel"
+          danger={true}
+          onConfirm={confirmDeleteState}
+          onCancel={() => setDeleteStateConfirm(null)}
+        />
+      )}
     </div>
   )
 }
