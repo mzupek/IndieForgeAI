@@ -358,6 +358,7 @@ export function StoryboardEditor() {
   const [playbackTime, setPlaybackTime] = useState(0)
   const [loopPlayback, setLoopPlayback] = useState(false)
   const [sidebarTab, setSidebarTab] = useState<'background' | 'camera'>('background')
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; type: 'camera' | 'effect'; index: number } | null>(null)
   
   const [dragMode, setDragMode] = useState<DragMode>(null)
   const [dragStart, setDragStart] = useState<any>(null)
@@ -2109,7 +2110,12 @@ export function StoryboardEditor() {
                       onContextMenu={(e) => {
                         e.preventDefault()
                         e.stopPropagation()
-                        handleDeleteCameraKeyframe(idx)
+                        setContextMenu({ 
+                          x: e.clientX, 
+                          y: e.clientY, 
+                          type: 'camera', 
+                          index: idx 
+                        })
                       }}
                       style={{
                         position: 'absolute',
@@ -2151,7 +2157,12 @@ export function StoryboardEditor() {
                       onContextMenu={(e) => {
                         e.preventDefault()
                         e.stopPropagation()
-                        handleDeleteMarker('effect', idx)
+                        setContextMenu({ 
+                          x: e.clientX, 
+                          y: e.clientY, 
+                          type: 'effect', 
+                          index: idx 
+                        })
                       }}
                       style={{
                         position: 'absolute',
@@ -2264,6 +2275,66 @@ export function StoryboardEditor() {
           </div>
         )}
       </div>
+
+      {/* Context menu for keyframe actions */}
+      {contextMenu && (
+        <>
+          <div 
+            style={{ 
+              position: 'fixed', 
+              top: 0, 
+              left: 0, 
+              right: 0, 
+              bottom: 0, 
+              zIndex: 999 
+            }}
+            onClick={() => setContextMenu(null)}
+            onContextMenu={(e) => {
+              e.preventDefault()
+              setContextMenu(null)
+            }}
+          />
+          <div
+            style={{
+              position: 'fixed',
+              left: `${contextMenu.x}px`,
+              top: `${contextMenu.y}px`,
+              background: 'var(--bg)',
+              border: '1px solid var(--border)',
+              borderRadius: '4px',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+              zIndex: 1000,
+              minWidth: '150px'
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => {
+                if (contextMenu.type === 'camera') {
+                  handleDeleteCameraKeyframe(contextMenu.index)
+                } else {
+                  handleDeleteMarker('effect', contextMenu.index)
+                }
+                setContextMenu(null)
+              }}
+              style={{
+                width: '100%',
+                padding: '0.5rem 1rem',
+                background: 'transparent',
+                border: 'none',
+                textAlign: 'left',
+                cursor: 'pointer',
+                color: 'var(--danger)',
+                fontSize: '0.9rem'
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.background = 'var(--bg-secondary)'}
+              onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+            >
+              🗑️ Delete Keyframe
+            </button>
+          </div>
+        </>
+      )}
 
       {/* Right sidebar with tabs */}
       {selectedShot && (
