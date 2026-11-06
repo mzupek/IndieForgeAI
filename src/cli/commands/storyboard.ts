@@ -238,7 +238,7 @@ export function registerStoryboardCommands(program: Command): void {
     .description('Update shot properties')
     .requiredOption('--id <shotId>', 'Shot ID')
     .option('--name <name>', 'New name')
-    .option('--duration <seconds>', 'Duration in seconds')
+    .option('--duration <seconds>', 'Duration in seconds (user-entered; shrink is refused if audio/clips/keys/camera/effects would be cut; previous length is not restored from history)')
     .option('--notes <text>', 'Notes for engineer')
     .option('--background-image <path>', 'Direct-import image (copied into studio backgrounds/; not an external path)')
     .option('--background-asset <id>', 'Library visual asset id (selected Game; full image, not thumbnail)')
@@ -540,16 +540,24 @@ export function registerStoryboardCommands(program: Command): void {
     .option('--role <role>', 'music | sfx (default: library kind)')
     .option('--source-in <seconds>', 'Source trim in (default 0)')
     .option('--source-out <seconds>', 'Source trim out (default audio duration)')
-    .option('--duration <seconds>', 'Authored block length (loop may exceed trim; non-loop must equal trim)')
-    .option('--loop', 'Wrap source within trim for a longer block')
+    .option('--duration <seconds>', 'Authored block length (omit to fit remaining shot; loop may exceed trim; non-loop must equal trim)')
+    .option('--loop', 'Wrap source within trim (default on for music)')
+    .option('--no-loop', 'Do not loop (default for sfx)')
     .option('--volume <0-1>', 'Linear gain (default 1)')
     .option('--fade-in <seconds>', 'Fade in at block start (default 0)')
     .option('--fade-out <seconds>', 'Fade out at block end (default 0)')
+    .option('--fit-shot', 'Clamp this block to the current shot end (keep library source)')
     .option('--extend-shot', 'If the block pasts the shot end, extend the shot (never silent)')
     .option('--json', 'Output as JSON')
     .action(async (options, cmd) => {
       try {
         const mergedOpts = { ...cmd.parent!.parent!.parent!.opts(), ...options }
+        const argv = process.argv
+        const hasLoop = argv.includes('--loop')
+        const hasNoLoop = argv.includes('--no-loop')
+        if (hasLoop && hasNoLoop) {
+          throw new Error('Use either --loop or --no-loop, not both')
+        }
         const result = await addShotAudioBlock(
           options.shot,
           {
@@ -559,25 +567,36 @@ export function registerStoryboardCommands(program: Command): void {
             sourceInSec: options.sourceIn,
             sourceOutSec: options.sourceOut,
             durationSec: options.duration,
-            loop: !!options.loop,
+            loop: hasLoop ? true : hasNoLoop ? false : undefined,
             volume: options.volume,
             fadeInSec: options.fadeIn,
             fadeOutSec: options.fadeOut,
-            extendShot: !!options.extendShot
+            extendShot: !!options.extendShot,
+            fitShot: !!options.fitShot
           },
           getDataDir(mergedOpts.dataDir)
         )
         if (mergedOpts.json) {
           console.log(
             JSON.stringify(
-              { ...result.block, shotDurationSec: result.shotDurationSec, extended: result.extended },
+              {
+                ...result.block,
+                shotDurationSec: result.shotDurationSec,
+                extended: result.extended,
+                fitted: result.fitted
+              },
               null,
               2
             )
           )
         } else {
+          const extra = result.extended
+            ? ` (shot extended to ${result.shotDurationSec}s)`
+            : result.fitted
+              ? ` (fitted to remaining shot ${result.shotDurationSec}s)`
+              : ''
           console.log(
-            `✓ Added audio block ${result.block.id} ${describeAudioBlock(result.block)}${result.extended ? ` (shot extended to ${result.shotDurationSec}s)` : ''}`
+            `✓ Added audio block ${result.block.id} ${describeAudioBlock(result.block)}${extra}`
           )
         }
       } catch (err) {
@@ -647,6 +666,7 @@ export function registerStoryboardCommands(program: Command): void {
     .option('--volume <0-1>', 'Linear gain')
     .option('--fade-in <seconds>', 'Fade in')
     .option('--fade-out <seconds>', 'Fade out')
+    .option('--fit-shot', 'Clamp this block to the current shot end (keep library source; does not restore a previous shot length)')
     .option('--extend-shot', 'If the block pasts the shot end, extend the shot (never silent)')
     .option('--json', 'Output as JSON')
     .action(async (options, cmd) => {
@@ -663,22 +683,31 @@ export function registerStoryboardCommands(program: Command): void {
             volume: options.volume,
             fadeInSec: options.fadeIn,
             fadeOutSec: options.fadeOut,
-            extendShot: !!options.extendShot
+            extendShot: !!options.extendShot,
+            fitShot: !!options.fitShot
           },
           getDataDir(mergedOpts.dataDir)
         )
         if (mergedOpts.json) {
           console.log(
             JSON.stringify(
-              { ...result.block, shotDurationSec: result.shotDurationSec, extended: result.extended },
+              {
+                ...result.block,
+                shotDurationSec: result.shotDurationSec,
+                extended: result.extended,
+                fitted: result.fitted
+              },
               null,
               2
             )
           )
         } else {
-          console.log(
-            `✓ Updated audio block ${result.block.id}${result.extended ? ` (shot extended to ${result.shotDurationSec}s)` : ''}`
-          )
+          const extra = result.extended
+            ? ` (shot extended to ${result.shotDurationSec}s)`
+            : result.fitted
+              ? ' (fitted to current shot end)'
+              : ''
+          console.log(`✓ Updated audio block ${result.block.id}${extra}`)
         }
       } catch (err) {
         console.error('Error:', err instanceof Error ? err.message : err)

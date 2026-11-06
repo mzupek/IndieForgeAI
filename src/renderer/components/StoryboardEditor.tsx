@@ -69,7 +69,9 @@ import {
 } from '@shared/storyboard/clipBlocks'
 import {
   audioBlockEnd,
-  audioBlockIssues
+  audioBlockIssues,
+  defaultLoopForAudioKind,
+  remainingShotTime
 } from '@shared/storyboard/audioBlocks'
 import { isSupportedAudioMedia, unsupportedAudioMediaMessage } from '@shared/storyboard/audioValidation'
 import {
@@ -509,6 +511,8 @@ export function StoryboardEditor() {
   const [audioFadeOutDraft, setAudioFadeOutDraft] = useState('0')
   const [audioLoopDraft, setAudioLoopDraft] = useState(false)
   const [audioError, setAudioError] = useState<string | null>(null)
+  const [shotDurationDraft, setShotDurationDraft] = useState('')
+  const [shotDurationError, setShotDurationError] = useState<string | null>(null)
   const audioVoicesRef = useRef<Map<string, AudioVoice>>(new Map())
   const lastPlaybackTimeRef = useRef(0)
   const [audioEpoch, setAudioEpoch] = useState(0)
@@ -745,6 +749,12 @@ export function StoryboardEditor() {
     selectedAudioBlock?.fadeOutSec,
     selectedAudioBlock?.loop
   ])
+
+  useEffect(() => {
+    if (!selectedShot) return
+    setShotDurationDraft(String(selectedShot.durationSec))
+    setShotDurationError(null)
+  }, [selectedShotId, selectedShot?.durationSec])
 
   // Load clip videos via forge-file:// (never base64, never local-file://)
   useEffect(() => {
@@ -2799,7 +2809,7 @@ export function StoryboardEditor() {
       if (msg.includes('--extend-shot') || msg.includes('never silent') || msg.includes('extend the shot')) {
         setPendingExtend({
           message:
-            'This audio block ends after the shot duration. Extend the shot to fit the block? Cancel keeps the current duration — Forge never silently extends.',
+            'This audio block ends after the shot duration. Extend the shot to play the full authored length? Cancel keeps the current shot length — Forge never silently extends. To keep the shot length, Cancel, click Fit remaining shot, then Place (or shorten Duration so the block ends at the shot end). Previous shot length is not restored from history.',
           run: async () => {
             await fn(true)
             await reloadProject()
@@ -2815,6 +2825,26 @@ export function StoryboardEditor() {
     }
   }
 
+  const remainingShotForPlayhead = selectedShot
+    ? remainingShotTime(selectedShot.durationSec, playbackTime)
+    : 0
+
+  const applyFitRemainingToAddForm = () => {
+    if (!selectedShot) return
+    const remaining = remainingShotTime(selectedShot.durationSec, playbackTime)
+    if (remaining <= 0) {
+      setAudioError(`Cannot fit audio: playhead ${playbackTime}s is at or after shot duration ${selectedShot.durationSec}s`)
+      return
+    }
+    setAddAudioDuration(String(Number(remaining.toFixed(3))))
+    if (!addAudioLoop) {
+      const inn = Number(addAudioSourceIn)
+      const start = Number.isFinite(inn) ? inn : 0
+      setAddAudioSourceOut(String(Number((start + remaining).toFixed(3))))
+    }
+    setAudioError(null)
+  }
+
   const handleAddAudioBlock = async () => {
     if (!selectedShot || !addAudioId) {
       setAudioError('Select audio from this Game library')
@@ -2827,7 +2857,7 @@ export function StoryboardEditor() {
     }
     const sourceInSec = Number(addAudioSourceIn)
     const sourceOutSec = addAudioSourceOut === '' ? asset.durationSec : Number(addAudioSourceOut)
-    const durationSec = addAudioLoop && addAudioDuration !== '' ? Number(addAudioDuration) : undefined
+    const durationSec = addAudioDuration !== '' ? Number(addAudioDuration) : undefined
     const ok = await runAudioWrite(async (extendShot) => {
       await window.indieForge.pipeline.addShotAudioBlock(projectId!, selectedShotId!, {
         audioId: addAudioId,
@@ -2850,21 +2880,75 @@ export function StoryboardEditor() {
     if (!selectedAudioBlock) return
     const t = Number(audioTimeDraft)
     const sourceInSec = Number(audioInDraft)
-    const sourceOutSec = Number(audioOutDraft)
-    const durationSec = Number(audioDurationDraft)
+    let sourceOutSec = Number(audioOutDraft)
+    let durationSec = Number(audioDurationDraft)
+    const loop = loopOverride !== undefined ? loopOverride : audioLoopDraft
+    if (!loop && Number.isFinite(sourceInSec) && Number.isFinite(sourceOutSec) && Number.isFinite(durationSec)) {
+      const trim = sourceOutSec - sourceInSec
+      const outChanged = Math.abs(sourceOutSec - selectedAudioBlock.sourceOutSec) > 0.001
+      const durChanged = Math.abs(durationSec - selectedAudioBlock.durationSec) > 0.001
+      if (durChanged && !outChanged) {
+        sourceOutSec = sourceInSec + durationSec
+      } else if (outChanged) {
+        durationSec = trim
+      } else if (Math.abs(durationSec - trim) > 0.001) {
+        sourceOutSec = sourceInSec + durationSec
+      }
+    }
     await runAudioWrite(async (extendShot) => {
       await window.indieForge.pipeline.updateShotAudioBlock(projectId!, selectedAudioBlock.id, {
         t,
         sourceInSec,
         sourceOutSec,
         durationSec,
-        loop: loopOverride !== undefined ? loopOverride : audioLoopDraft,
+        loop,
         volume: Number(audioVolumeDraft),
         fadeInSec: Number(audioFadeInDraft),
         fadeOutSec: Number(audioFadeOutDraft),
         extendShot
       })
     })
+  }
+
+  const handleFitAudioBlockToShot = async () => {
+    if (!selectedAudioBlock || !selectedShot) return
+    try {
+      setLayerError(null)
+      setAudioError(null)
+      await window.indieForge.pipeline.updateShotAudioBlock(projectId!, selectedAudioBlock.id, {
+        fitShot: true
+      })
+      await reloadProject()
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      setAudioError(msg)
+      setLayerError(msg)
+    }
+  }
+
+  const handleCommitShotDuration = async () => {
+    if (!selectedShot || !projectId || !selectedShotId) return
+    const n = Number(shotDurationDraft)
+    if (!Number.isFinite(n) || n <= 0) {
+      setShotDurationError('Shot duration must be a positive number of seconds')
+      setShotDurationDraft(String(selectedShot.durationSec))
+      return
+    }
+    if (Math.abs(n - selectedShot.durationSec) < 1e-9) {
+      setShotDurationError(null)
+      return
+    }
+    try {
+      setShotDurationError(null)
+      setLayerError(null)
+      await window.indieForge.pipeline.updateShot(projectId, selectedShotId, { durationSec: n })
+      await reloadProject()
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      setShotDurationError(msg)
+      setLayerError(msg)
+      setShotDurationDraft(String(selectedShot.durationSec))
+    }
   }
 
   const confirmDeleteAudioBlockNow = async () => {
@@ -3293,6 +3377,26 @@ export function StoryboardEditor() {
                 </div>
                 {selectedShotId === shot.id && (
                   <div style={{ padding: '0 0.5rem 0.5rem' }}>
+                    <label
+                      style={{ display: 'block', fontSize: '0.7rem', color: 'var(--muted)', marginBottom: '0.35rem' }}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      Duration (s)
+                      <input
+                        type="number"
+                        step="0.05"
+                        min="0.05"
+                        value={shotDurationDraft}
+                        onChange={(e) => setShotDurationDraft(e.target.value)}
+                        onBlur={() => void handleCommitShotDuration()}
+                        onClick={(e) => e.stopPropagation()}
+                        title="Enter a duration. Shrink is refused if audio, clips, keys, camera, or effects would be cut. Previous length is not restored from history."
+                        style={{ width: '100%', marginTop: '0.15rem', fontSize: '0.8rem' }}
+                      />
+                    </label>
+                    {shotDurationError && (
+                      <div style={{ color: '#ff8a8a', fontSize: '0.7rem', marginBottom: '0.35rem' }}>{shotDurationError}</div>
+                    )}
                     <button
                       type="button"
                       onClick={(e) => {
@@ -3547,25 +3651,43 @@ export function StoryboardEditor() {
                     onClick={() => {
                       setShowAddAudio(true)
                       const first = audioAssets[0]
+                      const remaining = remainingShotTime(selectedShot.durationSec, playbackTime)
                       setAddAudioId(first?.id || '')
-                      setAddAudioLoop(false)
+                      setAddAudioLoop(first ? defaultLoopForAudioKind(first.kind) : false)
                       setAddAudioSourceIn('0')
                       setAddAudioSourceOut(first ? String(first.durationSec) : '')
-                      setAddAudioDuration(first ? String(first.durationSec) : '')
+                      setAddAudioDuration(
+                        remaining > 0 ? String(Number(remaining.toFixed(3))) : ''
+                      )
                       setAddAudioVolume('1')
                       setAddAudioFadeIn('0')
                       setAddAudioFadeOut('0')
+                      setAudioError(null)
                     }}
                     style={{ fontSize: '0.8rem', padding: '0.25rem 0.5rem' }}
-                    title="Place a timed music or SFX block. Playback uses HTMLAudioElement.play()/pause()."
+                    title="Place a timed music or SFX block. Duration defaults to remaining shot time. Playback uses HTMLAudioElement.play()/pause()."
                   >
                     + Audio @ {playbackTime.toFixed(1)}s
                   </button>
-                  <span style={{ color: 'var(--muted)' }}>
-                    {playbackTime.toFixed(2)}s / {selectedShot.durationSec}s
-                  </span>
+                  <label style={{ fontSize: '0.75rem', color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                    {playbackTime.toFixed(2)}s /
+                    <input
+                      type="number"
+                      step="0.05"
+                      min="0.05"
+                      value={shotDurationDraft}
+                      onChange={(e) => setShotDurationDraft(e.target.value)}
+                      onBlur={() => void handleCommitShotDuration()}
+                      title="Shot duration (seconds). Enter a value to shorten or lengthen. Shrink is refused if other content would be cut."
+                      style={{ width: '4.5rem', fontSize: '0.75rem' }}
+                    />
+                    s
+                  </label>
                 </div>
               </div>
+              {shotDurationError && (
+                <div style={{ color: '#ff8a8a', fontSize: '0.75rem', marginBottom: '0.45rem' }}>{shotDurationError}</div>
+              )}
               
               <div 
                 style={{ 
@@ -4103,6 +4225,10 @@ export function StoryboardEditor() {
                   <div style={{ fontWeight: 'bold', marginBottom: '0.5rem', fontSize: '0.9rem' }}>
                     Add audio at {playbackTime.toFixed(1)}s
                   </div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--muted)', marginBottom: '0.45rem' }}>
+                    Duration defaults to remaining shot ({remainingShotForPlayhead.toFixed(2)}s). Library file stays full.
+                    Loop repeats the source inside the shot. Extend only after confirm.
+                  </div>
                   {audioAssets.length === 0 ? (
                     <div style={{ fontSize: '0.8rem', color: 'var(--muted)' }}>
                       Import audio in Library → Audio for this Game first.
@@ -4116,9 +4242,13 @@ export function StoryboardEditor() {
                           onChange={(e) => {
                             setAddAudioId(e.target.value)
                             const a = audioAssets.find((x) => x.id === e.target.value)
-                            if (a) {
+                            if (a && selectedShot) {
+                              setAddAudioLoop(defaultLoopForAudioKind(a.kind))
                               setAddAudioSourceOut(String(a.durationSec))
-                              setAddAudioDuration(String(a.durationSec))
+                              const remaining = remainingShotTime(selectedShot.durationSec, playbackTime)
+                              setAddAudioDuration(
+                                remaining > 0 ? String(Number(remaining.toFixed(3))) : String(a.durationSec)
+                              )
                             }
                           }}
                           style={{ width: '100%', marginTop: '0.2rem' }}
@@ -4162,19 +4292,25 @@ export function StoryboardEditor() {
                           />
                           Loop
                         </label>
-                        {addAudioLoop && (
-                          <label style={{ fontSize: '0.75rem' }}>
-                            Duration
-                            <input
-                              type="number"
-                              step="0.05"
-                              min="0.05"
-                              value={addAudioDuration}
-                              onChange={(e) => setAddAudioDuration(e.target.value)}
-                              style={{ width: '4.5rem', marginLeft: '0.25rem' }}
-                            />
-                          </label>
-                        )}
+                        <label style={{ fontSize: '0.75rem' }}>
+                          Duration
+                          <input
+                            type="number"
+                            step="0.05"
+                            min="0.05"
+                            value={addAudioDuration}
+                            onChange={(e) => setAddAudioDuration(e.target.value)}
+                            style={{ width: '4.5rem', marginLeft: '0.25rem' }}
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          onClick={applyFitRemainingToAddForm}
+                          style={{ fontSize: '0.75rem' }}
+                          title="Set Duration to remaining shot time. Loop keeps the full library source. Does not extend the shot."
+                        >
+                          Fit remaining shot
+                        </button>
                         <label style={{ fontSize: '0.75rem' }}>
                           Vol
                           <input
@@ -4246,6 +4382,7 @@ export function StoryboardEditor() {
                   <div style={{ color: 'var(--muted)', marginTop: '0.2rem', fontSize: '0.75rem' }}>
                     Half-open [t, t+duration). Silence outside. Paused/reverse scrub seeks silently.
                     Play uses HTMLAudioElement.play()/pause() — not paused currentTime. Clips stay muted.
+                    Fit remaining shot clamps this block to the current shot end; it does not restore a previous shot length.
                   </div>
                   {(() => {
                     const voice = audioVoicesRef.current.get(selectedAudioBlock.id)
@@ -4326,6 +4463,14 @@ export function StoryboardEditor() {
                         style={{ width: '4.5rem', marginLeft: '0.25rem' }}
                       />
                     </label>
+                    <button
+                      type="button"
+                      onClick={() => void handleFitAudioBlockToShot()}
+                      style={{ fontSize: '0.75rem' }}
+                      title="Clamp this block to the current shot duration. Library source is kept. Does not restore a previous shot length."
+                    >
+                      Fit remaining shot
+                    </button>
                     <label style={{ fontSize: '0.75rem' }}>
                       Vol
                       <input

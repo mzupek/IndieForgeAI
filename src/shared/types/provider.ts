@@ -607,6 +607,7 @@ export interface IndieForgeAPI {
         fadeInSec?: number
         fadeOutSec?: number
         extendShot?: boolean
+        fitShot?: boolean
       }
     ) => Promise<any>
     listShotAudioBlocks: (shotId: string) => Promise<any[]>
@@ -624,6 +625,7 @@ export interface IndieForgeAPI {
         fadeInSec?: number
         fadeOutSec?: number
         extendShot?: boolean
+        fitShot?: boolean
       }
     ) => Promise<any>
     deleteShotAudioBlock: (projectId: string, blockId: string) => Promise<any>

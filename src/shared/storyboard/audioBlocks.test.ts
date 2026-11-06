@@ -13,7 +13,10 @@ import type {
 import {
   assertShotDurationFitsAudioBlocks,
   fadeGainForAudioBlock,
+  fitAudioBlockToShotEnd,
   isAudioBlockActive,
+  planAudioBlockPlacement,
+  remainingShotTime,
   sampleAudioBlocks,
   sourceTimeForAudioBlock,
   validateShotAudioBlock
@@ -57,6 +60,32 @@ const bed: AudioAsset = {
   tags: [],
   file: '/data/audio/bed/audio.ogg',
   durationSec: 0.5,
+  schemaVersion: 1,
+  createdAt: now,
+  updatedAt: now
+}
+
+const longBed: AudioAsset = {
+  id: 'aud-long',
+  gameId: 'game-a',
+  name: 'LongBed',
+  kind: 'music',
+  tags: [],
+  file: '/data/audio/long/audio.wav',
+  durationSec: 22,
+  schemaVersion: 1,
+  createdAt: now,
+  updatedAt: now
+}
+
+const longSfx: AudioAsset = {
+  id: 'aud-long-sfx',
+  gameId: 'game-a',
+  name: 'LongSfx',
+  kind: 'sfx',
+  tags: [],
+  file: '/data/audio/long-sfx/audio.wav',
+  durationSec: 24,
   schemaVersion: 1,
   createdAt: now,
   updatedAt: now
@@ -114,7 +143,7 @@ const pipeline = {
   storyboards: [
     { id: 'sb', gameId: 'game-a', name: 'B', shotIds: ['shot-a'], createdAt: now, updatedAt: now }
   ],
-  audioAssets: [hit, bed, otherGame],
+  audioAssets: [hit, bed, longBed, longSfx, otherGame],
   characters: [],
   clips: []
 } as unknown as AssetPipelineProject
@@ -260,6 +289,103 @@ function testExtendShrinkNonLoop(): void {
   console.log('✓ extend required; shrink guarded; non-loop duration matches trim; loop may be longer')
 }
 
+function testFitLongSourceOnShortShot(): void {
+  assert(remainingShotTime(3, 0) === 3, 'remaining at 0')
+  assert(remainingShotTime(3, 1) === 2, 'remaining at 1')
+  const musicPlan = planAudioBlockPlacement({
+    asset: longBed,
+    shotDurationSec: 3,
+    t: 0
+  })
+  assert(musicPlan.loop === true, 'music defaults to loop')
+  assert(Math.abs(musicPlan.durationSec - 3) < 1e-9, 'music duration is remaining shot')
+  assert(Math.abs(musicPlan.sourceOutSec - 22) < 1e-9, 'music keeps full library source')
+  assert(musicPlan.sourceInSec === 0, 'music source in 0')
+  assert(musicPlan.fitted === true, 'music fitted to shot')
+  assert(musicPlan.needsExtend === false, 'music default does not extend')
+
+  const sfxPlan = planAudioBlockPlacement({
+    asset: longSfx,
+    shotDurationSec: 3,
+    t: 0
+  })
+  assert(sfxPlan.loop === false, 'sfx default no loop')
+  assert(Math.abs(sfxPlan.durationSec - 3) < 1e-9, 'sfx duration is remaining prefix')
+  assert(Math.abs(sfxPlan.sourceOutSec - 3) < 1e-9, 'sfx sourceOut clamped to remaining')
+  assert(sfxPlan.fitted === true, 'sfx fitted')
+  assert(sfxPlan.needsExtend === false, 'sfx default does not extend')
+
+  const explicit = planAudioBlockPlacement({
+    asset: longBed,
+    shotDurationSec: 3,
+    t: 0,
+    loop: true,
+    durationSec: 22
+  })
+  assert(explicit.needsExtend === true, 'explicit overflowing duration still needs extend')
+  assert(Math.abs(explicit.durationSec - 22) < 1e-9, 'explicit duration kept until extend/fit')
+
+  const fittedExplicit = planAudioBlockPlacement({
+    asset: longBed,
+    shotDurationSec: 3,
+    t: 0,
+    loop: true,
+    durationSec: 22,
+    fitShot: true
+  })
+  assert(fittedExplicit.fitted === true, 'fit-shot clamps explicit overflow')
+  assert(Math.abs(fittedExplicit.durationSec - 3) < 1e-9, 'fit-shot duration remaining')
+  assert(Math.abs(fittedExplicit.sourceOutSec - 22) < 1e-9, 'fit-shot keeps loop source')
+
+  assertThrows(
+    () =>
+      planAudioBlockPlacement({
+        asset: longBed,
+        shotDurationSec: 3,
+        t: 0,
+        fitShot: true,
+        extendShot: true
+      }),
+    'not both',
+    'fit and extend exclusive'
+  )
+
+  const looped = {
+    id: 'accidental',
+    audioId: 'aud-long',
+    role: 'music' as const,
+    t: 0,
+    durationSec: 22,
+    sourceInSec: 0,
+    sourceOutSec: 22,
+    loop: true,
+    volume: 1,
+    fadeInSec: 0.2,
+    fadeOutSec: 0.2,
+    schemaVersion: 1 as const
+  }
+  const recovered = fitAudioBlockToShotEnd(looped, 3)
+  assert(Math.abs(recovered.durationSec - 3) < 1e-9, 'recovery duration')
+  assert(Math.abs(recovered.sourceOutSec - 22) < 1e-9, 'recovery keeps source')
+  assert(recovered.loop === true, 'recovery keeps loop')
+  const shortShot = shot({ durationSec: 3, audioTrack: [recovered] })
+  validateShotAudioBlock(recovered, shortShot, pipeline, 'shot-a')
+  const mid = sourceTimeForAudioBlock(recovered, 2.5)
+  assert(Math.abs(mid - (2.5 % 22)) < 1e-9, 'loop wrap on fitted 22s source')
+  const fadeStart = fadeGainForAudioBlock(recovered, 0.1)
+  const fadeMid = fadeGainForAudioBlock(recovered, 1.5)
+  const fadeEnd = fadeGainForAudioBlock(recovered, 2.9)
+  assert(fadeStart < 1, 'fade in on fitted bed')
+  assert(fadeMid === 1, 'mid gain full')
+  assert(fadeEnd < 1, 'fade out on fitted bed')
+  assertThrows(
+    () => validateShotAudioBlock(looped, shot({ durationSec: 3 }), pipeline, 'shot-a'),
+    '--extend-shot',
+    'unfitted 22s on 3s still requires extend'
+  )
+  console.log('✓ 22s source on 3s shot fits remaining; loop keeps source; explicit overflow still confirms')
+}
+
 function testSampleDoesNotMutate(): void {
   const b = block({ id: 'keep', t: 0.2 })
   const s = shot({ audioTrack: [b] })
@@ -276,6 +402,7 @@ function main(): void {
   testFade()
   testOverlapAndScope()
   testExtendShrinkNonLoop()
+  testFitLongSourceOnShortShot()
   testSampleDoesNotMutate()
   console.log('\nAll A2 audio block timing tests passed')
 }

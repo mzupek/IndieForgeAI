@@ -1113,6 +1113,8 @@ forge shot update \
   [--json]
 ```
 
+`--duration` is user-entered only. Forge does not restore a previous shot length from history. Shrink is refused (and lists blockers) if an audio block, clip block, timed key, camera keyframe, or effect marker would be cut.
+
 Static shot background is a **Library visual asset** on the shot's Game (`--background-asset`, optional `--background-state` for an explicit state; omit state for default/static). Canvas uses the full-resolution `asset.image` or `state.file`, not the thumbnail. `--background-image` is the secondary direct import: the file is copied into studio `backgrounds/` and the shot stores that relative path, not the original external source. `--clear-background-image` clears the static/library image only (clip unchanged). `--clear-background` also clears the clip. Image and clip can coexist (clip draws over the still while a background clip block is active).
 
 ### Remove Shot
@@ -1145,17 +1147,22 @@ Preview in Storyboard uses `forge-file://` video elements driven by `currentTime
 
 ### Timed audio blocks (A2)
 
-Audio blocks are **range bars** on `shot.audioTrack`. Role is `music` or `sfx` and must match the library asset kind. Half-open `[t, t+duration)`: **silence outside the bar**. Non-loop 1x `durationSec` equals `sourceOutSec - sourceInSec`. `--loop` wraps the trim window so authored duration may be longer than trim. Music overlap is rejected (one bed). SFX overlap is allowed. Overflow past shot duration requires `--extend-shot` (never silent). Shrinking the shot is rejected while a block would be cut.
+Audio blocks are **range bars** on `shot.audioTrack`. Role is `music` or `sfx` and must match the library asset kind. Half-open `[t, t+duration)`: **silence outside the bar**. Non-loop 1x `durationSec` equals `sourceOutSec - sourceInSec`. `--loop` wraps the trim window so authored duration may be longer than trim (default **on** for music, off for sfx). Music overlap is rejected (one bed). SFX overlap is allowed.
+
+Placing a long library file on a shorter shot **fits remaining shot time by default** (does not extend). Loop keeps the full source in/out and sets `durationSec` to remaining. Non-loop plays a prefix (`sourceOut` clamped). The library file is never rewritten. Overflow past shot duration still requires `--extend-shot` (never silent) when you pass an explicit overflowing `--duration`. `--fit-shot` clamps **this** block to the current shot end. It does **not** restore a previous shot length from history.
+
+`forge shot update --duration` is user-entered only. Shrink is refused if audio, clips, timed keys, camera keyframes, or effect markers would be cut; the error lists blockers. Shorten those items first, then enter the new duration. Existing records that were accidentally extended have that same path (shorten the audio block, then enter the shot duration). Do not delete or reimport the library audio.
 
 Storyboard playback uses `HTMLAudioElement.play()` / `pause()` synced to the master transport. **Paused `currentTime` seeks do not play sound.** Reverse scrub and pause position silently. Clip video remains muted. No cross-shot bus. Event SFX is A3 (not this command).
 
 ```bash
-forge shot audio add --shot <shotId> --audio <audioId> --time 0.5 [--role music|sfx] [--source-in 0] [--source-out 1.2] [--duration 2] [--loop] [--volume 1] [--fade-in 0] [--fade-out 0] [--extend-shot] [--json]
+forge shot audio add --shot <shotId> --audio <audioId> --time 0.5 [--role music|sfx] [--source-in 0] [--source-out 1.2] [--duration 2] [--loop|--no-loop] [--volume 1] [--fade-in 0] [--fade-out 0] [--fit-shot] [--extend-shot] [--json]
 forge shot audio list --shot <shotId> [--json]
 forge shot audio show --id <blockId> [--json]
-forge shot audio update --id <blockId> [--time 1.0] [--source-in 0.2] [--source-out 1.0] [--duration 2] [--loop true|false] [--volume 0.8] [--fade-in 0.1] [--fade-out 0.1] [--extend-shot] [--json]
+forge shot audio update --id <blockId> [--time 1.0] [--source-in 0.2] [--source-out 1.0] [--duration 2] [--loop true|false] [--volume 0.8] [--fade-in 0.1] [--fade-out 0.1] [--fit-shot] [--extend-shot] [--json]
 forge shot audio remove --id <blockId> [--json]
 forge shot audio sample --shot <shotId> --time 0.8 [--json]
+forge shot update --id <shotId> --duration 3
 ```
 
 `sample` prints active blocks, source time, and fade gain. It is preview-only and never persisted.

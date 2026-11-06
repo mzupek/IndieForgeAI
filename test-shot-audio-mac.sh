@@ -21,6 +21,8 @@ npx tsx src/shared/storyboard/audioBlocks.test.ts
 echo ""
 npx tsx src/shared/storyboard/audioPlayback.test.ts
 echo ""
+npx tsx src/shared/storyboard/shotDuration.test.ts
+echo ""
 
 TEST_DIR=$(mktemp -d -t forge-shot-audio-XXXXXX)
 export FORGE_DATA_DIR="$TEST_DIR"
@@ -261,7 +263,7 @@ assert shot['durationSec']>2.1, shot
 "
 pass "Opt-in --extend-shot lengthens the shot"
 
-if $CLI shot update --id "$SHOT_ID" --duration 1.0 2>&1 | grep -q "audio block ends"; then
+if $CLI shot update --id "$SHOT_ID" --duration 1.0 2>&1 | grep -q "audio block"; then
   pass "Duration shrink rejected while audio block exists"
 else
   fail "Duration shrink was accepted"
@@ -292,7 +294,169 @@ pass "Remove unused blocks; remaining music intact; unused library audio deleted
 
 echo ""
 echo "----------------------------------------"
-echo "Test 4: --help"
+echo "Test 4: long 22s source on 3s shot — fit default, accidental extend, user-entered recovery"
+echo "----------------------------------------"
+WAV_LONG="$TEST_DIR/bed-22s.wav"
+OUT="$WAV_LONG" DUR=22 python3 - <<'PY'
+import math, os, pathlib, struct
+sr, dur = 8000, float(os.environ['DUR'])
+n = int(sr * dur)
+samples = [int(9000 * math.sin(2 * math.pi * 330 * i / sr)) for i in range(n)]
+data = b''.join(struct.pack('<h', s) for s in samples)
+header = struct.pack(
+    '<4sI4s4sIHHIIHH4sI',
+    b'RIFF', 36 + len(data), b'WAVE', b'fmt ', 16,
+    1, 1, sr, sr * 2, 2, 16,
+    b'data', len(data)
+)
+pathlib.Path(os.environ['OUT']).write_bytes(header + data)
+PY
+[ -f "$WAV_LONG" ] || fail "Failed to create 22s WAV fixture"
+LONG_IMP=$($CLI audio import "$WAV_LONG" --game game-test --kind music --name "Long Bed 22")
+LONG_ID=$(echo "$LONG_IMP" | audio_import_id)
+[ -n "$LONG_ID" ] || fail "long bed import id"
+SFX_LONG_IMP=$($CLI audio import "$WAV_LONG" --game game-test --kind sfx --name "Long Sfx 22")
+SFX_LONG_ID=$(echo "$SFX_LONG_IMP" | audio_import_id)
+[ -n "$SFX_LONG_ID" ] || fail "long sfx import id"
+
+SHORT_OUT=$($CLI shot add --storyboard "$SB_ID" --name "Short Fit" --duration 3)
+SHORT_ID=$(echo "$SHORT_OUT" | json_id)
+
+FIT=$($CLI shot audio add --shot "$SHORT_ID" --audio "$LONG_ID" --time 0 --fade-in 0.2 --fade-out 0.2)
+FIT_ID=$(echo "$FIT" | json_id)
+echo "$FIT" | python3 -c "
+import sys,json
+t=sys.stdin.read(); i=t.find('{'); d=json.loads(t[i:])
+assert d['loop'] is True, d
+assert abs(d['durationSec']-3)<1e-6, d
+assert abs(d['sourceOutSec']-22)<0.08, d
+assert abs(d['sourceInSec'])<1e-9, d
+assert d.get('fitted') is True, d
+assert d.get('extended') is False, d
+assert abs(d['shotDurationSec']-3)<1e-6, d
+assert d['audioId']=='$LONG_ID'
+"
+$CLI storyboard show --id "$SB_ID" | python3 -c "
+import sys,json
+t=sys.stdin.read(); i=t.find('{'); d=json.loads(t[i:])
+shot=next(s for s in d['shots'] if s['id']=='$SHORT_ID')
+assert abs(shot['durationSec']-3)<1e-6, shot
+"
+$CLI shot audio sample --shot "$SHORT_ID" --time 2.5 | python3 -c "
+import sys,json
+t=sys.stdin.read(); i=t.find('{'); d=json.loads(t[i:])
+music=[s for s in d['samples'] if s['role']=='music']
+assert music, d
+assert abs(music[0]['sourceTimeSec']-2.5)<0.05, music
+"
+$CLI shot audio sample --shot "$SHORT_ID" --time 0.05 | python3 -c "
+import sys,json
+t=sys.stdin.read(); i=t.find('{'); d=json.loads(t[i:])
+music=[s for s in d['samples'] if s['role']=='music']
+assert music and music[0]['gain']<1, music
+"
+$CLI shot audio sample --shot "$SHORT_ID" --time 2.95 | python3 -c "
+import sys,json
+t=sys.stdin.read(); i=t.find('{'); d=json.loads(t[i:])
+music=[s for s in d['samples'] if s['role']=='music']
+assert music and music[0]['gain']<1, music
+"
+pass "Default place 22s looping music on 3s shot fits remaining; source kept; shot not extended"
+
+SFX_FIT=$($CLI shot audio add --shot "$SHORT_ID" --audio "$SFX_LONG_ID" --time 0 --no-loop)
+echo "$SFX_FIT" | python3 -c "
+import sys,json
+t=sys.stdin.read(); i=t.find('{'); d=json.loads(t[i:])
+assert d['loop'] is False, d
+assert abs(d['durationSec']-3)<1e-6, d
+assert abs(d['sourceOutSec']-3)<1e-6, d
+assert d.get('fitted') is True, d
+"
+pass "Long non-loop SFX fits as prefix; library file unchanged"
+
+OVF_OUT=$($CLI shot add --storyboard "$SB_ID" --name "Overflow Confirm" --duration 3)
+OVF_ID=$(echo "$OVF_OUT" | json_id)
+if $CLI shot audio add --shot "$OVF_ID" --audio "$LONG_ID" --time 0 --duration 22 --loop 2>&1 | grep -q "extend-shot"; then
+  pass "Explicit overflowing --duration still requires --extend-shot or --fit-shot"
+else
+  fail "Explicit 22s duration was accepted without extend/fit"
+fi
+
+ACC_OUT=$($CLI shot add --storyboard "$SB_ID" --name "Accidental Extend" --duration 3)
+ACC_ID=$(echo "$ACC_OUT" | json_id)
+ACC=$($CLI shot audio add --shot "$ACC_ID" --audio "$LONG_ID" --time 0 --duration 22 --loop --extend-shot --fade-in 0.2 --fade-out 0.2)
+ACC_BLOCK=$(echo "$ACC" | json_id)
+echo "$ACC" | python3 -c "
+import sys,json
+t=sys.stdin.read(); i=t.find('{'); d=json.loads(t[i:])
+assert d.get('extended') is True, d
+assert abs(d['shotDurationSec']-22)<0.08, d
+assert abs(d['durationSec']-22)<0.08, d
+"
+if $CLI shot update --id "$ACC_ID" --duration 3 2>&1 | grep -q "audio block"; then
+  pass "Cannot shrink shot while 22s block remains (no invented history)"
+else
+  fail "Shot shrink was accepted while long audio block exists"
+fi
+$CLI shot audio update --id "$ACC_BLOCK" --duration 3 >/dev/null
+$CLI shot audio show --id "$ACC_BLOCK" | python3 -c "
+import sys,json
+t=sys.stdin.read(); i=t.find('{'); d=json.loads(t[i:])
+assert abs(d['durationSec']-3)<1e-6, d
+assert abs(d['sourceOutSec']-22)<0.08, d
+assert d['loop'] is True, d
+"
+$CLI shot update --id "$ACC_ID" --duration 3 >/dev/null
+$CLI storyboard show --id "$SB_ID" | python3 -c "
+import sys,json
+t=sys.stdin.read(); i=t.find('{'); d=json.loads(t[i:])
+shot=next(s for s in d['shots'] if s['id']=='$ACC_ID')
+assert abs(shot['durationSec']-3)<1e-6, shot
+block=next(b for b in shot.get('audioTrack') or [] if b['id']=='$ACC_BLOCK')
+assert abs(block['durationSec']-3)<1e-6
+assert abs(block['sourceOutSec']-22)<0.08
+"
+pass "Accidental extend recovered: shorten this audio Dur, then enter shot duration 3; source kept"
+
+FIT_SHOT_OUT=$($CLI shot add --storyboard "$SB_ID" --name "Fit Flag" --duration 3)
+FIT_SHOT_ID=$(echo "$FIT_SHOT_OUT" | json_id)
+FIT_FLAG=$($CLI shot audio add --shot "$FIT_SHOT_ID" --audio "$LONG_ID" --time 0 --duration 22 --loop --fit-shot)
+echo "$FIT_FLAG" | python3 -c "
+import sys,json
+t=sys.stdin.read(); i=t.find('{'); d=json.loads(t[i:])
+assert abs(d['durationSec']-3)<1e-6, d
+assert abs(d['sourceOutSec']-22)<0.08, d
+assert d.get('fitted') is True, d
+assert d.get('extended') is False, d
+"
+pass "--fit-shot clamps overflowing explicit duration without extending"
+
+$CLI camera key --shot "$ACC_ID" --time 2.5 --json >/dev/null
+if $CLI shot update --id "$ACC_ID" --duration 2.0 2>&1 | grep -q "camera keyframe"; then
+  pass "Shrink blocked by unrelated camera keyframe"
+else
+  fail "Camera keyframe was silently truncated"
+fi
+$CLI effect add --shot "$ACC_ID" --time 2.6 --type shake --json >/dev/null
+if $CLI shot update --id "$ACC_ID" --duration 2.0 2>&1 | grep -q "effect marker"; then
+  pass "Shrink blocked by unrelated effect marker"
+else
+  fail "Effect marker was silently truncated"
+fi
+$CLI camera remove --shot "$ACC_ID" --time 2.5 --json >/dev/null
+$CLI effect remove --shot "$ACC_ID" --time 2.6 --json >/dev/null
+if $CLI shot update --id "$ACC_ID" --duration 2.5 2>&1 | grep -q "audio block"; then
+  pass "After removing camera/effect, shrink still lists remaining audio (no silent truncation)"
+else
+  fail "Expected audio blocker after camera/effect removed"
+fi
+$CLI shot audio update --id "$ACC_BLOCK" --duration 2.5 >/dev/null
+$CLI shot update --id "$ACC_ID" --duration 2.5 >/dev/null
+pass "After shortening this audio, user-entered shot duration 2.5s is accepted"
+
+echo ""
+echo "----------------------------------------"
+echo "Test 5: --help"
 echo "----------------------------------------"
 HELP_AUDIO=$($CLI shot audio --help)
 echo "$HELP_AUDIO" | grep -q "add" || fail "shot audio --help missing add"
@@ -305,10 +469,14 @@ HELP_ADD=$($CLI shot audio add --help)
 echo "$HELP_ADD" | grep -q -- "--audio" || fail "add --help missing --audio"
 echo "$HELP_ADD" | grep -q -- "--time" || fail "add --help missing --time"
 echo "$HELP_ADD" | grep -q -- "--loop" || fail "add --help missing --loop"
+echo "$HELP_ADD" | grep -q -- "--fit-shot" || fail "add --help missing --fit-shot"
 echo "$HELP_ADD" | grep -q -- "--extend-shot" || fail "add --help missing --extend-shot"
+HELP_UPDATE=$($CLI shot audio update --help)
+echo "$HELP_UPDATE" | grep -q -- "--fit-shot" || fail "update --help missing --fit-shot"
+echo "$HELP_UPDATE" | grep -q -- "--duration" || fail "update --help missing --duration"
 HELP_SAMPLE=$($CLI shot audio sample --help)
 echo "$HELP_SAMPLE" | grep -q -- "--time" || fail "sample --help missing --time"
-pass "CLI --help documents shot audio add/list/show/update/remove/sample"
+pass "CLI --help documents shot audio add/list/show/update/remove/sample + --fit-shot"
 
 echo ""
 echo "=========================================="
@@ -316,11 +484,12 @@ echo -e "${GREEN}All A2 shot audio tests passed${NC}"
 echo "=========================================="
 echo ""
 echo "Verified (automated, no Electron UI):"
-echo "  ✓ Timing + playback-lifecycle unit tests (mocks, not host audio)"
-echo "  ✓ WAV/OGG isolated fixtures"
+echo "  ✓ Timing + playback-lifecycle + shot-duration unit tests (mocks, not host audio)"
+echo "  ✓ WAV/OGG isolated fixtures including 22s source"
 echo "  ✓ CRUD / sample half-open / reverse-equivalent / loop wrap"
 echo "  ✓ Music overlap rejected; SFX overlap allowed; wrong-game"
 echo "  ✓ --extend-shot; shrink guard; in-use delete; short replace; remove"
+echo "  ✓ 22s-on-3s fit default; accidental-extend recovery; camera/effect shrink guards"
 echo "  ✓ --help"
 echo ""
 echo "NOT executed here: Mac Storyboard audible HTMLAudioElement.play()."

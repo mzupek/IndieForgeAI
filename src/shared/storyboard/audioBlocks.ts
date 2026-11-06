@@ -210,7 +210,7 @@ export function validateShotAudioBlock(
   const end = audioBlockEnd(block)
   if (end > shot.durationSec + AUDIO_BLOCK_TIME_EPS && !options?.extendShot) {
     throw new Error(
-      `Audio block ends at t=${end}s but shot duration is ${shot.durationSec}s. Pass --extend-shot to extend the shot (never silent).`
+      `Audio block ends at t=${end}s but shot duration is ${shot.durationSec}s. Pass --extend-shot to extend the shot, or --fit-shot to clamp this block to the current shot end (never silent).`
     )
   }
 
@@ -318,22 +318,118 @@ export function makeAudioBlock(input: {
   }
 }
 
-export function defaultAudioWindow(
-  asset: AudioAsset,
-  shotDurationSec: number,
-  startT: number
-): { sourceInSec: number; sourceOutSec: number; durationSec: number; needsExtend: boolean; end: number } {
-  const sourceInSec = 0
-  const sourceOutSec = asset.durationSec
-  const durationSec = sourceOutSec - sourceInSec
-  const end = startT + durationSec
+export function remainingShotTime(shotDurationSec: number, startT: number): number {
+  return shotDurationSec - startT
+}
+
+export function defaultLoopForAudioKind(kind: AudioAsset['kind']): boolean {
+  return kind === 'music'
+}
+
+/**
+ * Clamp THIS block to the current shot end. Library source is unchanged.
+ * Loop: duration = remaining, source in/out stay the trim (file still loops).
+ * Non-loop: sourceOut and duration shrink to the remaining prefix (1x).
+ * Does not invent a previous shot length.
+ */
+export function fitAudioBlockToShotEnd<
+  T extends Pick<ShotAudioBlock, 't' | 'durationSec' | 'sourceInSec' | 'sourceOutSec' | 'loop'>
+>(block: T, shotDurationSec: number): T {
+  const remaining = remainingShotTime(shotDurationSec, block.t)
+  if (remaining <= AUDIO_BLOCK_TIME_EPS) {
+    throw new Error(
+      `Cannot fit audio: start ${block.t}s is at or after shot duration ${shotDurationSec}s`
+    )
+  }
+  if (audioBlockEnd(block) <= shotDurationSec + AUDIO_BLOCK_TIME_EPS) {
+    return block
+  }
+  if (block.loop) {
+    return { ...block, durationSec: remaining }
+  }
+  return {
+    ...block,
+    sourceOutSec: block.sourceInSec + remaining,
+    durationSec: remaining
+  }
+}
+
+export interface AudioPlacementPlan {
+  sourceInSec: number
+  sourceOutSec: number
+  durationSec: number
+  loop: boolean
+  fitted: boolean
+  needsExtend: boolean
+}
+
+/**
+ * Default placement uses remaining shot time, not the full library file.
+ * Explicit overflowing --duration still requires --extend-shot or --fit-shot.
+ */
+export function planAudioBlockPlacement(input: {
+  asset: AudioAsset
+  shotDurationSec: number
+  t: number
+  sourceInSec?: number
+  sourceOutSec?: number
+  durationSec?: number
+  loop?: boolean
+  fitShot?: boolean
+  extendShot?: boolean
+}): AudioPlacementPlan {
+  if (input.extendShot && input.fitShot) {
+    throw new Error('Use either --fit-shot or --extend-shot, not both')
+  }
+  const remaining = remainingShotTime(input.shotDurationSec, input.t)
+  if (remaining <= AUDIO_BLOCK_TIME_EPS) {
+    throw new Error(
+      `Cannot place audio at t=${input.t}s: shot duration is ${input.shotDurationSec}s (at or after the shot end)`
+    )
+  }
+  const loop = input.loop !== undefined ? input.loop : defaultLoopForAudioKind(input.asset.kind)
+  const sourceInSec = input.sourceInSec !== undefined ? input.sourceInSec : 0
+  let sourceOutSec = input.sourceOutSec !== undefined ? input.sourceOutSec : input.asset.durationSec
+  const trim = sourceOutSec - sourceInSec
+  const durationWasSet = input.durationSec !== undefined
+  let durationSec = durationWasSet ? input.durationSec! : loop ? remaining : trim
+  let fitted = false
+  if (!durationWasSet && loop && Math.abs(remaining - trim) > AUDIO_BLOCK_TIME_EPS) {
+    fitted = true
+  }
+  const overflow = input.t + durationSec > input.shotDurationSec + AUDIO_BLOCK_TIME_EPS
+  if (overflow && (input.fitShot || (!input.extendShot && !durationWasSet))) {
+    const next = fitAudioBlockToShotEnd(
+      { t: input.t, durationSec, sourceInSec, sourceOutSec, loop },
+      input.shotDurationSec
+    )
+    sourceOutSec = next.sourceOutSec
+    durationSec = next.durationSec
+    fitted = true
+  }
   return {
     sourceInSec,
     sourceOutSec,
     durationSec,
-    needsExtend: end > shotDurationSec + AUDIO_BLOCK_TIME_EPS,
-    end
+    loop,
+    fitted,
+    needsExtend: input.t + durationSec > input.shotDurationSec + AUDIO_BLOCK_TIME_EPS
   }
+}
+
+export function defaultAudioWindow(
+  asset: AudioAsset,
+  shotDurationSec: number,
+  startT: number,
+  opts?: { loop?: boolean }
+): AudioPlacementPlan & { end: number } {
+  const plan = planAudioBlockPlacement({
+    asset,
+    shotDurationSec,
+    t: startT,
+    loop: opts?.loop
+  })
+  return { ...plan, end: startT + plan.durationSec }
 }
 
 export function assertReplacementFitsAudioBlocks(

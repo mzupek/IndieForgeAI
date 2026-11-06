@@ -437,6 +437,8 @@ export interface ShotClipBlock {
  * Half-open [t, t+duration). Non-loop 1x duration equals sourceOut-sourceIn.
  * Loop wraps the trim window so authored duration may be longer than trim.
  * Music overlap rejected (one bed). SFX overlap allowed.
+ * Fit-to-shot clamps this block to the current shot end; library media is unchanged.
+ * Shot duration is user-entered (no previous-length history).
  */
 export type AudioBlockRole = 'music' | 'sfx'
 

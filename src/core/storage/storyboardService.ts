@@ -15,29 +15,29 @@ import { validateLayerReferences } from '../../shared/storyboard/layerValidation
 import { validateShotBackgroundReferences } from '../../shared/storyboard/shotBackground'
 import { purgeBindingsForLayers, purgeBindingsForShots } from './eventService'
 import {
-  assertShotDurationFitsTimedKeys,
   findTimedKey,
   flattenShotTimedKeys,
   parseTimedKeyTime,
   validateLayerTimedKey
 } from '../../shared/storyboard/timedKeys'
 import {
-  assertShotDurationFitsClipBlocks,
   clipBlockEnd,
   findClipBlock,
   parseClipTime,
   validateShotClipBlock
 } from '../../shared/storyboard/clipBlocks'
 import {
-  assertShotDurationFitsAudioBlocks,
   audioBlockEnd,
   findAudioBlock,
+  fitAudioBlockToShotEnd,
   parseAudioBool,
   parseAudioRole,
   parseAudioTime,
   parseAudioVolume,
+  planAudioBlockPlacement,
   validateShotAudioBlock
 } from '../../shared/storyboard/audioBlocks'
+import { assertShotDurationFitsContent } from '../../shared/storyboard/shotDuration'
 
 /**
  * Create a new storyboard
@@ -242,29 +242,18 @@ export async function updateShot(
     throw new Error(`Shot not found: ${shotId}`)
   }
 
+  const existingShot = pipeline.storyboardShots[index]
   const nextDuration =
-    updates.durationSec !== undefined
-      ? updates.durationSec
-      : pipeline.storyboardShots[index].durationSec
-  const durationCheckShot = {
-    ...pipeline.storyboardShots[index],
-    layers: updates.layers ?? pipeline.storyboardShots[index].layers
+    updates.durationSec !== undefined ? updates.durationSec : existingShot.durationSec
+  const durationCheckShot: StoryboardShot = {
+    ...existingShot,
+    layers: updates.layers ?? existingShot.layers,
+    clipTrack: updates.clipTrack ?? existingShot.clipTrack,
+    audioTrack: updates.audioTrack ?? existingShot.audioTrack,
+    cameraTrack: updates.cameraTrack ?? existingShot.cameraTrack,
+    effectsTrack: updates.effectsTrack ?? existingShot.effectsTrack
   }
-  assertShotDurationFitsTimedKeys(durationCheckShot, nextDuration)
-  assertShotDurationFitsClipBlocks(
-    {
-      ...durationCheckShot,
-      clipTrack: updates.clipTrack ?? pipeline.storyboardShots[index].clipTrack
-    },
-    nextDuration
-  )
-  assertShotDurationFitsAudioBlocks(
-    {
-      ...durationCheckShot,
-      audioTrack: updates.audioTrack ?? pipeline.storyboardShots[index].audioTrack
-    },
-    nextDuration
-  )
+  assertShotDurationFitsContent(durationCheckShot, nextDuration)
 
   const merged: StoryboardShot = {
     ...pipeline.storyboardShots[index],
@@ -750,9 +739,10 @@ export async function addShotAudioBlock(
     fadeInSec?: number | string
     fadeOutSec?: number | string
     extendShot?: boolean
+    fitShot?: boolean
   },
   dataDirOverride?: string
-): Promise<{ block: ShotAudioBlock; shotDurationSec: number; extended: boolean }> {
+): Promise<{ block: ShotAudioBlock; shotDurationSec: number; extended: boolean; fitted: boolean }> {
   const pipeline = await getAssetPipeline(dataDirOverride)
   const shot = pipeline.storyboardShots.find((s) => s.id === shotId)
   if (!shot) throw new Error(`Shot not found: ${shotId}`)
@@ -762,26 +752,30 @@ export async function addShotAudioBlock(
   if (!asset) throw new Error(`Audio not found: ${input.audioId}`)
 
   const role = parseAudioRole(input.role, asset.kind)
-  const sourceInSec =
-    input.sourceInSec !== undefined ? parseAudioTime(input.sourceInSec, 'source in') : 0
-  const sourceOutSec =
-    input.sourceOutSec !== undefined
-      ? parseAudioTime(input.sourceOutSec, 'source out')
-      : asset.durationSec
-  const loop = parseAudioBool(input.loop, false)
-  const trim = sourceOutSec - sourceInSec
-  const durationSec =
-    input.durationSec !== undefined ? parseAudioTime(input.durationSec, 'duration') : trim
   const t = parseAudioTime(input.t, 'block start')
+  const plan = planAudioBlockPlacement({
+    asset,
+    shotDurationSec: shot.durationSec,
+    t,
+    sourceInSec:
+      input.sourceInSec !== undefined ? parseAudioTime(input.sourceInSec, 'source in') : undefined,
+    sourceOutSec:
+      input.sourceOutSec !== undefined ? parseAudioTime(input.sourceOutSec, 'source out') : undefined,
+    durationSec:
+      input.durationSec !== undefined ? parseAudioTime(input.durationSec, 'duration') : undefined,
+    loop: input.loop === undefined || input.loop === '' ? undefined : parseAudioBool(input.loop, false),
+    fitShot: !!input.fitShot,
+    extendShot: !!input.extendShot
+  })
   const block: ShotAudioBlock = {
     id: randomUUID(),
     audioId: input.audioId,
     role,
     t,
-    durationSec,
-    sourceInSec,
-    sourceOutSec,
-    loop,
+    durationSec: plan.durationSec,
+    sourceInSec: plan.sourceInSec,
+    sourceOutSec: plan.sourceOutSec,
+    loop: plan.loop,
     volume: parseAudioVolume(input.volume, 1),
     fadeInSec: input.fadeInSec !== undefined ? parseAudioTime(input.fadeInSec, 'fade in') : 0,
     fadeOutSec: input.fadeOutSec !== undefined ? parseAudioTime(input.fadeOutSec, 'fade out') : 0,
@@ -799,7 +793,7 @@ export async function addShotAudioBlock(
   shot.audioTrack.sort((a, b) => a.t - b.t || a.id.localeCompare(b.id))
   shot.updatedAt = new Date().toISOString()
   await updateAssetPipeline(pipeline, dataDirOverride)
-  return { block, shotDurationSec: shot.durationSec, extended }
+  return { block, shotDurationSec: shot.durationSec, extended, fitted: plan.fitted && !extended }
 }
 
 export async function listShotAudioBlocks(
@@ -833,12 +827,16 @@ export async function updateShotAudioBlock(
     fadeInSec?: number | string
     fadeOutSec?: number | string
     extendShot?: boolean
+    fitShot?: boolean
   },
   dataDirOverride?: string
-): Promise<{ block: ShotAudioBlock; shotDurationSec: number; extended: boolean }> {
+): Promise<{ block: ShotAudioBlock; shotDurationSec: number; extended: boolean; fitted: boolean }> {
   const pipeline = await getAssetPipeline(dataDirOverride)
   const found = findAudioBlock(pipeline, blockId)
   if (!found) throw new Error(`Audio block not found: ${blockId}`)
+  if (patch.extendShot && patch.fitShot) {
+    throw new Error('Use either --fit-shot or --extend-shot, not both')
+  }
   const sourceInSec =
     patch.sourceInSec !== undefined
       ? parseAudioTime(patch.sourceInSec, 'source in')
@@ -855,7 +853,7 @@ export async function updateShotAudioBlock(
       : loop
         ? found.block.durationSec
         : trim
-  const next: ShotAudioBlock = {
+  let next: ShotAudioBlock = {
     ...found.block,
     t: patch.t !== undefined ? parseAudioTime(patch.t, 'block start') : found.block.t,
     sourceInSec,
@@ -871,6 +869,16 @@ export async function updateShotAudioBlock(
         : found.block.fadeOutSec,
     schemaVersion: 1
   }
+  let fitted = false
+  if (patch.fitShot) {
+    const before = JSON.stringify({
+      durationSec: next.durationSec,
+      sourceOutSec: next.sourceOutSec
+    })
+    next = fitAudioBlockToShotEnd(next, found.shot.durationSec)
+    fitted =
+      JSON.stringify({ durationSec: next.durationSec, sourceOutSec: next.sourceOutSec }) !== before
+  }
   validateShotAudioBlock(next, found.shot, pipeline, found.shot.id, {
     excludeBlockId: blockId,
     extendShot: !!patch.extendShot
@@ -885,7 +893,7 @@ export async function updateShotAudioBlock(
   found.shot.audioTrack.sort((a, b) => a.t - b.t || a.id.localeCompare(b.id))
   found.shot.updatedAt = new Date().toISOString()
   await updateAssetPipeline(pipeline, dataDirOverride)
-  return { block: next, shotDurationSec: found.shot.durationSec, extended }
+  return { block: next, shotDurationSec: found.shot.durationSec, extended, fitted }
 }
 
 export async function removeShotAudioBlock(
