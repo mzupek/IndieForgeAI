@@ -1108,18 +1108,42 @@ export function StoryboardEditor() {
     // Persist marker changes to disk
     if (dragMode === 'marker' as any && draggedMarker) {
       if (draggedMarker.type === 'camera') {
+        // Remember which key we were editing by time (not index, as it may change after sort)
+        const editedKeyTime = selectedShot.cameraTrack[draggedMarker.index]?.t
+        
+        // Sort camera track by time to maintain consistent order
+        const sortedTrack = [...selectedShot.cameraTrack].sort((a, b) => a.t - b.t)
+        
         await window.indieForge.pipeline.updateShot(projectId!, selectedShotId!, { 
-          cameraTrack: selectedShot.cameraTrack 
+          cameraTrack: sortedTrack
         })
+        
+        // Reload to ensure consistency
+        const proj = await window.indieForge.projects.open(projectId!)
+        setActiveProject(proj)
+        
+        // Update selectedCameraIndex to match new sorted position
+        if (editedKeyTime !== undefined) {
+          const newShot = proj.assetPipeline?.storyboardShots?.find(s => s.id === selectedShotId)
+          if (newShot) {
+            const newIndex = newShot.cameraTrack.findIndex(k => Math.abs(k.t - editedKeyTime) < 0.001)
+            if (newIndex >= 0) {
+              setSelectedCameraIndex(newIndex)
+            }
+          }
+        }
       } else {
+        // Sort effects track by time too
+        const sortedTrack = [...selectedShot.effectsTrack].sort((a, b) => a.t - b.t)
+        
         await window.indieForge.pipeline.updateShot(projectId!, selectedShotId!, { 
-          effectsTrack: selectedShot.effectsTrack 
+          effectsTrack: sortedTrack 
         })
+        
+        // Reload to ensure consistency
+        const proj = await window.indieForge.projects.open(projectId!)
+        setActiveProject(proj)
       }
-      
-      // Reload to ensure consistency
-      const proj = await window.indieForge.projects.open(projectId!)
-      setActiveProject(proj)
     }
     
     // Clean up drag state
@@ -1960,8 +1984,79 @@ export function StoryboardEditor() {
               })()}
             </div>
 
-            {/* Timeline */}
+              {/* Timeline & Key Inspector - unified stable area */}
             <div style={{ marginTop: '1rem', padding: '1rem', background: 'var(--bg-secondary)', borderRadius: '8px' }}>
+              
+              {/* Stable Key Inspector Area - always reserved, prevents layout jumping */}
+              {(editingCamera || editingEffect) && (
+                <div style={{ 
+                  marginBottom: '1rem', 
+                  padding: '1rem', 
+                  background: 'var(--bg)', 
+                  borderRadius: '8px',
+                  border: editingCamera ? '2px solid #00AAFF' : '2px solid #FF6B6B',
+                  minHeight: '200px'
+                }}>
+                  {editingCamera && selectedCameraIndex !== null && selectedShot && selectedShot.cameraTrack[selectedCameraIndex] ? (
+                    <>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', paddingBottom: '0.5rem', borderBottom: '1px solid var(--border)' }}>
+                        <h4 style={{ margin: 0, color: '#00AAFF', fontSize: '0.9rem' }}>
+                          📷 Camera Key @ {selectedShot.cameraTrack[selectedCameraIndex].t.toFixed(2)}s
+                        </h4>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingCamera(false)
+                            setSelectedCameraIndex(null)
+                          }}
+                          style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem' }}
+                        >
+                          Close
+                        </button>
+                      </div>
+                      <CameraInspector
+                        keyframe={selectedShot.cameraTrack[selectedCameraIndex]}
+                        layers={selectedShot.layers}
+                        onSave={(updated) => handleUpdateCameraKeyframe(selectedCameraIndex, updated)}
+                        onClose={() => {
+                          setEditingCamera(false)
+                          setSelectedCameraIndex(null)
+                        }}
+                        onDelete={() => handleDeleteCameraKeyframe(selectedCameraIndex)}
+                      />
+                    </>
+                  ) : editingEffect && selectedEffectIndex !== null && selectedShot && selectedShot.effectsTrack[selectedEffectIndex] ? (
+                    <>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', paddingBottom: '0.5rem', borderBottom: '1px solid var(--border)' }}>
+                        <h4 style={{ margin: 0, color: '#FF6B6B', fontSize: '0.9rem' }}>
+                          ⚡ Effect @ {selectedShot.effectsTrack[selectedEffectIndex].t.toFixed(2)}s
+                        </h4>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingEffect(false)
+                            setSelectedEffectIndex(null)
+                          }}
+                          style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem' }}
+                        >
+                          Close
+                        </button>
+                      </div>
+                      <EffectInspector
+                        effect={selectedShot.effectsTrack[selectedEffectIndex]}
+                        presets={presets}
+                        onSave={(updated) => handleUpdateEffectMarker(selectedEffectIndex, updated)}
+                        onClose={() => {
+                          setEditingEffect(false)
+                          setSelectedEffectIndex(null)
+                        }}
+                        onDelete={() => handleDeleteMarker('effect', selectedEffectIndex)}
+                      />
+                    </>
+                  ) : null}
+                </div>
+              )}
+              
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', alignItems: 'center' }}>
                 <span style={{ fontSize: '0.9rem', fontWeight: 'bold' }}>Timeline</span>
                 <div style={{ display: 'flex', gap: '0.5rem', fontSize: '0.85rem', alignItems: 'center' }}>
@@ -2065,10 +2160,13 @@ export function StoryboardEditor() {
                       key={idx}
                       onPointerDown={(e) => {
                         // Don't stopPropagation - let timeline handle dragging
-                        // Just select this marker
+                        // Select this camera marker, clear effect selection
                         setSelectedCameraIndex(idx)
                         setEditingCamera(true)
                         setCameraManuallySelected(true)
+                        // Clear effect selection to show only one inspector
+                        setEditingEffect(false)
+                        setSelectedEffectIndex(null)
                       }}
                       onContextMenu={(e) => {
                         e.preventDefault()
@@ -2103,9 +2201,12 @@ export function StoryboardEditor() {
                       key={idx}
                       onPointerDown={(e) => {
                         // Don't stopPropagation - let timeline handle dragging
-                        // Just select this marker
+                        // Select this effect marker, clear camera selection
                         setSelectedEffectIndex(idx)
                         setEditingEffect(true)
+                        // Clear camera selection to show only one inspector
+                        setEditingCamera(false)
+                        setSelectedCameraIndex(null)
                       }}
                       onContextMenu={(e) => {
                         e.preventDefault()
@@ -2171,32 +2272,6 @@ export function StoryboardEditor() {
                     Cancel
                   </button>
                 </div>
-              )}
-              
-              {editingEffect && selectedEffectIndex !== null && selectedShot && selectedShot.effectsTrack[selectedEffectIndex] && (
-                <EffectInspector
-                  effect={selectedShot.effectsTrack[selectedEffectIndex]}
-                  presets={presets}
-                  onSave={(params) => handleUpdateEffectParams(selectedEffectIndex, params)}
-                  onClose={() => {
-                    setEditingEffect(false)
-                    setSelectedEffectIndex(null)
-                  }}
-                />
-              )}
-              
-              {editingCamera && selectedCameraIndex !== null && selectedShot && selectedShot.cameraTrack[selectedCameraIndex] && (
-                <CameraInspector
-                  keyframe={selectedShot.cameraTrack[selectedCameraIndex]}
-                  layers={selectedShot.layers}
-                  onSave={(updated) => handleUpdateCameraKeyframe(selectedCameraIndex, updated)}
-                  onClose={() => {
-                    setEditingCamera(false)
-                    setSelectedCameraIndex(null)
-                    setCameraManuallySelected(false)
-                  }}
-                  onDelete={() => handleDeleteCameraKeyframe(selectedCameraIndex)}
-                />
               )}
             </div>
 
