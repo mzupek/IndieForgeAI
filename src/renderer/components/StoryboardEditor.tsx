@@ -561,9 +561,12 @@ export function StoryboardEditor() {
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
-    // Clear canvas
+    // Clear canvas completely
+    ctx.save()
+    ctx.setTransform(1, 0, 0, 1, 0, 0)
     ctx.fillStyle = '#1a1a1a'
     ctx.fillRect(0, 0, canvas.width, canvas.height)
+    ctx.restore()
 
     // Draw background image if present (before camera transform)
     if (backgroundImage) {
@@ -1866,12 +1869,29 @@ export function StoryboardEditor() {
                 fontSize: '0.85rem',
                 color: 'var(--text-secondary)'
               }}>
-                💡 <strong>Camera</strong> zooms the whole shot. <strong>Layer Scale</strong> (right panel) sizes each character individually.
+                💡 <strong>Camera mode:</strong> Shows framing preview. Drag timeline or playback to see camera zoom/position change.
                 {selectedShot && selectedShot.cameraTrack.length > 1 && (
                   <div style={{ marginTop: '0.25rem', fontSize: '0.75rem', fontStyle: 'italic' }}>
-                    Camera smoothly interpolates between keys over time. Check timeline markers and live readout below.
+                    Camera smoothly interpolates between keys. Scrub timeline to preview each moment.
                   </div>
                 )}
+                {selectedShot && selectedShot.cameraTrack.length === 0 && (
+                  <div style={{ marginTop: '0.25rem', fontSize: '0.75rem', fontStyle: 'italic' }}>
+                    Add camera keyframes with "+ Camera" button. First key sets the camera position.
+                  </div>
+                )}
+              </div>
+            )}
+            {mode === 'layout' && selectedShot && selectedShot.cameraTrack.length > 0 && (
+              <div style={{ 
+                marginBottom: '0.5rem', 
+                padding: '0.5rem', 
+                background: 'rgba(255, 200, 0, 0.1)', 
+                borderLeft: '3px solid #FFC800',
+                fontSize: '0.85rem',
+                color: 'var(--text-secondary)'
+              }}>
+                💡 Switch to <strong>Camera mode</strong> to preview camera zoom/framing. Layout mode shows unframed view.
               </div>
             )}
 
@@ -1944,12 +1964,26 @@ export function StoryboardEditor() {
             <div style={{ marginTop: '1rem', padding: '1rem', background: 'var(--bg-secondary)', borderRadius: '8px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', alignItems: 'center' }}>
                 <span style={{ fontSize: '0.9rem', fontWeight: 'bold' }}>Timeline</span>
-                <div style={{ display: 'flex', gap: '0.5rem', fontSize: '0.85rem' }}>
-                  {mode === 'camera' && (
-                    <button type="button" onClick={handleAddCameraKeyframe} style={{ fontSize: '0.8rem', padding: '0.25rem 0.5rem' }}>
-                      + Camera @ {playbackTime.toFixed(1)}s
-                    </button>
-                  )}
+                <div style={{ display: 'flex', gap: '0.5rem', fontSize: '0.85rem', alignItems: 'center' }}>
+                  <button 
+                    type="button" 
+                    onClick={() => {
+                      handleAddCameraKeyframe()
+                      if (mode !== 'camera') {
+                        setMode('camera')
+                      }
+                    }} 
+                    style={{ 
+                      fontSize: '0.8rem', 
+                      padding: '0.25rem 0.5rem',
+                      background: mode === 'camera' ? 'var(--forge-gold)' : 'var(--bg-secondary)',
+                      color: mode === 'camera' ? 'var(--bg)' : 'var(--text)',
+                      border: mode === 'camera' ? 'none' : '1px solid var(--border)'
+                    }}
+                    title={mode === 'camera' ? 'Add camera keyframe at current time' : 'Add camera keyframe (switches to Camera mode)'}
+                  >
+                    + Camera @ {playbackTime.toFixed(1)}s
+                  </button>
                   <button type="button" onClick={() => setShowAddEffect(true)} style={{ fontSize: '0.8rem', padding: '0.25rem 0.5rem' }}>
                     + Effect
                   </button>
