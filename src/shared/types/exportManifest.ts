@@ -106,6 +106,10 @@ export interface ExportManifestShot {
   aspectRatio: { width: number; height: number }
   backgroundImage?: string
   backgroundClipId?: string
+  backgroundVisualAssetId?: string
+  backgroundAssetStateId?: string | null
+  /** Resolved studio-relative full-resolution image (not thumbnail, not an external source path). */
+  backgroundFile?: string
   layers: ExportManifestLayer[]
   cameraTrack: ExportManifestCameraKeyframe[]
   effectsTrack: ExportManifestEffectMarker[]

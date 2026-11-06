@@ -303,6 +303,8 @@ The `schemaVersion` field enables backward compatibility:
 
 #### Storyboards Array
 
+Shot backgrounds export `backgroundVisualAssetId` / `backgroundAssetStateId` when the still comes from the Library, plus resolved `backgroundFile` (studio-relative full-resolution image, not a thumbnail and not an orphan external path). Legacy `backgroundImage` remains for direct-imported copies under `backgrounds/`.
+
 The manifest now includes an optional `storyboards` array containing complete shot sequences with:
 
 - **Shot metadata**: Name, duration, aspect ratio, engineer notes

@@ -11,6 +11,7 @@ import type {
 } from '@shared/types/assetPipeline'
 import { getAssetPipeline, updateAssetPipeline } from './studioStorage'
 import { validateLayerReferences } from '../../shared/storyboard/layerValidation'
+import { validateShotBackgroundReferences } from '../../shared/storyboard/shotBackground'
 import { purgeBindingsForLayers, purgeBindingsForShots } from './eventService'
 import {
   assertShotDurationFitsTimedKeys,
@@ -188,24 +189,37 @@ export async function getShot(
 /**
  * Update shot
  */
+const SHOT_CLEARABLE_KEYS = [
+  'backgroundImage',
+  'backgroundClipId',
+  'backgroundVisualAssetId',
+  'backgroundAssetStateId'
+] as const
+
+type ShotPatch = Partial<
+  Pick<
+    StoryboardShot,
+    | 'name'
+    | 'durationSec'
+    | 'aspectRatio'
+    | 'layers'
+    | 'cameraTrack'
+    | 'effectsTrack'
+    | 'clipTrack'
+    | 'notes'
+    | 'thumbnail'
+    | 'stageTreatment'
+  >
+> & {
+  backgroundImage?: string | null
+  backgroundClipId?: string | null
+  backgroundVisualAssetId?: string | null
+  backgroundAssetStateId?: string | null
+}
+
 export async function updateShot(
   shotId: string,
-  updates: Partial<
-    Pick<
-      StoryboardShot,
-      | 'name'
-      | 'durationSec'
-      | 'aspectRatio'
-      | 'backgroundImage'
-      | 'backgroundClipId'
-      | 'layers'
-      | 'cameraTrack'
-      | 'effectsTrack'
-      | 'clipTrack'
-      | 'notes'
-      | 'thumbnail'
-    >
-  >,
+  updates: ShotPatch,
   dataDirOverride?: string
 ): Promise<StoryboardShot> {
   const pipeline = await getAssetPipeline(dataDirOverride)
@@ -231,12 +245,28 @@ export async function updateShot(
     },
     nextDuration
   )
-  
-  pipeline.storyboardShots[index] = {
+
+  const merged: StoryboardShot = {
     ...pipeline.storyboardShots[index],
     ...updates,
     updatedAt: new Date().toISOString()
   }
+  // IPC structured-clone drops `undefined`; callers send `null` to clear.
+  for (const key of SHOT_CLEARABLE_KEYS) {
+    if (key in updates && (updates as Record<string, unknown>)[key] == null) {
+      delete merged[key]
+    }
+  }
+
+  if (
+    'backgroundImage' in updates ||
+    'backgroundVisualAssetId' in updates ||
+    'backgroundAssetStateId' in updates
+  ) {
+    validateShotBackgroundReferences(merged, pipeline)
+  }
+  
+  pipeline.storyboardShots[index] = merged
   
   await updateAssetPipeline(pipeline, dataDirOverride)
   return pipeline.storyboardShots[index]

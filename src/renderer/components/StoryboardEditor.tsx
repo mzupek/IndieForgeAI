@@ -43,6 +43,8 @@ import {
   DEFAULT_FONT_REF,
   DEFAULT_PALETTE_REF
 } from '@shared/storyboard/layerValidation'
+import { resolveShotBackgroundImagePath } from '@shared/storyboard/shotBackground'
+import { ShotBackgroundPicker } from './ShotBackgroundPicker'
 import {
   describeLayerLabel,
   getLayerPixelSize,
@@ -452,6 +454,7 @@ export function StoryboardEditor() {
   const [addTextFont, setAddTextFont] = useState(DEFAULT_FONT_REF)
   const [addTextPalette, setAddTextPalette] = useState(DEFAULT_PALETTE_REF)
   const [layerError, setLayerError] = useState<string | null>(null)
+  const [backgroundError, setBackgroundError] = useState<string | null>(null)
   const [confirmDeleteLayer, setConfirmDeleteLayer] = useState(false)
   const [selectedTimedKeyId, setSelectedTimedKeyId] = useState<string | null>(null)
   const [confirmDeleteTimedKeyId, setConfirmDeleteTimedKeyId] = useState<string | null>(null)
@@ -494,6 +497,10 @@ export function StoryboardEditor() {
   
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const animationFrameRef = useRef<number | null>(null)
+  const selectedShotIdRef = useRef(selectedShotId)
+  const gameIdRef = useRef(gameId)
+  selectedShotIdRef.current = selectedShotId
+  gameIdRef.current = gameId
 
   const storyboards = activeProject?.assetPipeline?.storyboards?.filter(sb => sb.gameId === gameId) ?? []
   const selectedStoryboard = storyboards.find(sb => sb.id === selectedStoryboardId)
@@ -577,32 +584,67 @@ export function StoryboardEditor() {
     }
   }, [selectedShot, editingNotes])
 
-  // Load background image
+  // Load background image (Library full-res path or legacy/direct-import path)
   useEffect(() => {
-    if (!selectedShot?.backgroundImage) {
+    let cancelled = false
+    if (!selectedShot) {
       setBackgroundImage(null)
       return
     }
 
+    const resolved = pipeline
+      ? resolveShotBackgroundImagePath(selectedShot, pipeline)
+      : selectedShot.backgroundImage
+        ? { path: selectedShot.backgroundImage }
+        : {}
+
+    if (resolved.error) {
+      setBackgroundError(resolved.error)
+    } else {
+      setBackgroundError(null)
+    }
+
+    if (!resolved.path) {
+      setBackgroundImage(null)
+      return
+    }
+
+    const path = resolved.path
     const loadBg = async () => {
       try {
-        const { localUrl } = await window.indieForge.files.getLocalUrl(selectedShot.backgroundImage!)
+        const { localUrl } = await window.indieForge.files.getLocalUrl(path)
+        if (cancelled) return
         const img = new Image()
         img.onload = () => {
+          if (cancelled) return
           setBackgroundImage({ element: img, url: localUrl, width: img.width, height: img.height })
         }
         img.onerror = () => {
-          console.error('Failed to load background image:', selectedShot.backgroundImage)
+          if (cancelled) return
+          console.error('Failed to load background image:', path)
           setBackgroundImage(null)
+          setBackgroundError('Failed to load background image')
         }
         img.src = localUrl
       } catch (err) {
+        if (cancelled) return
         console.error('Error loading background image:', err)
         setBackgroundImage(null)
+        setBackgroundError(err instanceof Error ? err.message : 'Failed to load background image')
       }
     }
-    loadBg()
-  }, [selectedShot?.backgroundImage])
+    void loadBg()
+    return () => {
+      cancelled = true
+    }
+  }, [
+    selectedShot?.id,
+    selectedShot?.backgroundImage,
+    selectedShot?.backgroundVisualAssetId,
+    selectedShot?.backgroundAssetStateId,
+    pipeline,
+    gameId
+  ])
 
   // Keep preview engine catalog in sync; never persist preview holds
   useEffect(() => {
@@ -1921,6 +1963,70 @@ export function StoryboardEditor() {
     } catch (err) {
       setLayerError(err instanceof Error ? err.message : 'Failed to add character layer')
     }
+  }
+
+  const applyShotBackgroundUpdate = async (
+    shotId: string,
+    game: string,
+    updates: Record<string, unknown>
+  ) => {
+    if (!projectId) return
+    try {
+      setBackgroundError(null)
+      const updated = await window.indieForge.pipeline.updateShot(projectId, shotId, updates)
+      if (selectedShotIdRef.current !== shotId || gameIdRef.current !== game) return
+      setActiveProject(updated)
+    } catch (err) {
+      if (selectedShotIdRef.current !== shotId || gameIdRef.current !== game) return
+      setBackgroundError(err instanceof Error ? err.message : 'Failed to update background')
+    }
+  }
+
+  const handleSelectLibraryBackground = async (assetId: string, stateId: string | null) => {
+    if (!selectedShotId) return
+    await applyShotBackgroundUpdate(selectedShotId, gameId, {
+      backgroundVisualAssetId: assetId,
+      backgroundAssetStateId: stateId,
+      backgroundImage: null
+    })
+  }
+
+  const handleChangeLibraryBackgroundState = async (stateId: string | null) => {
+    if (!selectedShotId) return
+    await applyShotBackgroundUpdate(selectedShotId, gameId, {
+      backgroundAssetStateId: stateId
+    })
+  }
+
+  const handleImportBackgroundImage = async () => {
+    const shotId = selectedShotId
+    const game = gameId
+    if (!shotId || !projectId) return
+    try {
+      setBackgroundError(null)
+      const { filePath } = await window.indieForge.files.chooseImage()
+      if (!filePath) return
+      if (selectedShotIdRef.current !== shotId || gameIdRef.current !== game) return
+      const updated = await window.indieForge.pipeline.updateShot(projectId, shotId, {
+        backgroundImage: filePath,
+        backgroundVisualAssetId: null,
+        backgroundAssetStateId: null
+      })
+      if (selectedShotIdRef.current !== shotId || gameIdRef.current !== game) return
+      setActiveProject(updated)
+    } catch (err) {
+      if (selectedShotIdRef.current !== shotId || gameIdRef.current !== game) return
+      setBackgroundError(err instanceof Error ? err.message : 'Failed to import background image')
+    }
+  }
+
+  const handleClearBackgroundImage = async () => {
+    if (!selectedShotId) return
+    await applyShotBackgroundUpdate(selectedShotId, gameId, {
+      backgroundImage: null,
+      backgroundVisualAssetId: null,
+      backgroundAssetStateId: null
+    })
   }
 
   const handleAddAssetLayer = async () => {
@@ -3581,47 +3687,17 @@ export function StoryboardEditor() {
                 <div style={{ marginBottom: '1.5rem', paddingBottom: '1rem', borderBottom: '1px solid var(--border)' }}>
                   <h3 style={{ fontSize: '1rem', margin: '0 0 0.75rem 0' }}>Background</h3>
             
-            {/* Background Image */}
-            <div style={{ marginBottom: '0.75rem' }}>
-              <div style={{ fontSize: '0.85rem', marginBottom: '0.25rem', fontWeight: 'bold' }}>Image:</div>
-              {selectedShot.backgroundImage ? (
-                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                  <div style={{ flex: 1, fontSize: '0.75rem', padding: '0.5rem', background: 'var(--bg-secondary)', borderRadius: '4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {selectedShot.backgroundImage.split('/').pop()}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      await window.indieForge.pipeline.updateShot(projectId!, selectedShotId!, { backgroundImage: undefined })
-                      const updated = await window.indieForge.projects.open(projectId!)
-                      setActiveProject(updated)
-                    }}
-                    style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem', background: 'var(--danger)', color: 'white' }}
-                  >
-                    Clear
-                  </button>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={async () => {
-                    const paths = await window.indieForge.dialog.openFile({ 
-                      filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp'] }],
-                      properties: ['openFile']
-                    })
-                    if (paths && paths.length > 0) {
-                      // Pass absolute path; updateShot will copy it into studio storage
-                      await window.indieForge.pipeline.updateShot(projectId!, selectedShotId!, { backgroundImage: paths[0] })
-                      const updated = await window.indieForge.projects.open(projectId!)
-                      setActiveProject(updated)
-                    }
-                  }}
-                  style={{ width: '100%', fontSize: '0.85rem', padding: '0.4rem' }}
-                >
-                  + Import Image
-                </button>
-              )}
-            </div>
+            <ShotBackgroundPicker
+              gameId={gameId}
+              shot={selectedShot}
+              visualAssets={visualAssets}
+              assetStates={assetStates}
+              error={backgroundError}
+              onSelectLibrary={handleSelectLibraryBackground}
+              onChangeState={handleChangeLibraryBackgroundState}
+              onImport={handleImportBackgroundImage}
+              onClear={handleClearBackgroundImage}
+            />
 
             {/* Background Clip */}
             <div>
@@ -3630,7 +3706,7 @@ export function StoryboardEditor() {
                 value={selectedShot.backgroundClipId || ''}
                 onChange={async (e) => {
                   const clipId = e.target.value || undefined
-                  await window.indieForge.pipeline.updateShot(projectId!, selectedShotId!, { backgroundClipId: clipId })
+                  await window.indieForge.pipeline.updateShot(projectId!, selectedShotId!, { backgroundClipId: clipId || null })
                   const updated = await window.indieForge.projects.open(projectId!)
                   setActiveProject(updated)
                 }}
@@ -3654,7 +3730,7 @@ export function StoryboardEditor() {
               <div style={{ fontSize: '0.7rem', marginTop: '0.25rem', color: 'var(--muted)', fontStyle: 'italic' }}>
                 Dropdown sets legacy backgroundClipId (implicit play from 0, never extends the shot).
                 Timed placement lives on the Clips timeline track. An explicit background block replaces implicit playback.
-                {selectedShot.backgroundImage && selectedShot.backgroundClipId ? ' Clip draws over the static image while the block is active.' : ''}
+                {(selectedShot.backgroundImage || selectedShot.backgroundVisualAssetId) && selectedShot.backgroundClipId ? ' Clip draws over the static image while the block is active.' : ''}
               </div>
             </div>
             

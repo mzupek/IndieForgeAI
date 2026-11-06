@@ -345,6 +345,10 @@ export function collectAssetLayerUsage(
         labels.push(`${shot.name}/${layer.id}`)
       }
     }
+    if (shot.backgroundVisualAssetId === assetId) {
+      if (!shotIds.includes(shot.id)) shotIds.push(shot.id)
+      labels.push(`${shot.name} background`)
+    }
   }
   return { layerIds, shotIds, labels }
 }
@@ -363,6 +367,10 @@ export function collectAssetStateLayerUsage(
         if (!shotIds.includes(shot.id)) shotIds.push(shot.id)
         labels.push(`${shot.name}/${layer.id}`)
       }
+    }
+    if (shot.backgroundAssetStateId === stateId) {
+      if (!shotIds.includes(shot.id)) shotIds.push(shot.id)
+      labels.push(`${shot.name} background`)
     }
   }
   return { layerIds, shotIds, labels }

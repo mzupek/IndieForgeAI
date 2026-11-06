@@ -462,6 +462,13 @@ export interface StoryboardShot {
   /** Optional background */
   backgroundImage?: string
   backgroundClipId?: string
+  /**
+   * Library visual asset used as the static shot background (selected Game).
+   * Full-resolution `asset.image` / default or explicit `state.file` — not thumbnail.
+   */
+  backgroundVisualAssetId?: string
+  /** Explicit AssetState for `backgroundVisualAssetId`. Omit/null = default or static image. */
+  backgroundAssetStateId?: string | null
   
   /** Stage treatment effects applied to background only (Phase C.1) */
   stageTreatment?: {

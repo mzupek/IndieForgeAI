@@ -44,8 +44,7 @@ import {
 import { simulateEventFire } from '../../shared/storyboard/eventPreview'
 import { getAssetPipeline } from '../../core/storage/studioStorage'
 import { getDataDir } from '../../core/storage/dataDir'
-import { copyFile, mkdir } from 'fs/promises'
-import { join, basename } from 'path'
+import { importDirectShotBackground } from '../../core/storage/shotBackgroundMedia'
 
 export function registerStoryboardCommands(program: Command): void {
   const storyboardCmd = program
@@ -232,9 +231,12 @@ export function registerStoryboardCommands(program: Command): void {
     .option('--name <name>', 'New name')
     .option('--duration <seconds>', 'Duration in seconds')
     .option('--notes <text>', 'Notes for engineer')
-    .option('--background-image <path>', 'Background image path (forge-file:// or absolute)')
+    .option('--background-image <path>', 'Direct-import image (copied into studio backgrounds/; not an external path)')
+    .option('--background-asset <id>', 'Library visual asset id (selected Game; full image, not thumbnail)')
+    .option('--background-state <id>', 'Asset state id for --background-asset (omit for default/static)')
     .option('--background-clip <clipId>', 'Background clip ID')
-    .option('--clear-background', 'Clear both background image and clip')
+    .option('--clear-background-image', 'Clear static/library background image only (clip unchanged)')
+    .option('--clear-background', 'Clear background image, library asset ref, and clip')
     .option('--bg-dim <value>', 'Background dim (0-1): darken background only')
     .option('--vignette <value>', 'Vignette strength (0-1): radial darkening')
     .option('--clear-stage-treatment', 'Clear all stage treatment effects')
@@ -246,26 +248,39 @@ export function registerStoryboardCommands(program: Command): void {
         if (options.duration) updates.durationSec = parseFloat(options.duration)
         if (options.notes) updates.notes = options.notes
         
-        // Handle background image: copy into studio storage
-        if (options.backgroundImage !== undefined) {
-          const sourcePath = options.backgroundImage
-          const backgroundsDir = join(getDataDir(mergedOpts.dataDir), 'backgrounds')
-          await mkdir(backgroundsDir, { recursive: true })
-          
-          const filename = `${Date.now()}-${basename(sourcePath)}`
-          const destPath = join(backgroundsDir, filename)
-          
-          await copyFile(sourcePath, destPath)
-          
-          // Store relative path that protocol handler can serve
-          updates.backgroundImage = `backgrounds/${filename}`
-          console.log(`Copied background to studio: ${destPath}`)
+        if (options.backgroundImage && options.backgroundAsset) {
+          throw new Error('Use either --background-image or --background-asset, not both')
         }
-        
+
+        // Direct import: copy into studio storage (stable relative path, not the source)
+        if (options.backgroundImage !== undefined) {
+          updates.backgroundImage = await importDirectShotBackground(
+            options.backgroundImage,
+            getDataDir(mergedOpts.dataDir)
+          )
+          updates.backgroundVisualAssetId = null
+          updates.backgroundAssetStateId = null
+        }
+
+        if (options.backgroundAsset !== undefined) {
+          updates.backgroundVisualAssetId = options.backgroundAsset
+          updates.backgroundAssetStateId = options.backgroundState || null
+          updates.backgroundImage = null
+        } else if (options.backgroundState !== undefined) {
+          updates.backgroundAssetStateId = options.backgroundState
+        }
+
         if (options.backgroundClip !== undefined) updates.backgroundClipId = options.backgroundClip
+        if (options.clearBackgroundImage) {
+          updates.backgroundImage = null
+          updates.backgroundVisualAssetId = null
+          updates.backgroundAssetStateId = null
+        }
         if (options.clearBackground) {
-          updates.backgroundImage = undefined
-          updates.backgroundClipId = undefined
+          updates.backgroundImage = null
+          updates.backgroundVisualAssetId = null
+          updates.backgroundAssetStateId = null
+          updates.backgroundClipId = null
         }
         
         // Stage treatment (Phase C.1)

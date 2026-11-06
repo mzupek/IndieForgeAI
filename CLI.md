@@ -1053,8 +1053,15 @@ forge shot update \
   --name "Updated shot name" \
   --duration 4.0 \
   --notes "Engineer notes here" \
+  [--background-asset <visualAssetId> [--background-state <stateId>]] \
+  [--background-image <path>] \
+  [--background-clip <clipId>] \
+  [--clear-background-image] \
+  [--clear-background] \
   [--json]
 ```
+
+Static shot background is a **Library visual asset** on the shot's Game (`--background-asset`, optional `--background-state` for an explicit state; omit state for default/static). Canvas uses the full-resolution `asset.image` or `state.file`, not the thumbnail. `--background-image` is the secondary direct import: the file is copied into studio `backgrounds/` and the shot stores that relative path, not the original external source. `--clear-background-image` clears the static/library image only (clip unchanged). `--clear-background` also clears the clip. Image and clip can coexist (clip draws over the still while a background clip block is active).
 
 ### Remove Shot
 

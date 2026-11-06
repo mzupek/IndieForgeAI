@@ -1,7 +1,7 @@
 import { copyFile, mkdir, readFile } from 'fs/promises'
 import { existsSync } from 'fs'
 import { basename, join } from 'path'
-import { app, dialog, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { IPC_CHANNELS } from '@shared/ipc'
 import type {
   CreateAssetDraft,
@@ -118,6 +118,7 @@ import {
   updateAssetState,
   deleteAssetState
 } from '../../core/storage/studioStorage'
+import { importDirectShotBackground, isAbsoluteFilesystemPath } from '../../core/storage/shotBackgroundMedia'
 import {
   createBinding,
   createEvent,
@@ -481,10 +482,14 @@ export function registerIpcHandlers(): void {
   )
 
   ipcMain.handle(IPC_CHANNELS.FILES_CHOOSE_IMAGE, async () => {
-    const result = await dialog.showOpenDialog({
-      properties: ['openFile'],
+    const opts = {
+      properties: ['openFile' as const],
       filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp'] }]
-    })
+    }
+    const win = BrowserWindow.getFocusedWindow()
+    const result = win
+      ? await dialog.showOpenDialog(win, opts)
+      : await dialog.showOpenDialog(opts)
     return { filePath: result.canceled ? null : (result.filePaths[0] ?? null) }
   })
 
@@ -887,38 +892,13 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.SHOT_UPDATE,
     async (_e, projectId: string, shotId: string, updates: any) => {
-      // Handle background image copy if it's an absolute path outside dataDir
       if (updates.backgroundImage && typeof updates.backgroundImage === 'string') {
         const bgPath = updates.backgroundImage
-        
-        // If it's an absolute path (not already a relative studio path), copy it
-        if (bgPath.startsWith('/') || /^[A-Za-z]:/.test(bgPath)) {
-          try {
-            const { getDataDir } = await import('../../core/storage/dataDir')
-            const dataDir = getDataDir()
-            const backgroundsDir = join(dataDir, 'backgrounds')
-            
-            await mkdir(backgroundsDir, { recursive: true })
-            
-            const filename = `${Date.now()}-${basename(bgPath)}`
-            const destPath = join(backgroundsDir, filename)
-            
-            if (existsSync(bgPath)) {
-              await copyFile(bgPath, destPath)
-              console.log(`Copied background from ${bgPath} to ${destPath}`)
-              
-              // Store as relative path within dataDir: backgrounds/filename
-              updates.backgroundImage = `backgrounds/${filename}`
-            } else {
-              console.warn(`Background image not found: ${bgPath}, storing path as-is`)
-            }
-          } catch (err) {
-            console.error('Failed to copy background image:', err)
-            // Continue with original path if copy fails
-          }
+        if (isAbsoluteFilesystemPath(bgPath)) {
+          updates.backgroundImage = await importDirectShotBackground(bgPath)
         }
       }
-      
+
       await updateShot(shotId, updates)
       return await loadProject(projectId)
     }

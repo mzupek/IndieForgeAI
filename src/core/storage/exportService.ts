@@ -13,6 +13,8 @@ import type {
 } from '@shared/types/exportManifest'
 import { EXPORT_MANIFEST_SCHEMA_VERSION } from '@shared/types/exportManifest'
 import { getAssetPipeline, saveStudio, updateAssetPipeline } from './studioStorage'
+import { getDataDir } from './dataDir'
+import { resolveShotBackgroundImagePath } from '../../shared/storyboard/shotBackground'
 import type { Game } from '@shared/types/assetPipeline'
 import { generateStoryboardThumbnails } from '../export/storyboardThumbnails'
 import { homedir } from 'os'
@@ -313,6 +315,19 @@ async function generateManifest(
           }
         })
         
+        const bgResolved = resolveShotBackgroundImagePath(shot, pipeline)
+        let backgroundFile: string | undefined
+        if (bgResolved.path) {
+          const dataDir = getDataDir(dataDirOverride)
+          const normalized = bgResolved.path.replace(/\\/g, '/')
+          const dataPrefix = dataDir.replace(/\\/g, '/')
+          if (normalized.startsWith(dataPrefix)) {
+            backgroundFile = normalized.slice(dataPrefix.length).replace(/^[/\\]+/, '')
+          } else {
+            backgroundFile = shot.backgroundImage || normalized
+          }
+        }
+
         return {
           id: shot.id,
           name: shot.name,
@@ -320,6 +335,9 @@ async function generateManifest(
           aspectRatio: shot.aspectRatio,
           backgroundImage: shot.backgroundImage,
           backgroundClipId: shot.backgroundClipId,
+          backgroundVisualAssetId: shot.backgroundVisualAssetId,
+          backgroundAssetStateId: shot.backgroundAssetStateId,
+          backgroundFile,
           layers,
           cameraTrack: shot.cameraTrack,
           effectsTrack: shot.effectsTrack,
