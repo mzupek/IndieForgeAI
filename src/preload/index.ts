@@ -205,6 +205,16 @@ const api: IndieForgeAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.SHOT_CLIP_UPDATE, projectId, blockId, updates),
     deleteShotClipBlock: (projectId, blockId) =>
       ipcRenderer.invoke(IPC_CHANNELS.SHOT_CLIP_DELETE, projectId, blockId),
+    addShotAudioBlock: (projectId, shotId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_AUDIO_ADD, projectId, shotId, input),
+    listShotAudioBlocks: (shotId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_AUDIO_LIST, shotId),
+    getShotAudioBlock: (blockId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_AUDIO_GET, blockId),
+    updateShotAudioBlock: (projectId, blockId, updates) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_AUDIO_UPDATE, projectId, blockId, updates),
+    deleteShotAudioBlock: (projectId, blockId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_AUDIO_DELETE, projectId, blockId),
     createScene: (gameId, input) =>
       ipcRenderer.invoke(IPC_CHANNELS.SCENE_CREATE, gameId, input),
     getScene: (sceneId) =>

@@ -592,6 +592,41 @@ export interface IndieForgeAPI {
       updates: { t?: number; sourceInSec?: number; sourceOutSec?: number; extendShot?: boolean }
     ) => Promise<any>
     deleteShotClipBlock: (projectId: string, blockId: string) => Promise<any>
+    addShotAudioBlock: (
+      projectId: string,
+      shotId: string,
+      input: {
+        audioId: string
+        role?: 'music' | 'sfx'
+        t: number
+        sourceInSec?: number
+        sourceOutSec?: number
+        durationSec?: number
+        loop?: boolean
+        volume?: number
+        fadeInSec?: number
+        fadeOutSec?: number
+        extendShot?: boolean
+      }
+    ) => Promise<any>
+    listShotAudioBlocks: (shotId: string) => Promise<any[]>
+    getShotAudioBlock: (blockId: string) => Promise<any>
+    updateShotAudioBlock: (
+      projectId: string,
+      blockId: string,
+      updates: {
+        t?: number
+        sourceInSec?: number
+        sourceOutSec?: number
+        durationSec?: number
+        loop?: boolean
+        volume?: number
+        fadeInSec?: number
+        fadeOutSec?: number
+        extendShot?: boolean
+      }
+    ) => Promise<any>
+    deleteShotAudioBlock: (projectId: string, blockId: string) => Promise<any>
     createScene: (gameId: string, input: any) => Promise<any>
     getScene: (sceneId: string) => Promise<any | undefined>
     listScenes: (gameId: string) => Promise<any[]>

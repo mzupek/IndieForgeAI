@@ -20,6 +20,7 @@ import {
   parseAudioKind,
   unsupportedAudioMediaMessage
 } from '../../shared/storyboard/audioValidation'
+import { assertReplacementFitsAudioBlocks } from '../../shared/storyboard/audioBlocks'
 
 if (ffmpegPath) {
   ffmpeg.setFfmpegPath(ffmpegPath)
@@ -178,23 +179,13 @@ export async function updateAudio(
 
   if (patch.file) {
     await assertReadableAudioFile(patch.file)
+    durationSec = await getAudioDuration(patch.file)
+    assertReplacementFitsAudioBlocks(pipeline, audioId, durationSec)
     const ext = extname(patch.file).toLowerCase()
     const destDir = join(getAudioDir(options.dataDirOverride), existing.id)
     await mkdir(destDir, { recursive: true })
     const destPath = join(destDir, `audio${ext}`)
     await copyFile(patch.file, destPath)
-    try {
-      durationSec = await getAudioDuration(destPath)
-    } catch (err) {
-      if (destPath !== existing.file) {
-        try {
-          await unlink(destPath)
-        } catch {
-          /* ignore */
-        }
-      }
-      throw err
-    }
     file = destPath
   }
 

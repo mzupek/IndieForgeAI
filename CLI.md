@@ -1141,7 +1141,24 @@ forge shot clip sample --shot <shotId> --time 0.8 [--json]
 
 `sample` prints active blocks (including implicit) at the playhead. It is preview-only and never persisted. Reverse seek and loop wrap are the same function of time: loop to `t=0` hides a block that starts later.
 
-Preview in Storyboard uses `forge-file://` video elements driven by `currentTime` from the playhead (paused; not `video.play()`), so scrubbing backwards is deterministic. Unsupported or missing media is shown as an error; it is not promised.
+Preview in Storyboard uses `forge-file://` video elements driven by `currentTime` from the playhead (paused; not `video.play()`), so scrubbing backwards is deterministic. Unsupported or missing media is shown as an error; it is not promised. Clip video stays muted; there is no clip soundtrack option.
+
+### Timed audio blocks (A2)
+
+Audio blocks are **range bars** on `shot.audioTrack`. Role is `music` or `sfx` and must match the library asset kind. Half-open `[t, t+duration)`: **silence outside the bar**. Non-loop 1x `durationSec` equals `sourceOutSec - sourceInSec`. `--loop` wraps the trim window so authored duration may be longer than trim. Music overlap is rejected (one bed). SFX overlap is allowed. Overflow past shot duration requires `--extend-shot` (never silent). Shrinking the shot is rejected while a block would be cut.
+
+Storyboard playback uses `HTMLAudioElement.play()` / `pause()` synced to the master transport. **Paused `currentTime` seeks do not play sound.** Reverse scrub and pause position silently. Clip video remains muted. No cross-shot bus. Event SFX is A3 (not this command).
+
+```bash
+forge shot audio add --shot <shotId> --audio <audioId> --time 0.5 [--role music|sfx] [--source-in 0] [--source-out 1.2] [--duration 2] [--loop] [--volume 1] [--fade-in 0] [--fade-out 0] [--extend-shot] [--json]
+forge shot audio list --shot <shotId> [--json]
+forge shot audio show --id <blockId> [--json]
+forge shot audio update --id <blockId> [--time 1.0] [--source-in 0.2] [--source-out 1.0] [--duration 2] [--loop true|false] [--volume 0.8] [--fade-in 0.1] [--fade-out 0.1] [--extend-shot] [--json]
+forge shot audio remove --id <blockId> [--json]
+forge shot audio sample --shot <shotId> --time 0.8 [--json]
+```
+
+`sample` prints active blocks, source time, and fade gain. It is preview-only and never persisted.
 
 ---
 

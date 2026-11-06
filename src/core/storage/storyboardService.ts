@@ -7,7 +7,8 @@ import type {
   EffectMarker,
   LayerTimedKey,
   LayerTimedKeyAction,
-  ShotClipBlock
+  ShotClipBlock,
+  ShotAudioBlock
 } from '@shared/types/assetPipeline'
 import { getAssetPipeline, updateAssetPipeline } from './studioStorage'
 import { validateLayerReferences } from '../../shared/storyboard/layerValidation'
@@ -27,6 +28,16 @@ import {
   parseClipTime,
   validateShotClipBlock
 } from '../../shared/storyboard/clipBlocks'
+import {
+  assertShotDurationFitsAudioBlocks,
+  audioBlockEnd,
+  findAudioBlock,
+  parseAudioBool,
+  parseAudioRole,
+  parseAudioTime,
+  parseAudioVolume,
+  validateShotAudioBlock
+} from '../../shared/storyboard/audioBlocks'
 
 /**
  * Create a new storyboard
@@ -161,6 +172,7 @@ export async function createShot(
     cameraTrack: [],
     effectsTrack: [],
     clipTrack: [],
+    audioTrack: [],
     notes: input.notes,
     createdAt: now,
     updatedAt: now
@@ -206,6 +218,7 @@ type ShotPatch = Partial<
     | 'cameraTrack'
     | 'effectsTrack'
     | 'clipTrack'
+    | 'audioTrack'
     | 'notes'
     | 'thumbnail'
     | 'stageTreatment'
@@ -242,6 +255,13 @@ export async function updateShot(
     {
       ...durationCheckShot,
       clipTrack: updates.clipTrack ?? pipeline.storyboardShots[index].clipTrack
+    },
+    nextDuration
+  )
+  assertShotDurationFitsAudioBlocks(
+    {
+      ...durationCheckShot,
+      audioTrack: updates.audioTrack ?? pipeline.storyboardShots[index].audioTrack
     },
     nextDuration
   )
@@ -712,6 +732,170 @@ export async function removeShotClipBlock(
   const found = findClipBlock(pipeline, blockId)
   if (!found) throw new Error(`Clip block not found: ${blockId}`)
   found.shot.clipTrack = (found.shot.clipTrack || []).filter((b) => b.id !== blockId)
+  found.shot.updatedAt = new Date().toISOString()
+  await updateAssetPipeline(pipeline, dataDirOverride)
+}
+
+export async function addShotAudioBlock(
+  shotId: string,
+  input: {
+    audioId: string
+    role?: string
+    t: number | string
+    sourceInSec?: number | string
+    sourceOutSec?: number | string
+    durationSec?: number | string
+    loop?: boolean | string
+    volume?: number | string
+    fadeInSec?: number | string
+    fadeOutSec?: number | string
+    extendShot?: boolean
+  },
+  dataDirOverride?: string
+): Promise<{ block: ShotAudioBlock; shotDurationSec: number; extended: boolean }> {
+  const pipeline = await getAssetPipeline(dataDirOverride)
+  const shot = pipeline.storyboardShots.find((s) => s.id === shotId)
+  if (!shot) throw new Error(`Shot not found: ${shotId}`)
+  if (!shot.audioTrack) shot.audioTrack = []
+
+  const asset = (pipeline.audioAssets || []).find((a) => a.id === input.audioId)
+  if (!asset) throw new Error(`Audio not found: ${input.audioId}`)
+
+  const role = parseAudioRole(input.role, asset.kind)
+  const sourceInSec =
+    input.sourceInSec !== undefined ? parseAudioTime(input.sourceInSec, 'source in') : 0
+  const sourceOutSec =
+    input.sourceOutSec !== undefined
+      ? parseAudioTime(input.sourceOutSec, 'source out')
+      : asset.durationSec
+  const loop = parseAudioBool(input.loop, false)
+  const trim = sourceOutSec - sourceInSec
+  const durationSec =
+    input.durationSec !== undefined ? parseAudioTime(input.durationSec, 'duration') : trim
+  const t = parseAudioTime(input.t, 'block start')
+  const block: ShotAudioBlock = {
+    id: randomUUID(),
+    audioId: input.audioId,
+    role,
+    t,
+    durationSec,
+    sourceInSec,
+    sourceOutSec,
+    loop,
+    volume: parseAudioVolume(input.volume, 1),
+    fadeInSec: input.fadeInSec !== undefined ? parseAudioTime(input.fadeInSec, 'fade in') : 0,
+    fadeOutSec: input.fadeOutSec !== undefined ? parseAudioTime(input.fadeOutSec, 'fade out') : 0,
+    schemaVersion: 1
+  }
+
+  validateShotAudioBlock(block, shot, pipeline, shotId, { extendShot: !!input.extendShot })
+  const end = audioBlockEnd(block)
+  let extended = false
+  if (input.extendShot && end > shot.durationSec) {
+    shot.durationSec = end
+    extended = true
+  }
+  shot.audioTrack.push(block)
+  shot.audioTrack.sort((a, b) => a.t - b.t || a.id.localeCompare(b.id))
+  shot.updatedAt = new Date().toISOString()
+  await updateAssetPipeline(pipeline, dataDirOverride)
+  return { block, shotDurationSec: shot.durationSec, extended }
+}
+
+export async function listShotAudioBlocks(
+  shotId: string,
+  dataDirOverride?: string
+): Promise<ShotAudioBlock[]> {
+  const shot = await getShot(shotId, dataDirOverride)
+  if (!shot) throw new Error(`Shot not found: ${shotId}`)
+  return [...(shot.audioTrack || [])].sort((a, b) => a.t - b.t || a.id.localeCompare(b.id))
+}
+
+export async function getShotAudioBlock(
+  blockId: string,
+  dataDirOverride?: string
+): Promise<{ shotId: string; block: ShotAudioBlock } | undefined> {
+  const pipeline = await getAssetPipeline(dataDirOverride)
+  const found = findAudioBlock(pipeline, blockId)
+  if (!found) return undefined
+  return { shotId: found.shot.id, block: found.block }
+}
+
+export async function updateShotAudioBlock(
+  blockId: string,
+  patch: {
+    t?: number | string
+    sourceInSec?: number | string
+    sourceOutSec?: number | string
+    durationSec?: number | string
+    loop?: boolean | string
+    volume?: number | string
+    fadeInSec?: number | string
+    fadeOutSec?: number | string
+    extendShot?: boolean
+  },
+  dataDirOverride?: string
+): Promise<{ block: ShotAudioBlock; shotDurationSec: number; extended: boolean }> {
+  const pipeline = await getAssetPipeline(dataDirOverride)
+  const found = findAudioBlock(pipeline, blockId)
+  if (!found) throw new Error(`Audio block not found: ${blockId}`)
+  const sourceInSec =
+    patch.sourceInSec !== undefined
+      ? parseAudioTime(patch.sourceInSec, 'source in')
+      : found.block.sourceInSec
+  const sourceOutSec =
+    patch.sourceOutSec !== undefined
+      ? parseAudioTime(patch.sourceOutSec, 'source out')
+      : found.block.sourceOutSec
+  const loop = patch.loop !== undefined ? parseAudioBool(patch.loop, found.block.loop) : found.block.loop
+  const trim = sourceOutSec - sourceInSec
+  const durationSec =
+    patch.durationSec !== undefined
+      ? parseAudioTime(patch.durationSec, 'duration')
+      : loop
+        ? found.block.durationSec
+        : trim
+  const next: ShotAudioBlock = {
+    ...found.block,
+    t: patch.t !== undefined ? parseAudioTime(patch.t, 'block start') : found.block.t,
+    sourceInSec,
+    sourceOutSec,
+    durationSec,
+    loop,
+    volume: patch.volume !== undefined ? parseAudioVolume(patch.volume, found.block.volume) : found.block.volume,
+    fadeInSec:
+      patch.fadeInSec !== undefined ? parseAudioTime(patch.fadeInSec, 'fade in') : found.block.fadeInSec,
+    fadeOutSec:
+      patch.fadeOutSec !== undefined
+        ? parseAudioTime(patch.fadeOutSec, 'fade out')
+        : found.block.fadeOutSec,
+    schemaVersion: 1
+  }
+  validateShotAudioBlock(next, found.shot, pipeline, found.shot.id, {
+    excludeBlockId: blockId,
+    extendShot: !!patch.extendShot
+  })
+  const end = audioBlockEnd(next)
+  let extended = false
+  if (patch.extendShot && end > found.shot.durationSec) {
+    found.shot.durationSec = end
+    extended = true
+  }
+  found.shot.audioTrack = (found.shot.audioTrack || []).map((b) => (b.id === blockId ? next : b))
+  found.shot.audioTrack.sort((a, b) => a.t - b.t || a.id.localeCompare(b.id))
+  found.shot.updatedAt = new Date().toISOString()
+  await updateAssetPipeline(pipeline, dataDirOverride)
+  return { block: next, shotDurationSec: found.shot.durationSec, extended }
+}
+
+export async function removeShotAudioBlock(
+  blockId: string,
+  dataDirOverride?: string
+): Promise<void> {
+  const pipeline = await getAssetPipeline(dataDirOverride)
+  const found = findAudioBlock(pipeline, blockId)
+  if (!found) throw new Error(`Audio block not found: ${blockId}`)
+  found.shot.audioTrack = (found.shot.audioTrack || []).filter((b) => b.id !== blockId)
   found.shot.updatedAt = new Date().toISOString()
   await updateAssetPipeline(pipeline, dataDirOverride)
 }

@@ -25,7 +25,12 @@ import {
   listShotClipBlocks,
   getShotClipBlock,
   updateShotClipBlock,
-  removeShotClipBlock
+  removeShotClipBlock,
+  addShotAudioBlock,
+  listShotAudioBlocks,
+  getShotAudioBlock,
+  updateShotAudioBlock,
+  removeShotAudioBlock
 } from '../../core/storage/storyboardService'
 import type {
   CameraKeyframe,
@@ -41,6 +46,10 @@ import {
   describeClipBlock,
   sampleClipBlocks
 } from '../../shared/storyboard/clipBlocks'
+import {
+  describeAudioBlock,
+  sampleAudioBlocks
+} from '../../shared/storyboard/audioBlocks'
 import { simulateEventFire } from '../../shared/storyboard/eventPreview'
 import { getAssetPipeline } from '../../core/storage/studioStorage'
 import { getDataDir } from '../../core/storage/dataDir'
@@ -191,7 +200,7 @@ export function registerStoryboardCommands(program: Command): void {
     })
 
   // Shot commands
-  const shotCmd = program.command('shot').description('Manage shots, clip blocks, and cinematography')
+  const shotCmd = program.command('shot').description('Manage shots, clip blocks, audio blocks, and cinematography')
 
   shotCmd
     .command('add')
@@ -509,6 +518,224 @@ export function registerStoryboardCommands(program: Command): void {
           for (const sample of samples) {
             console.log(
               `t=${timeSec}s  ${sample.role} clip=${sample.clipId} source=${sample.sourceTimeSec.toFixed(3)}s${sample.implicit ? ' (implicit)' : ''}`
+            )
+          }
+        }
+        } catch (err) {
+          console.error('Error:', err instanceof Error ? err.message : err)
+          process.exit(1)
+        }
+      })
+
+  const shotAudioCmd = shotCmd
+    .command('audio')
+    .description('Timed music/SFX blocks on a shot (A2; not event SFX)')
+
+  shotAudioCmd
+    .command('add')
+    .description('Place a Game-scoped audio block on the shot timeline')
+    .requiredOption('--shot <shotId>', 'Shot ID')
+    .requiredOption('--audio <audioId>', 'Library audio ID')
+    .requiredOption('--time <seconds>', 'Shot start time')
+    .option('--role <role>', 'music | sfx (default: library kind)')
+    .option('--source-in <seconds>', 'Source trim in (default 0)')
+    .option('--source-out <seconds>', 'Source trim out (default audio duration)')
+    .option('--duration <seconds>', 'Authored block length (loop may exceed trim; non-loop must equal trim)')
+    .option('--loop', 'Wrap source within trim for a longer block')
+    .option('--volume <0-1>', 'Linear gain (default 1)')
+    .option('--fade-in <seconds>', 'Fade in at block start (default 0)')
+    .option('--fade-out <seconds>', 'Fade out at block end (default 0)')
+    .option('--extend-shot', 'If the block pasts the shot end, extend the shot (never silent)')
+    .option('--json', 'Output as JSON')
+    .action(async (options, cmd) => {
+      try {
+        const mergedOpts = { ...cmd.parent!.parent!.parent!.opts(), ...options }
+        const result = await addShotAudioBlock(
+          options.shot,
+          {
+            audioId: options.audio,
+            role: options.role,
+            t: options.time,
+            sourceInSec: options.sourceIn,
+            sourceOutSec: options.sourceOut,
+            durationSec: options.duration,
+            loop: !!options.loop,
+            volume: options.volume,
+            fadeInSec: options.fadeIn,
+            fadeOutSec: options.fadeOut,
+            extendShot: !!options.extendShot
+          },
+          getDataDir(mergedOpts.dataDir)
+        )
+        if (mergedOpts.json) {
+          console.log(
+            JSON.stringify(
+              { ...result.block, shotDurationSec: result.shotDurationSec, extended: result.extended },
+              null,
+              2
+            )
+          )
+        } else {
+          console.log(
+            `✓ Added audio block ${result.block.id} ${describeAudioBlock(result.block)}${result.extended ? ` (shot extended to ${result.shotDurationSec}s)` : ''}`
+          )
+        }
+      } catch (err) {
+        console.error('Error:', err instanceof Error ? err.message : err)
+        process.exit(1)
+      }
+    })
+
+  shotAudioCmd
+    .command('list')
+    .description('List authored audio blocks on a shot')
+    .requiredOption('--shot <shotId>', 'Shot ID')
+    .option('--json', 'Output as JSON')
+    .action(async (options, cmd) => {
+      try {
+        const mergedOpts = { ...cmd.parent!.parent!.parent!.opts(), ...options }
+        const rows = await listShotAudioBlocks(options.shot, getDataDir(mergedOpts.dataDir))
+        if (mergedOpts.json) {
+          console.log(JSON.stringify(rows, null, 2))
+        } else if (rows.length === 0) {
+          console.log('No audio blocks')
+        } else {
+          console.log(`Audio blocks (${rows.length}):`)
+          for (const row of rows) {
+            console.log(`  ${row.id}  ${describeAudioBlock(row)}`)
+          }
+        }
+      } catch (err) {
+        console.error('Error:', err instanceof Error ? err.message : err)
+        process.exit(1)
+      }
+    })
+
+  shotAudioCmd
+    .command('show')
+    .description('Show an audio block')
+    .requiredOption('--id <blockId>', 'Audio block ID')
+    .option('--json', 'Output as JSON')
+    .action(async (options, cmd) => {
+      try {
+        const mergedOpts = { ...cmd.parent!.parent!.parent!.opts(), ...options }
+        const found = await getShotAudioBlock(options.id, getDataDir(mergedOpts.dataDir))
+        if (!found) {
+          console.error(`Audio block not found: ${options.id}`)
+          process.exit(1)
+        }
+        if (mergedOpts.json) {
+          console.log(JSON.stringify({ ...found.block, shotId: found.shotId }, null, 2))
+        } else {
+          console.log(`${found.block.id}  shot=${found.shotId}  ${describeAudioBlock(found.block)}`)
+        }
+      } catch (err) {
+        console.error('Error:', err instanceof Error ? err.message : err)
+        process.exit(1)
+      }
+    })
+
+  shotAudioCmd
+    .command('update')
+    .description('Move, trim, or edit an audio block')
+    .requiredOption('--id <blockId>', 'Audio block ID')
+    .option('--time <seconds>', 'New shot start time')
+    .option('--source-in <seconds>', 'Source trim in')
+    .option('--source-out <seconds>', 'Source trim out')
+    .option('--duration <seconds>', 'Authored block length')
+    .option('--loop <bool>', 'true | false (omit to keep)')
+    .option('--volume <0-1>', 'Linear gain')
+    .option('--fade-in <seconds>', 'Fade in')
+    .option('--fade-out <seconds>', 'Fade out')
+    .option('--extend-shot', 'If the block pasts the shot end, extend the shot (never silent)')
+    .option('--json', 'Output as JSON')
+    .action(async (options, cmd) => {
+      try {
+        const mergedOpts = { ...cmd.parent!.parent!.parent!.opts(), ...options }
+        const result = await updateShotAudioBlock(
+          options.id,
+          {
+            t: options.time,
+            sourceInSec: options.sourceIn,
+            sourceOutSec: options.sourceOut,
+            durationSec: options.duration,
+            loop: options.loop,
+            volume: options.volume,
+            fadeInSec: options.fadeIn,
+            fadeOutSec: options.fadeOut,
+            extendShot: !!options.extendShot
+          },
+          getDataDir(mergedOpts.dataDir)
+        )
+        if (mergedOpts.json) {
+          console.log(
+            JSON.stringify(
+              { ...result.block, shotDurationSec: result.shotDurationSec, extended: result.extended },
+              null,
+              2
+            )
+          )
+        } else {
+          console.log(
+            `✓ Updated audio block ${result.block.id}${result.extended ? ` (shot extended to ${result.shotDurationSec}s)` : ''}`
+          )
+        }
+      } catch (err) {
+        console.error('Error:', err instanceof Error ? err.message : err)
+        process.exit(1)
+      }
+    })
+
+  shotAudioCmd
+    .command('remove')
+    .description('Remove an audio block (does not delete the library audio)')
+    .requiredOption('--id <blockId>', 'Audio block ID')
+    .option('--json', 'Output as JSON')
+    .action(async (options, cmd) => {
+      try {
+        const mergedOpts = { ...cmd.parent!.parent!.parent!.opts(), ...options }
+        await removeShotAudioBlock(options.id, getDataDir(mergedOpts.dataDir))
+        if (mergedOpts.json) {
+          console.log(JSON.stringify({ deleted: true, blockId: options.id }, null, 2))
+        } else {
+          console.log(`✓ Removed audio block: ${options.id}`)
+        }
+      } catch (err) {
+        console.error('Error:', err instanceof Error ? err.message : err)
+        process.exit(1)
+      }
+    })
+
+  shotAudioCmd
+    .command('sample')
+    .description('Print which audio blocks are active at a playhead time (preview timing, never persisted)')
+    .requiredOption('--shot <shotId>', 'Shot ID')
+    .requiredOption('--time <seconds>', 'Playhead time in seconds')
+    .option('--json', 'Output as JSON')
+    .action(async (options, cmd) => {
+      try {
+        const mergedOpts = { ...cmd.parent!.parent!.parent!.opts(), ...options }
+        const dataDir = getDataDir(mergedOpts.dataDir)
+        const shot = await getShot(options.shot, dataDir)
+        if (!shot) throw new Error(`Shot not found: ${options.shot}`)
+        const timeSec = Number(options.time)
+        if (!Number.isFinite(timeSec)) throw new Error('--time must be a number')
+        const samples = sampleAudioBlocks(shot, timeSec)
+        const result = {
+          timeSec,
+          samples,
+          authoredBlockCount: (shot.audioTrack || []).length,
+          persisted: false,
+          note: 'Half-open [t, t+duration). Silence outside. Loop wraps trim. Paused currentTime seeks do not play — A2 mixer uses HTMLAudioElement.play()/pause().'
+        }
+        if (mergedOpts.json) {
+          console.log(JSON.stringify(result, null, 2))
+        } else if (samples.length === 0) {
+          console.log(`t=${timeSec}s  (no active audio block)`)
+        } else {
+          for (const sample of samples) {
+            console.log(
+              `t=${timeSec}s  ${sample.role} audio=${sample.audioId} source=${sample.sourceTimeSec.toFixed(3)}s gain=${sample.gain.toFixed(3)}${sample.loop ? ' loop' : ''}`
             )
           }
         }

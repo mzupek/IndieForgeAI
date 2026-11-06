@@ -63,14 +63,9 @@ export function collectAudioUsage(
 ): { labels: string[] } {
   const labels: string[] = []
   for (const shot of pipeline.storyboardShots || []) {
-    const track =
-      (shot as { audioTrack?: Array<{ id?: string; audioId?: string; t?: number }> }).audioTrack ||
-      []
-    for (const block of track) {
+    for (const block of shot.audioTrack || []) {
       if (block.audioId === audioId) {
-        labels.push(
-          `${shot.name || shot.id} audio block ${block.id || ''} @ ${block.t ?? 0}s`.trim()
-        )
+        labels.push(`${shot.name || shot.id} audio block ${block.id} @ ${block.t}s`)
       }
     }
   }

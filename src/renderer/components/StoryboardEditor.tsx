@@ -11,6 +11,8 @@ import type {
   CameraKeyframe,
   EffectMarker,
   ShotClipBlock,
+  ShotAudioBlock,
+  AudioAsset,
   ScenePreset,
   ScenePresetType,
   VisualAsset,
@@ -65,6 +67,18 @@ import {
   sampleLayerClip,
   unsupportedClipMediaMessage
 } from '@shared/storyboard/clipBlocks'
+import {
+  audioBlockEnd,
+  audioBlockIssues
+} from '@shared/storyboard/audioBlocks'
+import { isSupportedAudioMedia, unsupportedAudioMediaMessage } from '@shared/storyboard/audioValidation'
+import {
+  applyAudioPlayback,
+  disposeAudioVoices,
+  evaluateAudioPlayback,
+  silenceAudioVoices,
+  type AudioVoice
+} from '@shared/storyboard/audioPlayback'
 
 type EditorMode = 'layout' | 'camera'
 type DragMode = 'move' | 'scale' | 'rotate' | 'framingRect' | 'cameraMarker' | 'effectMarker' | null
@@ -436,7 +450,7 @@ export function StoryboardEditor() {
   const [dragMode, setDragMode] = useState<DragMode>(null)
   const [dragStart, setDragStart] = useState<any>(null)
   const [draggedMarker, setDraggedMarker] = useState<{
-    type: 'camera' | 'effect' | 'timedKey' | 'clipBlock'
+    type: 'camera' | 'effect' | 'timedKey' | 'clipBlock' | 'audioBlock'
     index: number
     layerId?: string
     keyId?: string
@@ -475,6 +489,29 @@ export function StoryboardEditor() {
   const [clipTimeDraft, setClipTimeDraft] = useState('')
   const [clipInDraft, setClipInDraft] = useState('')
   const [clipOutDraft, setClipOutDraft] = useState('')
+  const [selectedAudioBlockId, setSelectedAudioBlockId] = useState<string | null>(null)
+  const [showAddAudio, setShowAddAudio] = useState(false)
+  const [addAudioId, setAddAudioId] = useState('')
+  const [addAudioLoop, setAddAudioLoop] = useState(false)
+  const [addAudioSourceIn, setAddAudioSourceIn] = useState('0')
+  const [addAudioSourceOut, setAddAudioSourceOut] = useState('')
+  const [addAudioDuration, setAddAudioDuration] = useState('')
+  const [addAudioVolume, setAddAudioVolume] = useState('1')
+  const [addAudioFadeIn, setAddAudioFadeIn] = useState('0')
+  const [addAudioFadeOut, setAddAudioFadeOut] = useState('0')
+  const [confirmDeleteAudioBlockId, setConfirmDeleteAudioBlockId] = useState<string | null>(null)
+  const [audioTimeDraft, setAudioTimeDraft] = useState('')
+  const [audioInDraft, setAudioInDraft] = useState('')
+  const [audioOutDraft, setAudioOutDraft] = useState('')
+  const [audioDurationDraft, setAudioDurationDraft] = useState('')
+  const [audioVolumeDraft, setAudioVolumeDraft] = useState('1')
+  const [audioFadeInDraft, setAudioFadeInDraft] = useState('0')
+  const [audioFadeOutDraft, setAudioFadeOutDraft] = useState('0')
+  const [audioLoopDraft, setAudioLoopDraft] = useState(false)
+  const [audioError, setAudioError] = useState<string | null>(null)
+  const audioVoicesRef = useRef<Map<string, AudioVoice>>(new Map())
+  const lastPlaybackTimeRef = useRef(0)
+  const [audioEpoch, setAudioEpoch] = useState(0)
   const videosRef = useRef<Map<string, LoadedVideo>>(new Map())
   const [videoEpoch, setVideoEpoch] = useState(0)
   const [previewSnapshot, setPreviewSnapshot] = useState<EventPreviewSnapshot>(EMPTY_PREVIEW_SNAPSHOT)
@@ -523,6 +560,8 @@ export function StoryboardEditor() {
   const palettes = (activeProject?.assetPipeline?.palettes ?? []).filter((p: Palette) => p.gameId === gameId)
   const pipeline = activeProject?.assetPipeline as AssetPipelineProject | undefined
   const gameClips = pipeline ? clipsForGame(pipeline, gameId) : clips
+  const audioAssets: AudioAsset[] =
+    pipeline?.audioAssets?.filter((a) => a.gameId === gameId) ?? []
   const eventDefinitions: EventDefinition[] =
     pipeline?.eventDefinitions?.filter((e) => e.gameId === gameId) ?? []
   const eventBindings: EventBinding[] =
@@ -542,6 +581,8 @@ export function StoryboardEditor() {
   const selectedTimedKeyRow = timedKeyRows.find((row) => row.key.id === selectedTimedKeyId)
   const clipBlocks = selectedShot ? resolveEffectiveClipBlocks(selectedShot, clips) : []
   const selectedClipBlock = clipBlocks.find((b) => b.id === selectedClipBlockId)
+  const audioBlocks = selectedShot?.audioTrack || []
+  const selectedAudioBlock = audioBlocks.find((b) => b.id === selectedAudioBlockId)
 
   const timedKeyActionLabel = (key: LayerTimedKey): string => {
     if (key.action.type === 'setPose') {
@@ -683,6 +724,28 @@ export function StoryboardEditor() {
     selectedClipBlock?.sourceOutSec
   ])
 
+  useEffect(() => {
+    if (!selectedAudioBlock) return
+    setAudioTimeDraft(selectedAudioBlock.t.toFixed(2))
+    setAudioInDraft(selectedAudioBlock.sourceInSec.toFixed(2))
+    setAudioOutDraft(selectedAudioBlock.sourceOutSec.toFixed(2))
+    setAudioDurationDraft(selectedAudioBlock.durationSec.toFixed(2))
+    setAudioVolumeDraft(String(selectedAudioBlock.volume))
+    setAudioFadeInDraft(String(selectedAudioBlock.fadeInSec))
+    setAudioFadeOutDraft(String(selectedAudioBlock.fadeOutSec))
+    setAudioLoopDraft(!!selectedAudioBlock.loop)
+  }, [
+    selectedAudioBlockId,
+    selectedAudioBlock?.t,
+    selectedAudioBlock?.sourceInSec,
+    selectedAudioBlock?.sourceOutSec,
+    selectedAudioBlock?.durationSec,
+    selectedAudioBlock?.volume,
+    selectedAudioBlock?.fadeInSec,
+    selectedAudioBlock?.fadeOutSec,
+    selectedAudioBlock?.loop
+  ])
+
   // Load clip videos via forge-file:// (never base64, never local-file://)
   useEffect(() => {
     if (!selectedShot) return
@@ -812,6 +875,154 @@ export function StoryboardEditor() {
       }
     }
   }, [playbackTime, selectedShot, clips, videoEpoch])
+
+  // A2: HTMLAudioElement.play()/pause() synced to master transport (not paused seeks).
+  useEffect(() => {
+    if (!selectedShot) {
+      silenceAudioVoices(audioVoicesRef.current)
+      return
+    }
+    const needed = new Set(audioBlocks.map((b) => b.id))
+    for (const [id, voice] of audioVoicesRef.current) {
+      if (!needed.has(id)) {
+        voice.playGeneration += 1
+        voice.element.volume = 0
+        if (!voice.element.paused) voice.element.pause()
+        try {
+          voice.element.src = ''
+        } catch {
+          /* ignore */
+        }
+        audioVoicesRef.current.delete(id)
+      }
+    }
+    let cancelled = false
+    const load = async () => {
+      for (const block of audioBlocks) {
+        if (cancelled) return
+        const existing = audioVoicesRef.current.get(block.id)
+        if (existing && (existing.status === 'ready' || existing.status === 'loading') && existing.audioId === block.audioId) {
+          continue
+        }
+        const asset = (pipeline?.audioAssets || []).find((a) => a.id === block.audioId)
+        if (!asset) {
+          audioVoicesRef.current.set(block.id, {
+            blockId: block.id,
+            audioId: block.audioId,
+            element: document.createElement('audio'),
+            url: '',
+            status: 'missing',
+            message: `Audio not found: ${block.audioId}`,
+            playGeneration: 0
+          })
+          continue
+        }
+        if (!asset.file) {
+          audioVoicesRef.current.set(block.id, {
+            blockId: block.id,
+            audioId: block.audioId,
+            element: document.createElement('audio'),
+            url: '',
+            status: 'missing',
+            message: `Audio '${asset.name}' has no media file`,
+            playGeneration: 0
+          })
+          continue
+        }
+        if (!isSupportedAudioMedia(asset.file)) {
+          audioVoicesRef.current.set(block.id, {
+            blockId: block.id,
+            audioId: block.audioId,
+            element: document.createElement('audio'),
+            url: '',
+            status: 'unsupported',
+            message: unsupportedAudioMediaMessage(asset.file),
+            playGeneration: 0
+          })
+          continue
+        }
+        try {
+          const { localUrl } = await window.indieForge.files.getLocalUrl(asset.file)
+          if (cancelled) return
+          if (!localUrl || localUrl.startsWith('local-file:')) {
+            audioVoicesRef.current.set(block.id, {
+              blockId: block.id,
+              audioId: block.audioId,
+              element: document.createElement('audio'),
+              url: localUrl || '',
+              status: 'error',
+              message: 'Audio URL is not forge-file://; local-file:// is not supported',
+              playGeneration: 0
+            })
+            continue
+          }
+          const el = document.createElement('audio')
+          el.preload = 'auto'
+          const entry: AudioVoice = {
+            blockId: block.id,
+            audioId: block.audioId,
+            element: el,
+            url: localUrl,
+            status: 'loading',
+            playGeneration: 0
+          }
+          el.addEventListener('loadedmetadata', () => {
+            entry.status = 'ready'
+            setAudioEpoch((n) => n + 1)
+          })
+          el.addEventListener('error', () => {
+            entry.status = 'error'
+            entry.message = 'Audio failed to load (missing file, codec, or host decode)'
+            setAudioEpoch((n) => n + 1)
+          })
+          audioVoicesRef.current.set(block.id, entry)
+          el.src = localUrl
+        } catch (err) {
+          audioVoicesRef.current.set(block.id, {
+            blockId: block.id,
+            audioId: block.audioId,
+            element: document.createElement('audio'),
+            url: '',
+            status: 'error',
+            message: err instanceof Error ? err.message : 'Failed to resolve audio URL',
+            playGeneration: 0
+          })
+        }
+      }
+      if (!cancelled) setAudioEpoch((n) => n + 1)
+    }
+    void load()
+    return () => {
+      cancelled = true
+    }
+  }, [selectedShot?.id, selectedShot?.audioTrack, pipeline?.audioAssets])
+
+  useEffect(() => {
+    if (!selectedShot) return
+    const commands = evaluateAudioPlayback(selectedShot, playbackTime, {
+      transport: playbackState,
+      previousTimeSec: lastPlaybackTimeRef.current,
+      scrubbing: dragMode === ('playhead' as any)
+    })
+    applyAudioPlayback(commands, audioVoicesRef.current, {
+      onPlayRejected: (_blockId, err) => {
+        setAudioError(err instanceof Error ? err.message : 'Audio play() was rejected')
+        setAudioEpoch((n) => n + 1)
+      }
+    })
+    lastPlaybackTimeRef.current = playbackTime
+  }, [playbackTime, playbackState, selectedShot, audioEpoch, dragMode])
+
+  useEffect(() => {
+    silenceAudioVoices(audioVoicesRef.current)
+    lastPlaybackTimeRef.current = 0
+  }, [selectedShotId])
+
+  useEffect(() => {
+    return () => {
+      disposeAudioVoices(audioVoicesRef.current)
+    }
+  }, [])
 
   useEffect(() => {
     if (playbackState === 'stopped' && wasPlayingRef.current) {
@@ -1528,8 +1739,8 @@ export function StoryboardEditor() {
     const clickTime = x * selectedShot.durationSec
     const near = (t: number) => Math.abs(x - t / selectedShot.durationSec) < 0.03
 
-    // Y-aware hit-test: camera / pose-state / effects / clips fourths
-    if (yRatio < 0.25) {
+    // Y-aware hit-test: five 40px bands (camera / pose / effects / clips / audio)
+    if (yRatio < 0.2) {
       for (let i = 0; i < selectedShot.cameraTrack.length; i++) {
         if (near(selectedShot.cameraTrack[i].t)) {
           setDraggedMarker({ type: 'camera', index: i })
@@ -1538,7 +1749,7 @@ export function StoryboardEditor() {
           return
         }
       }
-    } else if (yRatio < 0.5) {
+    } else if (yRatio < 0.4) {
       const rows = flattenShotTimedKeys(selectedShot)
       for (let i = rows.length - 1; i >= 0; i--) {
         if (near(rows[i].key.t)) {
@@ -1553,7 +1764,7 @@ export function StoryboardEditor() {
           return
         }
       }
-    } else if (yRatio < 0.75) {
+    } else if (yRatio < 0.6) {
       for (let i = 0; i < selectedShot.effectsTrack.length; i++) {
         if (near(selectedShot.effectsTrack[i].t)) {
           setDraggedMarker({ type: 'effect', index: i })
@@ -1562,7 +1773,7 @@ export function StoryboardEditor() {
           return
         }
       }
-    } else {
+    } else if (yRatio < 0.8) {
       const duration = selectedShot.durationSec || 1
       for (let i = clipBlocks.length - 1; i >= 0; i--) {
         const block = clipBlocks[i]
@@ -1571,6 +1782,7 @@ export function StoryboardEditor() {
         if (x >= x0 && x <= x1) {
           setSelectedClipBlockId(block.id)
           setSelectedTimedKeyId(null)
+          setSelectedAudioBlockId(null)
           setEditingCamera(false)
           setSelectedCameraIndex(null)
           setEditingEffect(false)
@@ -1585,6 +1797,36 @@ export function StoryboardEditor() {
           else if (x1 - x < edge) clipDrag = 'trimOut'
           setDraggedMarker({
             type: 'clipBlock',
+            index: i,
+            blockId: block.id,
+            clipDrag,
+            grabOffsetSec: clickTime - block.t
+          })
+          setDragMode('marker' as any)
+          e.currentTarget.setPointerCapture(e.pointerId)
+          return
+        }
+      }
+    } else {
+      const duration = selectedShot.durationSec || 1
+      for (let i = audioBlocks.length - 1; i >= 0; i--) {
+        const block = audioBlocks[i]
+        const x0 = block.t / duration
+        const x1 = audioBlockEnd(block) / duration
+        if (x >= x0 && x <= x1) {
+          setSelectedAudioBlockId(block.id)
+          setSelectedClipBlockId(null)
+          setSelectedTimedKeyId(null)
+          setEditingCamera(false)
+          setSelectedCameraIndex(null)
+          setEditingEffect(false)
+          setSelectedEffectIndex(null)
+          const edge = 0.012
+          let clipDrag: 'move' | 'trimIn' | 'trimOut' = 'move'
+          if (x - x0 < edge) clipDrag = 'trimIn'
+          else if (x1 - x < edge) clipDrag = 'trimOut'
+          setDraggedMarker({
+            type: 'audioBlock',
             index: i,
             blockId: block.id,
             clipDrag,
@@ -1709,6 +1951,63 @@ export function StoryboardEditor() {
           }
           setActiveProject(updatedProject)
         }
+      } else if (draggedMarker.type === 'audioBlock' && draggedMarker.blockId) {
+        const orig = (selectedShot.audioTrack || []).find((b) => b.id === draggedMarker.blockId)
+        if (!orig) return
+        const asset = audioAssets.find((a) => a.id === orig.audioId)
+        const assetDur = asset?.durationSec ?? orig.sourceOutSec
+        let next: ShotAudioBlock = orig
+        if (draggedMarker.clipDrag === 'trimIn') {
+          const end = audioBlockEnd(orig)
+          const newT = Math.max(0, Math.min(end - 0.05, newTime))
+          const durationSec = end - newT
+          if (orig.loop) {
+            next = { ...orig, t: newT, durationSec }
+          } else {
+            const sourceOutSec = orig.sourceOutSec
+            const sourceInSec = Math.max(0, sourceOutSec - durationSec)
+            next = {
+              ...orig,
+              t: newT,
+              durationSec: sourceOutSec - sourceInSec,
+              sourceInSec,
+              sourceOutSec
+            }
+          }
+        } else if (draggedMarker.clipDrag === 'trimOut') {
+          const maxEnd = selectedShot.durationSec
+          const newEnd = Math.max(orig.t + 0.05, Math.min(maxEnd, newTime))
+          const durationSec = newEnd - orig.t
+          if (orig.loop) {
+            next = { ...orig, durationSec }
+          } else {
+            const sourceOutSec = Math.min(assetDur, orig.sourceInSec + durationSec)
+            next = {
+              ...orig,
+              durationSec: sourceOutSec - orig.sourceInSec,
+              sourceOutSec
+            }
+          }
+        } else {
+          const maxT = Math.max(0, selectedShot.durationSec - orig.durationSec)
+          const rawT = newTime - (draggedMarker.grabOffsetSec || 0)
+          const newT = Math.max(0, Math.min(maxT, rawT))
+          next = { ...orig, t: newT }
+        }
+        if (activeProject && activeProject.assetPipeline) {
+          const updatedProject = {
+            ...activeProject,
+            assetPipeline: {
+              ...activeProject.assetPipeline,
+              storyboardShots: activeProject.assetPipeline.storyboardShots?.map((s) =>
+                s.id === selectedShotId
+                  ? { ...s, audioTrack: (s.audioTrack || []).map((b) => (b.id === next.id ? next : b)) }
+                  : s
+              )
+            }
+          }
+          setActiveProject(updatedProject)
+        }
       } else {
         const updated = [...selectedShot.effectsTrack]
         updated[draggedMarker.index] = { ...updated[draggedMarker.index], t: newTime }
@@ -1811,6 +2110,50 @@ export function StoryboardEditor() {
             })
           } else {
             setLayerError(msg)
+          }
+          const proj = await window.indieForge.projects.open(projectId!)
+          setActiveProject(proj)
+        }
+      } else if (draggedMarker.type === 'audioBlock' && draggedMarker.blockId) {
+        const block = (selectedShot.audioTrack || []).find((b) => b.id === draggedMarker.blockId)
+        try {
+          if (block) {
+            await window.indieForge.pipeline.updateShotAudioBlock(projectId!, block.id, {
+              t: block.t,
+              sourceInSec: block.sourceInSec,
+              sourceOutSec: block.sourceOutSec,
+              durationSec: block.durationSec,
+              loop: block.loop
+            })
+          }
+          const proj = await window.indieForge.projects.open(projectId!)
+          setActiveProject(proj)
+          setSelectedAudioBlockId(draggedMarker.blockId)
+          setLayerError(null)
+          setAudioError(null)
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : 'Failed to move audio block'
+          if (msg.includes('--extend-shot') || msg.includes('never silent')) {
+            setPendingExtend({
+              message:
+                'This audio block would pass the shot end. Extend the shot to fit? Cancel keeps the current duration (never silent).',
+              run: async () => {
+                if (!block) return
+                await window.indieForge.pipeline.updateShotAudioBlock(projectId!, block.id, {
+                  t: block.t,
+                  sourceInSec: block.sourceInSec,
+                  sourceOutSec: block.sourceOutSec,
+                  durationSec: block.durationSec,
+                  loop: block.loop,
+                  extendShot: true
+                })
+                const proj = await window.indieForge.projects.open(projectId!)
+                setActiveProject(proj)
+              }
+            })
+          } else {
+            setLayerError(msg)
+            setAudioError(msg)
           }
           const proj = await window.indieForge.projects.open(projectId!)
           setActiveProject(proj)
@@ -2444,6 +2787,101 @@ export function StoryboardEditor() {
     }
   }
 
+  const runAudioWrite = async (fn: (extendShot: boolean) => Promise<void>): Promise<boolean> => {
+    try {
+      setLayerError(null)
+      setAudioError(null)
+      await fn(false)
+      await reloadProject()
+      return true
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      if (msg.includes('--extend-shot') || msg.includes('never silent') || msg.includes('extend the shot')) {
+        setPendingExtend({
+          message:
+            'This audio block ends after the shot duration. Extend the shot to fit the block? Cancel keeps the current duration — Forge never silently extends.',
+          run: async () => {
+            await fn(true)
+            await reloadProject()
+          }
+        })
+        await reloadProject()
+        return false
+      }
+      setLayerError(msg)
+      setAudioError(msg)
+      await reloadProject()
+      return false
+    }
+  }
+
+  const handleAddAudioBlock = async () => {
+    if (!selectedShot || !addAudioId) {
+      setAudioError('Select audio from this Game library')
+      return
+    }
+    const asset = audioAssets.find((a) => a.id === addAudioId)
+    if (!asset) {
+      setAudioError('Audio is not in the selected Game')
+      return
+    }
+    const sourceInSec = Number(addAudioSourceIn)
+    const sourceOutSec = addAudioSourceOut === '' ? asset.durationSec : Number(addAudioSourceOut)
+    const durationSec = addAudioLoop && addAudioDuration !== '' ? Number(addAudioDuration) : undefined
+    const ok = await runAudioWrite(async (extendShot) => {
+      await window.indieForge.pipeline.addShotAudioBlock(projectId!, selectedShotId!, {
+        audioId: addAudioId,
+        role: asset.kind,
+        t: playbackTime,
+        sourceInSec,
+        sourceOutSec,
+        durationSec,
+        loop: addAudioLoop,
+        volume: Number(addAudioVolume),
+        fadeInSec: Number(addAudioFadeIn),
+        fadeOutSec: Number(addAudioFadeOut),
+        extendShot
+      })
+    })
+    if (ok) setShowAddAudio(false)
+  }
+
+  const handleCommitAudioBlockEdits = async (loopOverride?: boolean) => {
+    if (!selectedAudioBlock) return
+    const t = Number(audioTimeDraft)
+    const sourceInSec = Number(audioInDraft)
+    const sourceOutSec = Number(audioOutDraft)
+    const durationSec = Number(audioDurationDraft)
+    await runAudioWrite(async (extendShot) => {
+      await window.indieForge.pipeline.updateShotAudioBlock(projectId!, selectedAudioBlock.id, {
+        t,
+        sourceInSec,
+        sourceOutSec,
+        durationSec,
+        loop: loopOverride !== undefined ? loopOverride : audioLoopDraft,
+        volume: Number(audioVolumeDraft),
+        fadeInSec: Number(audioFadeInDraft),
+        fadeOutSec: Number(audioFadeOutDraft),
+        extendShot
+      })
+    })
+  }
+
+  const confirmDeleteAudioBlockNow = async () => {
+    if (!confirmDeleteAudioBlockId) return
+    try {
+      setLayerError(null)
+      setAudioError(null)
+      await window.indieForge.pipeline.deleteShotAudioBlock(projectId!, confirmDeleteAudioBlockId)
+      await reloadProject()
+      if (selectedAudioBlockId === confirmDeleteAudioBlockId) setSelectedAudioBlockId(null)
+    } catch (err) {
+      setAudioError(err instanceof Error ? err.message : 'Failed to delete audio block')
+    } finally {
+      setConfirmDeleteAudioBlockId(null)
+    }
+  }
+
   const confirmExtendShotNow = async () => {
     if (!pendingExtend) return
     try {
@@ -2454,6 +2892,7 @@ export function StoryboardEditor() {
     } finally {
       setPendingExtend(null)
       setShowAddClip(false)
+      setShowAddAudio(false)
     }
   }
 
@@ -3103,6 +3542,25 @@ export function StoryboardEditor() {
                   >
                     + Clip @ {playbackTime.toFixed(1)}s
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowAddAudio(true)
+                      const first = audioAssets[0]
+                      setAddAudioId(first?.id || '')
+                      setAddAudioLoop(false)
+                      setAddAudioSourceIn('0')
+                      setAddAudioSourceOut(first ? String(first.durationSec) : '')
+                      setAddAudioDuration(first ? String(first.durationSec) : '')
+                      setAddAudioVolume('1')
+                      setAddAudioFadeIn('0')
+                      setAddAudioFadeOut('0')
+                    }}
+                    style={{ fontSize: '0.8rem', padding: '0.25rem 0.5rem' }}
+                    title="Place a timed music or SFX block. Playback uses HTMLAudioElement.play()/pause()."
+                  >
+                    + Audio @ {playbackTime.toFixed(1)}s
+                  </button>
                   <span style={{ color: 'var(--muted)' }}>
                     {playbackTime.toFixed(2)}s / {selectedShot.durationSec}s
                   </span>
@@ -3112,7 +3570,7 @@ export function StoryboardEditor() {
               <div 
                 style={{ 
                   position: 'relative', 
-                  height: '160px', 
+                  height: '200px', 
                   background: 'var(--bg)', 
                   borderRadius: '4px', 
                   cursor: 'pointer',
@@ -3136,11 +3594,15 @@ export function StoryboardEditor() {
                 <div style={{ position: 'absolute', left: '0.5rem', top: '125px', fontSize: '0.7rem', fontWeight: 'bold', color: '#C9A0FF', zIndex: 5, pointerEvents: 'none' }}>
                   Clips
                 </div>
+                <div style={{ position: 'absolute', left: '0.5rem', top: '165px', fontSize: '0.7rem', fontWeight: 'bold', color: '#FFB347', zIndex: 5, pointerEvents: 'none' }}>
+                  Audio
+                </div>
                 
                 {/* Track Dividers */}
                 <div style={{ position: 'absolute', left: 0, right: 0, top: '40px', height: '1px', background: 'rgba(255,255,255,0.1)', pointerEvents: 'none' }} />
                 <div style={{ position: 'absolute', left: 0, right: 0, top: '80px', height: '1px', background: 'rgba(255,255,255,0.1)', pointerEvents: 'none' }} />
                 <div style={{ position: 'absolute', left: 0, right: 0, top: '120px', height: '1px', background: 'rgba(255,255,255,0.1)', pointerEvents: 'none' }} />
+                <div style={{ position: 'absolute', left: 0, right: 0, top: '160px', height: '1px', background: 'rgba(255,255,255,0.1)', pointerEvents: 'none' }} />
                 
                 {/* Playhead - visual indicator, clicks handled by timeline */}
                 <div
@@ -3322,6 +3784,7 @@ export function StoryboardEditor() {
                         setEditingEffect(false)
                         setSelectedEffectIndex(null)
                         setSelectedTimedKeyId(null)
+                        setSelectedAudioBlockId(null)
                       }}
                       style={{
                         position: 'absolute',
@@ -3350,6 +3813,61 @@ export function StoryboardEditor() {
                       title={tooltip}
                     >
                       {(clip?.moment || block.role).slice(0, 12)}
+                    </div>
+                  )
+                })}
+
+                {audioBlocks.map((block) => {
+                  const duration = selectedShot.durationSec || 1
+                  const left = (block.t / duration) * 100
+                  const width = Math.max(0.8, (block.durationSec / duration) * 100)
+                  const selected = selectedAudioBlockId === block.id
+                  const asset = audioAssets.find((a) => a.id === block.audioId)
+                  const issue = pipeline ? audioBlockIssues(block, selectedShot, pipeline, selectedShot.id) : null
+                  const voice = audioVoicesRef.current.get(block.id)
+                  const mediaNote =
+                    voice?.status === 'ready'
+                      ? 'ready'
+                      : voice?.status === 'loading'
+                        ? 'loading'
+                        : voice?.message || (asset ? '' : 'missing audio')
+                  const tooltip = `${block.role}${block.loop ? ' loop' : ''} ${asset?.name || block.audioId}\n${block.t.toFixed(2)}s–${audioBlockEnd(block).toFixed(2)}s\nsrc ${block.sourceInSec.toFixed(2)}–${block.sourceOutSec.toFixed(2)}\nvol ${block.volume} fade ${block.fadeInSec}/${block.fadeOutSec}\n${mediaNote}${issue ? `\n${issue}` : ''}\nSilence outside bar. Play uses HTMLAudio play()/pause().`
+                  return (
+                    <div
+                      key={block.id}
+                      onPointerDown={() => {
+                        setSelectedAudioBlockId(block.id)
+                        setSidebarTab('background')
+                        setEditingCamera(false)
+                        setSelectedCameraIndex(null)
+                        setEditingEffect(false)
+                        setSelectedEffectIndex(null)
+                        setSelectedTimedKeyId(null)
+                        setSelectedClipBlockId(null)
+                      }}
+                      style={{
+                        position: 'absolute',
+                        left: `${left}%`,
+                        top: '168px',
+                        width: `${width}%`,
+                        height: '26px',
+                        background: selected ? '#FFD8A8' : issue ? '#C44' : block.role === 'music' ? '#E07A2F' : '#FFB347',
+                        border: selected ? '3px solid #FFF' : '2px solid #fff',
+                        borderRadius: '4px',
+                        cursor: 'ew-resize',
+                        boxSizing: 'border-box',
+                        zIndex: selected ? 11 : 5,
+                        overflow: 'hidden',
+                        fontSize: '0.65rem',
+                        color: selected ? '#1a1a1a' : '#1a1a1a',
+                        padding: '2px 4px',
+                        lineHeight: 1.1,
+                        whiteSpace: 'nowrap',
+                        textOverflow: 'ellipsis'
+                      }}
+                      title={tooltip}
+                    >
+                      {(asset?.name || block.role).slice(0, 12)}
                     </div>
                   )
                 })}
@@ -3577,6 +4095,282 @@ export function StoryboardEditor() {
                       </button>
                     </div>
                   )}
+                </div>
+              )}
+
+              {showAddAudio && (
+                <div style={{ marginTop: '0.5rem', padding: '0.75rem', background: 'var(--bg)', borderRadius: '4px', border: '2px solid #FFB347' }}>
+                  <div style={{ fontWeight: 'bold', marginBottom: '0.5rem', fontSize: '0.9rem' }}>
+                    Add audio at {playbackTime.toFixed(1)}s
+                  </div>
+                  {audioAssets.length === 0 ? (
+                    <div style={{ fontSize: '0.8rem', color: 'var(--muted)' }}>
+                      Import audio in Library → Audio for this Game first.
+                    </div>
+                  ) : (
+                    <>
+                      <label style={{ fontSize: '0.8rem', display: 'block', marginBottom: '0.35rem' }}>
+                        Asset
+                        <select
+                          value={addAudioId}
+                          onChange={(e) => {
+                            setAddAudioId(e.target.value)
+                            const a = audioAssets.find((x) => x.id === e.target.value)
+                            if (a) {
+                              setAddAudioSourceOut(String(a.durationSec))
+                              setAddAudioDuration(String(a.durationSec))
+                            }
+                          }}
+                          style={{ width: '100%', marginTop: '0.2rem' }}
+                        >
+                          {audioAssets.map((a) => (
+                            <option key={a.id} value={a.id}>
+                              {a.kind} · {a.name} ({a.durationSec.toFixed(2)}s)
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                        <label style={{ fontSize: '0.75rem' }}>
+                          In
+                          <input
+                            type="number"
+                            step="0.05"
+                            min="0"
+                            value={addAudioSourceIn}
+                            onChange={(e) => setAddAudioSourceIn(e.target.value)}
+                            style={{ width: '4.5rem', marginLeft: '0.25rem' }}
+                          />
+                        </label>
+                        <label style={{ fontSize: '0.75rem' }}>
+                          Out
+                          <input
+                            type="number"
+                            step="0.05"
+                            min="0"
+                            value={addAudioSourceOut}
+                            onChange={(e) => setAddAudioSourceOut(e.target.value)}
+                            style={{ width: '4.5rem', marginLeft: '0.25rem' }}
+                          />
+                        </label>
+                        <label style={{ fontSize: '0.75rem' }}>
+                          <input
+                            type="checkbox"
+                            checked={addAudioLoop}
+                            onChange={(e) => setAddAudioLoop(e.target.checked)}
+                            style={{ marginRight: '0.25rem' }}
+                          />
+                          Loop
+                        </label>
+                        {addAudioLoop && (
+                          <label style={{ fontSize: '0.75rem' }}>
+                            Duration
+                            <input
+                              type="number"
+                              step="0.05"
+                              min="0.05"
+                              value={addAudioDuration}
+                              onChange={(e) => setAddAudioDuration(e.target.value)}
+                              style={{ width: '4.5rem', marginLeft: '0.25rem' }}
+                            />
+                          </label>
+                        )}
+                        <label style={{ fontSize: '0.75rem' }}>
+                          Vol
+                          <input
+                            type="number"
+                            step="0.05"
+                            min="0"
+                            max="1"
+                            value={addAudioVolume}
+                            onChange={(e) => setAddAudioVolume(e.target.value)}
+                            style={{ width: '3.5rem', marginLeft: '0.25rem' }}
+                          />
+                        </label>
+                        <label style={{ fontSize: '0.75rem' }}>
+                          Fade in
+                          <input
+                            type="number"
+                            step="0.05"
+                            min="0"
+                            value={addAudioFadeIn}
+                            onChange={(e) => setAddAudioFadeIn(e.target.value)}
+                            style={{ width: '3.5rem', marginLeft: '0.25rem' }}
+                          />
+                        </label>
+                        <label style={{ fontSize: '0.75rem' }}>
+                          Fade out
+                          <input
+                            type="number"
+                            step="0.05"
+                            min="0"
+                            value={addAudioFadeOut}
+                            onChange={(e) => setAddAudioFadeOut(e.target.value)}
+                            style={{ width: '3.5rem', marginLeft: '0.25rem' }}
+                          />
+                        </label>
+                      </div>
+                    </>
+                  )}
+                  {audioError && (
+                    <div style={{ color: '#ff8a8a', fontSize: '0.75rem', marginTop: '0.35rem' }}>{audioError}</div>
+                  )}
+                  <div style={{ display: 'flex', gap: '0.35rem', marginTop: '0.5rem' }}>
+                    <button
+                      type="button"
+                      onClick={handleAddAudioBlock}
+                      disabled={!addAudioId}
+                      style={{ flex: 1, fontSize: '0.85rem', background: '#E07A2F', color: '#fff' }}
+                    >
+                      Place block
+                    </button>
+                    <button type="button" onClick={() => setShowAddAudio(false)} style={{ flex: 1, fontSize: '0.85rem' }}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {selectedAudioBlock && selectedShot && (
+                <div style={{ marginTop: '0.5rem', padding: '0.6rem', background: 'var(--bg)', borderRadius: '4px', fontSize: '0.8rem' }}>
+                  <div>
+                    <strong>Audio block</strong>
+                    {' · '}
+                    {selectedAudioBlock.role}
+                    {selectedAudioBlock.loop ? ' loop' : ''}
+                    {' · '}
+                    {audioAssets.find((a) => a.id === selectedAudioBlock.audioId)?.name || selectedAudioBlock.audioId}
+                    {' · '}
+                    {selectedAudioBlock.t.toFixed(2)}s–{audioBlockEnd(selectedAudioBlock).toFixed(2)}s
+                  </div>
+                  <div style={{ color: 'var(--muted)', marginTop: '0.2rem', fontSize: '0.75rem' }}>
+                    Half-open [t, t+duration). Silence outside. Paused/reverse scrub seeks silently.
+                    Play uses HTMLAudioElement.play()/pause() — not paused currentTime. Clips stay muted.
+                  </div>
+                  {(() => {
+                    const voice = audioVoicesRef.current.get(selectedAudioBlock.id)
+                    const asset = audioAssets.find((a) => a.id === selectedAudioBlock.audioId)
+                    if (!asset) return <div style={{ color: '#ff8a8a', marginTop: '0.25rem' }}>Missing library audio</div>
+                    if (voice?.status === 'loading') return <div style={{ color: '#9ad', marginTop: '0.25rem' }}>Loading audio…</div>
+                    if (voice && voice.status !== 'ready') {
+                      return <div style={{ color: '#ff8a8a', marginTop: '0.25rem' }}>{voice.message}</div>
+                    }
+                    return voice?.status === 'ready' ? (
+                      <div style={{ color: '#9ad', marginTop: '0.25rem' }}>
+                        {playbackState === 'playing' ? 'Audible play()/pause() · forge-file' : 'Paused — silent seek'}
+                      </div>
+                    ) : null
+                  })()}
+                  {audioError && (
+                    <div style={{ color: '#ff8a8a', marginTop: '0.25rem' }}>{audioError}</div>
+                  )}
+                  <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.4rem', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                    <label style={{ fontSize: '0.75rem' }}>
+                      Start
+                      <input
+                        type="number"
+                        step="0.05"
+                        min="0"
+                        value={audioTimeDraft}
+                        onChange={(e) => setAudioTimeDraft(e.target.value)}
+                        onBlur={() => void handleCommitAudioBlockEdits()}
+                        style={{ width: '4.5rem', marginLeft: '0.25rem' }}
+                      />
+                    </label>
+                    <label style={{ fontSize: '0.75rem' }}>
+                      In
+                      <input
+                        type="number"
+                        step="0.05"
+                        min="0"
+                        value={audioInDraft}
+                        onChange={(e) => setAudioInDraft(e.target.value)}
+                        onBlur={() => void handleCommitAudioBlockEdits()}
+                        style={{ width: '4.5rem', marginLeft: '0.25rem' }}
+                      />
+                    </label>
+                    <label style={{ fontSize: '0.75rem' }}>
+                      Out
+                      <input
+                        type="number"
+                        step="0.05"
+                        min="0"
+                        value={audioOutDraft}
+                        onChange={(e) => setAudioOutDraft(e.target.value)}
+                        onBlur={() => void handleCommitAudioBlockEdits()}
+                        style={{ width: '4.5rem', marginLeft: '0.25rem' }}
+                      />
+                    </label>
+                    <label style={{ fontSize: '0.75rem' }}>
+                      <input
+                        type="checkbox"
+                        checked={audioLoopDraft}
+                        onChange={(e) => {
+                          const loop = e.target.checked
+                          setAudioLoopDraft(loop)
+                          void handleCommitAudioBlockEdits(loop)
+                        }}
+                        style={{ marginRight: '0.25rem' }}
+                      />
+                      Loop
+                    </label>
+                    <label style={{ fontSize: '0.75rem' }}>
+                      Dur
+                      <input
+                        type="number"
+                        step="0.05"
+                        min="0.05"
+                        value={audioDurationDraft}
+                        onChange={(e) => setAudioDurationDraft(e.target.value)}
+                        onBlur={() => void handleCommitAudioBlockEdits()}
+                        style={{ width: '4.5rem', marginLeft: '0.25rem' }}
+                      />
+                    </label>
+                    <label style={{ fontSize: '0.75rem' }}>
+                      Vol
+                      <input
+                        type="number"
+                        step="0.05"
+                        min="0"
+                        max="1"
+                        value={audioVolumeDraft}
+                        onChange={(e) => setAudioVolumeDraft(e.target.value)}
+                        onBlur={() => void handleCommitAudioBlockEdits()}
+                        style={{ width: '3.5rem', marginLeft: '0.25rem' }}
+                      />
+                    </label>
+                    <label style={{ fontSize: '0.75rem' }}>
+                      Fade in
+                      <input
+                        type="number"
+                        step="0.05"
+                        min="0"
+                        value={audioFadeInDraft}
+                        onChange={(e) => setAudioFadeInDraft(e.target.value)}
+                        onBlur={() => void handleCommitAudioBlockEdits()}
+                        style={{ width: '3.5rem', marginLeft: '0.25rem' }}
+                      />
+                    </label>
+                    <label style={{ fontSize: '0.75rem' }}>
+                      Fade out
+                      <input
+                        type="number"
+                        step="0.05"
+                        min="0"
+                        value={audioFadeOutDraft}
+                        onChange={(e) => setAudioFadeOutDraft(e.target.value)}
+                        onBlur={() => void handleCommitAudioBlockEdits()}
+                        style={{ width: '3.5rem', marginLeft: '0.25rem' }}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDeleteAudioBlockId(selectedAudioBlock.id)}
+                      style={{ fontSize: '0.75rem', background: 'var(--danger)', color: 'white' }}
+                    >
+                      Delete block
+                    </button>
+                  </div>
                 </div>
               )}
               
@@ -4777,6 +5571,16 @@ export function StoryboardEditor() {
           danger
           onConfirm={confirmDeleteClipBlockNow}
           onCancel={() => setConfirmDeleteClipBlockId(null)}
+        />
+      )}
+      {confirmDeleteAudioBlockId && (
+        <ConfirmModal
+          title="Delete audio block"
+          message="Remove this timed audio block from the shot? The library audio is not deleted."
+          confirmLabel="Delete"
+          danger
+          onConfirm={confirmDeleteAudioBlockNow}
+          onCancel={() => setConfirmDeleteAudioBlockId(null)}
         />
       )}
       {pendingExtend && (

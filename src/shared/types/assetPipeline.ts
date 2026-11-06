@@ -433,6 +433,34 @@ export interface ShotClipBlock {
 }
 
 /**
+ * Timed audio block on a shot timeline (A2).
+ * Half-open [t, t+duration). Non-loop 1x duration equals sourceOut-sourceIn.
+ * Loop wraps the trim window so authored duration may be longer than trim.
+ * Music overlap rejected (one bed). SFX overlap allowed.
+ */
+export type AudioBlockRole = 'music' | 'sfx'
+
+export interface ShotAudioBlock {
+  id: string
+  audioId: string
+  role: AudioBlockRole
+  /** Shot time when the block starts */
+  t: number
+  /** Audible duration on the shot (seconds) */
+  durationSec: number
+  /** Inclusive source trim start (seconds) */
+  sourceInSec: number
+  /** Exclusive source trim end (seconds) */
+  sourceOutSec: number
+  loop: boolean
+  /** Linear gain 0–1 */
+  volume: number
+  fadeInSec: number
+  fadeOutSec: number
+  schemaVersion: 1
+}
+
+/**
  * Effect marker for timeline - references preset or inline definition
  */
 export interface EffectMarker {
@@ -492,6 +520,12 @@ export interface StoryboardShot {
    * without a block still play as implicit [0, min(clip, shot)) during preview.
    */
   clipTrack?: ShotClipBlock[]
+
+  /**
+   * Timed audio blocks (A2). Music/SFX range bars on the shot.
+   * Playback uses HTMLAudioElement.play()/pause() (paused currentTime seeks stay silent).
+   */
+  audioTrack?: ShotAudioBlock[]
   
   /** Notes for engineer */
   notes?: string

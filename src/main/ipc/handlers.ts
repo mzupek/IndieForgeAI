@@ -110,7 +110,12 @@ import {
   listShotClipBlocks,
   getShotClipBlock,
   updateShotClipBlock,
-  removeShotClipBlock
+  removeShotClipBlock,
+  addShotAudioBlock,
+  listShotAudioBlocks,
+  getShotAudioBlock,
+  updateShotAudioBlock,
+  removeShotAudioBlock
 } from '../../core/storage/storyboardService'
 import {
   getVisualAssets,
@@ -1047,6 +1052,44 @@ export function registerIpcHandlers(): void {
     IPC_CHANNELS.SHOT_CLIP_DELETE,
     async (_e, projectId: string, blockId: string) => {
       await removeShotClipBlock(blockId)
+      return await loadProject(projectId)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SHOT_AUDIO_ADD,
+    async (_e, projectId: string, shotId: string, input: any) => {
+      await addShotAudioBlock(shotId, input)
+      return await loadProject(projectId)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SHOT_AUDIO_LIST,
+    async (_e, shotId: string) => {
+      return await listShotAudioBlocks(shotId)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SHOT_AUDIO_GET,
+    async (_e, blockId: string) => {
+      return await getShotAudioBlock(blockId)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SHOT_AUDIO_UPDATE,
+    async (_e, projectId: string, blockId: string, updates: any) => {
+      await updateShotAudioBlock(blockId, updates)
+      return await loadProject(projectId)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SHOT_AUDIO_DELETE,
+    async (_e, projectId: string, blockId: string) => {
+      await removeShotAudioBlock(blockId)
       return await loadProject(projectId)
     }
   )
