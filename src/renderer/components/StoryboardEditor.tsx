@@ -88,6 +88,13 @@ import {
   markEventSfxEnded,
   type EventSfxVoice
 } from '@shared/storyboard/eventSfxPlayback'
+import {
+  endPointerCaptureNow,
+  isDragPastThreshold,
+  releasePointerCaptureIfHeld,
+  type PointerSessionEvent
+} from '@shared/storyboard/pointerCapture'
+import { hitTestTimeline } from '@shared/storyboard/timelinePointer'
 
 type EditorMode = 'layout' | 'camera'
 type DragMode = 'move' | 'scale' | 'rotate' | 'framingRect' | 'cameraMarker' | 'effectMarker' | null
@@ -522,6 +529,7 @@ export function StoryboardEditor() {
   const [shotDurationError, setShotDurationError] = useState<string | null>(null)
   const audioVoicesRef = useRef<Map<string, AudioVoice>>(new Map())
   const eventSfxVoicesRef = useRef<Map<string, EventSfxVoice>>(new Map())
+  const capturedPointerRef = useRef<{ target: Element; pointerId: number } | null>(null)
   const lastPlaybackTimeRef = useRef(0)
   const [audioEpoch, setAudioEpoch] = useState(0)
   const [eventSfxEpoch, setEventSfxEpoch] = useState(0)
@@ -1173,6 +1181,9 @@ export function StoryboardEditor() {
     return () => {
       disposeAudioVoices(audioVoicesRef.current)
       disposeEventSfxVoices(eventSfxVoicesRef.current)
+      const held = capturedPointerRef.current
+      capturedPointerRef.current = null
+      if (held) releasePointerCaptureIfHeld(held.target, held.pointerId)
     }
   }, [])
 
@@ -1687,9 +1698,26 @@ export function StoryboardEditor() {
     }
   }, [selectedShot, selectedLayerId, mode, playbackTime, loadedImages, dragStart, getInterpolatedCamera, pipeline, gameId, previewSnapshot, clips, videoEpoch])
 
+  const capturePointer = (target: EventTarget | null, pointerId: number) => {
+    if (!target || typeof (target as Element).setPointerCapture !== 'function') return
+    try {
+      ;(target as Element).setPointerCapture(pointerId)
+      capturedPointerRef.current = { target: target as Element, pointerId }
+    } catch {
+      /* element may not accept capture */
+    }
+  }
+
+  const releaseHeldPointer = (e?: PointerSessionEvent) => {
+    if (e) endPointerCaptureNow(e)
+    const held = capturedPointerRef.current
+    capturedPointerRef.current = null
+    if (held) releasePointerCaptureIfHeld(held.target, held.pointerId)
+  }
+
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (!canvasRef.current || !selectedShot) return
-    e.currentTarget.setPointerCapture(e.pointerId)
+    capturePointer(e.currentTarget, e.pointerId)
 
     const canvas = canvasRef.current
     const rect = canvas.getBoundingClientRect()
@@ -1803,7 +1831,7 @@ export function StoryboardEditor() {
       const pixelDy = e.clientY - dragStart.clientY
       
       // Apply drag threshold to prevent accidental nudges on clicks
-      if (Math.abs(pixelDx) < 3 && Math.abs(pixelDy) < 3) return
+      if (!isDragPastThreshold(pixelDx, pixelDy)) return
       
       const dx = pixelDx / rect.width
       const dy = pixelDy / rect.height
@@ -1841,42 +1869,50 @@ export function StoryboardEditor() {
   }
 
   const handlePointerUp = async (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (dragMode === 'framingRect' && dragStart && selectedShot) {
-      const canvas = canvasRef.current!
-      const rect = canvas.getBoundingClientRect()
-      const x = (e.clientX - rect.left) / rect.width
-      const y = (e.clientY - rect.top) / rect.height
-      
-      const width = Math.abs(x - dragStart.x)
-      const height = Math.abs(y - dragStart.y)
-      const rectX = Math.min(x, dragStart.x)
-      const rectY = Math.min(y, dragStart.y)
-      
-      if (width > 0.05 && height > 0.05) {
-        const keyframe: CameraKeyframe = {
-          t: selectedCameraIndex !== null && selectedShot.cameraTrack[selectedCameraIndex]
-            ? selectedShot.cameraTrack[selectedCameraIndex].t
-            : playbackTime,
-          target: { x: rectX + width / 2, y: rectY + height / 2 },
-          zoom: 1.0 / Math.max(width, height),
-          framingRect: { x: rectX, y: rectY, width, height }
-        }
-        
-        // Update existing keyframe if one is selected, otherwise add new
-        if (selectedCameraIndex !== null && 
-            Math.abs(selectedShot.cameraTrack[selectedCameraIndex].t - keyframe.t) < 0.01) {
-          await handleUpdateCameraKeyframe(selectedCameraIndex, keyframe)
-        } else {
-          await window.indieForge.pipeline.addCameraKeyframe(projectId!, selectedShotId!, keyframe)
-          const updated = await window.indieForge.projects.open(projectId!)
-          setActiveProject(updated)
+    // Release before any await — React nulls currentTarget after the first await.
+    releaseHeldPointer(e)
+    try {
+      if (dragMode === 'framingRect' && dragStart && selectedShot) {
+        const canvas = canvasRef.current!
+        const rect = canvas.getBoundingClientRect()
+        const x = (e.clientX - rect.left) / rect.width
+        const y = (e.clientY - rect.top) / rect.height
+
+        const width = Math.abs(x - dragStart.x)
+        const height = Math.abs(y - dragStart.y)
+        const rectX = Math.min(x, dragStart.x)
+        const rectY = Math.min(y, dragStart.y)
+
+        if (width > 0.05 && height > 0.05) {
+          const keyframe: CameraKeyframe = {
+            t: selectedCameraIndex !== null && selectedShot.cameraTrack[selectedCameraIndex]
+              ? selectedShot.cameraTrack[selectedCameraIndex].t
+              : playbackTime,
+            target: { x: rectX + width / 2, y: rectY + height / 2 },
+            zoom: 1.0 / Math.max(width, height),
+            framingRect: { x: rectX, y: rectY, width, height }
+          }
+
+          if (selectedCameraIndex !== null &&
+              Math.abs(selectedShot.cameraTrack[selectedCameraIndex].t - keyframe.t) < 0.01) {
+            await handleUpdateCameraKeyframe(selectedCameraIndex, keyframe)
+          } else {
+            await window.indieForge.pipeline.addCameraKeyframe(projectId!, selectedShotId!, keyframe)
+            const updated = await window.indieForge.projects.open(projectId!)
+            setActiveProject(updated)
+          }
         }
       }
+    } finally {
+      setDragMode(null)
+      setDragStart(null)
     }
+  }
 
+  const handlePointerCancel = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    releaseHeldPointer(e)
     setDragMode(null)
     setDragStart(null)
-    e.currentTarget.releasePointerCapture(e.pointerId)
   }
 
   const handleTimelinePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -1888,113 +1924,99 @@ export function StoryboardEditor() {
     const rect = e.currentTarget.getBoundingClientRect()
     const x = (e.clientX - rect.left) / rect.width
     const yRatio = (e.clientY - rect.top) / rect.height
-    const clickTime = x * selectedShot.durationSec
-    const near = (t: number) => Math.abs(x - t / selectedShot.durationSec) < 0.03
+    const hit = hitTestTimeline({
+      durationSec: selectedShot.durationSec,
+      xRatio: x,
+      yRatio,
+      cameraTimes: selectedShot.cameraTrack.map((k) => k.t),
+      timedKeys: flattenShotTimedKeys(selectedShot).map((row) => ({
+        layerId: row.layerId,
+        keyId: row.key.id,
+        t: row.key.t
+      })),
+      effectTimes: selectedShot.effectsTrack.map((ef) => ef.t),
+      clipBlocks: clipBlocks.map((b) => ({
+        id: b.id,
+        t: b.t,
+        durationSec: b.durationSec,
+        implicit: b.implicit
+      })),
+      audioBlocks: audioBlocks.map((b) => ({
+        id: b.id,
+        t: b.t,
+        durationSec: b.durationSec
+      }))
+    })
 
-    // Y-aware hit-test: five 40px bands (camera / pose / effects / clips / audio)
-    if (yRatio < 0.2) {
-      for (let i = 0; i < selectedShot.cameraTrack.length; i++) {
-        if (near(selectedShot.cameraTrack[i].t)) {
-          setDraggedMarker({ type: 'camera', index: i })
-          setDragMode('marker' as any)
-          e.currentTarget.setPointerCapture(e.pointerId)
-          return
-        }
-      }
-    } else if (yRatio < 0.4) {
-      const rows = flattenShotTimedKeys(selectedShot)
-      for (let i = rows.length - 1; i >= 0; i--) {
-        if (near(rows[i].key.t)) {
-          setDraggedMarker({
-            type: 'timedKey',
-            index: i,
-            layerId: rows[i].layerId,
-            keyId: rows[i].key.id
-          })
-          setDragMode('marker' as any)
-          e.currentTarget.setPointerCapture(e.pointerId)
-          return
-        }
-      }
-    } else if (yRatio < 0.6) {
-      for (let i = 0; i < selectedShot.effectsTrack.length; i++) {
-        if (near(selectedShot.effectsTrack[i].t)) {
-          setDraggedMarker({ type: 'effect', index: i })
-          setDragMode('marker' as any)
-          e.currentTarget.setPointerCapture(e.pointerId)
-          return
-        }
-      }
-    } else if (yRatio < 0.8) {
-      const duration = selectedShot.durationSec || 1
-      for (let i = clipBlocks.length - 1; i >= 0; i--) {
-        const block = clipBlocks[i]
-        const x0 = block.t / duration
-        const x1 = clipBlockEnd(block) / duration
-        if (x >= x0 && x <= x1) {
-          setSelectedClipBlockId(block.id)
-          setSelectedTimedKeyId(null)
-          setSelectedAudioBlockId(null)
-          setEditingCamera(false)
-          setSelectedCameraIndex(null)
-          setEditingEffect(false)
-          setSelectedEffectIndex(null)
-          if (block.implicit) {
-            e.currentTarget.setPointerCapture(e.pointerId)
-            return
-          }
-          const edge = 0.012
-          let clipDrag: 'move' | 'trimIn' | 'trimOut' = 'move'
-          if (x - x0 < edge) clipDrag = 'trimIn'
-          else if (x1 - x < edge) clipDrag = 'trimOut'
-          setDraggedMarker({
-            type: 'clipBlock',
-            index: i,
-            blockId: block.id,
-            clipDrag,
-            grabOffsetSec: clickTime - block.t
-          })
-          setDragMode('marker' as any)
-          e.currentTarget.setPointerCapture(e.pointerId)
-          return
-        }
-      }
-    } else {
-      const duration = selectedShot.durationSec || 1
-      for (let i = audioBlocks.length - 1; i >= 0; i--) {
-        const block = audioBlocks[i]
-        const x0 = block.t / duration
-        const x1 = audioBlockEnd(block) / duration
-        if (x >= x0 && x <= x1) {
-          setSelectedAudioBlockId(block.id)
-          setSelectedClipBlockId(null)
-          setSelectedTimedKeyId(null)
-          setEditingCamera(false)
-          setSelectedCameraIndex(null)
-          setEditingEffect(false)
-          setSelectedEffectIndex(null)
-          const edge = 0.012
-          let clipDrag: 'move' | 'trimIn' | 'trimOut' = 'move'
-          if (x - x0 < edge) clipDrag = 'trimIn'
-          else if (x1 - x < edge) clipDrag = 'trimOut'
-          setDraggedMarker({
-            type: 'audioBlock',
-            index: i,
-            blockId: block.id,
-            clipDrag,
-            grabOffsetSec: clickTime - block.t
-          })
-          setDragMode('marker' as any)
-          e.currentTarget.setPointerCapture(e.pointerId)
-          return
-        }
-      }
+    if (hit.kind === 'camera') {
+      setDraggedMarker({ type: 'camera', index: hit.index })
+      setDragMode('marker' as any)
+      capturePointer(e.currentTarget, e.pointerId)
+      return
     }
-    
-    // Start playhead scrubbing
+    if (hit.kind === 'timedKey') {
+      setDraggedMarker({
+        type: 'timedKey',
+        index: hit.index,
+        layerId: hit.layerId,
+        keyId: hit.keyId
+      })
+      setDragMode('marker' as any)
+      capturePointer(e.currentTarget, e.pointerId)
+      return
+    }
+    if (hit.kind === 'effect') {
+      setDraggedMarker({ type: 'effect', index: hit.index })
+      setDragMode('marker' as any)
+      capturePointer(e.currentTarget, e.pointerId)
+      return
+    }
+    if (hit.kind === 'clipBlock') {
+      setSelectedClipBlockId(hit.blockId)
+      setSelectedTimedKeyId(null)
+      setSelectedAudioBlockId(null)
+      setEditingCamera(false)
+      setSelectedCameraIndex(null)
+      setEditingEffect(false)
+      setSelectedEffectIndex(null)
+      if (hit.implicit) {
+        capturePointer(e.currentTarget, e.pointerId)
+        return
+      }
+      setDraggedMarker({
+        type: 'clipBlock',
+        index: clipBlocks.findIndex((b) => b.id === hit.blockId),
+        blockId: hit.blockId,
+        clipDrag: hit.clipDrag,
+        grabOffsetSec: hit.grabOffsetSec
+      })
+      setDragMode('marker' as any)
+      capturePointer(e.currentTarget, e.pointerId)
+      return
+    }
+    if (hit.kind === 'audioBlock') {
+      setSelectedAudioBlockId(hit.blockId)
+      setSelectedClipBlockId(null)
+      setSelectedTimedKeyId(null)
+      setEditingCamera(false)
+      setSelectedCameraIndex(null)
+      setEditingEffect(false)
+      setSelectedEffectIndex(null)
+      setDraggedMarker({
+        type: 'audioBlock',
+        index: audioBlocks.findIndex((b) => b.id === hit.blockId),
+        blockId: hit.blockId,
+        clipDrag: hit.clipDrag,
+        grabOffsetSec: hit.grabOffsetSec
+      })
+      setDragMode('marker' as any)
+      capturePointer(e.currentTarget, e.pointerId)
+      return
+    }
+
     setDragMode('playhead' as any)
-    setPlaybackTime(clickTime)
-    e.currentTarget.setPointerCapture(e.pointerId)
+    setPlaybackTime(hit.timeSec)
+    capturePointer(e.currentTarget, e.pointerId)
   }
 
   const handleTimelinePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -2181,7 +2203,16 @@ export function StoryboardEditor() {
     }
   }
 
+  const handleTimelinePointerCancel = (e: React.PointerEvent<HTMLDivElement>) => {
+    releaseHeldPointer(e)
+    setDragMode(null)
+    setDraggedMarker(null)
+  }
+
   const handleTimelinePointerUp = async (e: React.PointerEvent<HTMLDivElement>) => {
+    // Must run before any await. After persist, React has nulled currentTarget.
+    releaseHeldPointer(e)
+    try {
     if (!selectedShot) return
     
     // Persist marker changes to disk
@@ -2323,13 +2354,9 @@ export function StoryboardEditor() {
         setActiveProject(proj)
       }
     }
-    
-    // Clean up drag state
-    setDragMode(null)
-    setDraggedMarker(null)
-    
-    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
-      e.currentTarget.releasePointerCapture(e.pointerId)
+    } finally {
+      setDragMode(null)
+      setDraggedMarker(null)
     }
   }
 
@@ -3648,6 +3675,7 @@ export function StoryboardEditor() {
                 onPointerDown={handlePointerDown}
                 onPointerMove={handlePointerMove}
                 onPointerUp={handlePointerUp}
+                onPointerCancel={handlePointerCancel}
                 style={{
                   width: '100%',
                   height: 'auto',
@@ -3846,6 +3874,7 @@ export function StoryboardEditor() {
                 onPointerDown={handleTimelinePointerDown}
                 onPointerMove={handleTimelinePointerMove}
                 onPointerUp={handleTimelinePointerUp}
+                onPointerCancel={handleTimelinePointerCancel}
               >
                 {/* Track Labels - pointerEvents none to not block marker clicks */}
                 <div style={{ position: 'absolute', left: '0.5rem', top: '5px', fontSize: '0.7rem', fontWeight: 'bold', color: '#00AAFF', zIndex: 5, pointerEvents: 'none' }}>

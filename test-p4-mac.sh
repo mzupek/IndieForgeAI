@@ -20,6 +20,8 @@ echo "----------------------------------------"
 npx tsx src/shared/storyboard/timedKeys.test.ts
 npx tsx src/shared/storyboard/eventPreview.test.ts
 npx tsx src/shared/storyboard/eventValidation.test.ts
+npx tsx src/shared/storyboard/pointerCapture.test.ts
+npx tsx src/shared/storyboard/timelinePointer.test.ts
 echo ""
 
 TEST_DIR=$(mktemp -d -t forge-p4-test-XXXXXX)
