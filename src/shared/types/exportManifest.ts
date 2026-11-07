@@ -87,6 +87,18 @@ export interface ExportManifestEffectMarker {
   inlineParams?: Record<string, unknown>
 }
 
+export interface ExportManifestClipBlock {
+  id: string
+  clipId: string
+  clipFile?: string
+  role: 'layer' | 'background'
+  layerId?: string | null
+  t: number
+  durationSec: number
+  sourceInSec: number
+  sourceOutSec: number
+}
+
 export interface ExportManifestShot {
   id: string
   name: string
@@ -94,9 +106,14 @@ export interface ExportManifestShot {
   aspectRatio: { width: number; height: number }
   backgroundImage?: string
   backgroundClipId?: string
+  backgroundVisualAssetId?: string
+  backgroundAssetStateId?: string | null
+  /** Resolved studio-relative full-resolution image (not thumbnail, not an external source path). */
+  backgroundFile?: string
   layers: ExportManifestLayer[]
   cameraTrack: ExportManifestCameraKeyframe[]
   effectsTrack: ExportManifestEffectMarker[]
+  clipTrack?: ExportManifestClipBlock[]
   notes?: string
   thumbnail?: string
 }

@@ -234,11 +234,23 @@
                 },
                 "backgroundImage": {
                   "type": "string",
-                  "description": "Relative path to background image"
+                  "description": "Legacy/direct-import relative path to background image"
                 },
                 "backgroundClipId": {
                   "type": "string",
                   "description": "Background clip reference"
+                },
+                "backgroundVisualAssetId": {
+                  "type": "string",
+                  "description": "Library visual asset id used as the static shot background"
+                },
+                "backgroundAssetStateId": {
+                  "type": ["string", "null"],
+                  "description": "Explicit asset state id; omit/null uses default/static image"
+                },
+                "backgroundFile": {
+                  "type": "string",
+                  "description": "Resolved studio-relative full-resolution image (not thumbnail)"
                 },
                 "layers": {
                   "type": "array",

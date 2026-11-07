@@ -13,6 +13,11 @@ import * as exportCmd from './commands/export'
 import * as validate from './commands/validate'
 import * as status from './commands/status'
 import { registerStoryboardCommands } from './commands/storyboard'
+import { registerSceneCommands } from './commands/scene'
+import { registerEventCommands } from './commands/event'
+import { registerAudioCommands } from './commands/audio'
+import * as asset from './commands/asset'
+import * as assetState from './commands/asset-state'
 
 const program = new Command()
 
@@ -23,8 +28,8 @@ program
   .option('--data-dir <path>', 'Override data directory (also: FORGE_DATA_DIR env var)')
   .option('--json', 'Output in JSON format')
 
-// Games commands
-const gamesCmd = program.command('games').description('Manage games')
+// Games commands (games or game - both work)
+const gamesCmd = program.command('games').alias('game').description('Manage games')
 gamesCmd
   .command('list')
   .description('List all games across all projects')
@@ -88,6 +93,123 @@ characterCmd
     await character.deleteCharacter(characterId, { ...program.opts(), ...options })
   })
 
+// P1: Asset commands (generic visual assets)
+const assetCmd = program.command('asset').description('Manage visual assets (P1)')
+
+assetCmd
+  .command('list')
+  .description('List visual assets')
+  .requiredOption('--game <id>', 'Game ID')
+  .option('--category <category>', 'Filter by category (logo|symbol|item|weapon|prop)')
+  .action(async (options) => {
+    await asset.list({ ...program.opts(), ...options })
+  })
+
+assetCmd
+  .command('show')
+  .description('Show asset details')
+  .argument('<asset-id>', 'Asset ID')
+  .requiredOption('--game <id>', 'Game ID')
+  .action(async (assetId, options) => {
+    await asset.show(assetId, { ...program.opts(), ...options })
+  })
+
+assetCmd
+  .command('create')
+  .description('Create a new visual asset')
+  .requiredOption('--game <id>', 'Game ID')
+  .requiredOption('--name <name>', 'Asset name')
+  .requiredOption('--category <category>', 'Category (logo|symbol|item|weapon|prop)')
+  .option('--tags <tags>', 'Comma-separated tags')
+  .option('--image <path>', 'PNG image file path (for static single-image assets)')
+  .action(async (options) => {
+    await asset.create({ ...program.opts(), ...options })
+  })
+
+assetCmd
+  .command('update')
+  .description('Update an asset')
+  .argument('<asset-id>', 'Asset ID')
+  .requiredOption('--game <id>', 'Game ID')
+  .option('--name <name>', 'Asset name')
+  .option('--category <category>', 'Category (logo|symbol|item|weapon|prop)')
+  .option('--tags <tags>', 'Comma-separated tags')
+  .option('--image <path>', 'PNG image file path (add/replace static image)')
+  .action(async (assetId, options) => {
+    await asset.update(assetId, { ...program.opts(), ...options })
+  })
+
+assetCmd
+  .command('delete')
+  .description('Delete an asset (cascades to owned states)')
+  .argument('<asset-id>', 'Asset ID')
+  .requiredOption('--game <id>', 'Game ID')
+  .action(async (assetId, options) => {
+    await asset.deleteAsset(assetId, { ...program.opts(), ...options })
+  })
+
+assetCmd
+  .command('set-default-state')
+  .description('Set default state for a multi-state asset')
+  .argument('<asset-id>', 'Asset ID')
+  .requiredOption('--game <id>', 'Game ID')
+  .requiredOption('--state <state-id>', 'State ID to set as default')
+  .action(async (assetId, options) => {
+    await asset.setDefaultState(assetId, { ...program.opts(), ...options })
+  })
+
+// P1: Asset State commands
+const assetStateCmd = program.command('asset-state').description('Manage asset states (P1)')
+
+assetStateCmd
+  .command('list')
+  .description('List states for an asset')
+  .requiredOption('--game <id>', 'Game ID')
+  .requiredOption('--asset <asset-id>', 'Asset ID')
+  .action(async (options) => {
+    await assetState.list({ ...program.opts(), ...options })
+  })
+
+assetStateCmd
+  .command('show')
+  .description('Show state details')
+  .argument('<state-id>', 'State ID')
+  .requiredOption('--game <id>', 'Game ID')
+  .action(async (stateId, options) => {
+    await assetState.show(stateId, { ...program.opts(), ...options })
+  })
+
+assetStateCmd
+  .command('create')
+  .description('Create a new asset state with image file')
+  .requiredOption('--game <id>', 'Game ID')
+  .requiredOption('--asset <asset-id>', 'Asset ID')
+  .requiredOption('--name <name>', 'State name (e.g., "open", "closed")')
+  .requiredOption('--file <path>', 'PNG file path')
+  .action(async (options) => {
+    await assetState.create({ ...program.opts(), ...options })
+  })
+
+assetStateCmd
+  .command('update')
+  .description('Update an asset state')
+  .argument('<state-id>', 'State ID')
+  .requiredOption('--game <id>', 'Game ID')
+  .option('--name <name>', 'State name')
+  .option('--file <path>', 'PNG file path (replaces existing)')
+  .action(async (stateId, options) => {
+    await assetState.update(stateId, { ...program.opts(), ...options })
+  })
+
+assetStateCmd
+  .command('delete')
+  .description('Delete an asset state (rejects if default state)')
+  .argument('<state-id>', 'State ID')
+  .requiredOption('--game <id>', 'Game ID')
+  .action(async (stateId, options) => {
+    await assetState.deleteState(stateId, { ...program.opts(), ...options })
+  })
+
 // Pose commands
 const poseCmd = program.command('pose').description('Manage poses')
 
@@ -125,7 +247,7 @@ clipCmd
   .description('Import clip(s) - auto-maps moment by filename')
   .argument('<files...>', 'Video files (mp4/webm)')
   .requiredOption('--game <id>', 'Game ID')
-  .option('--moment <moment>', 'Clip moment (intro|hit|finisher|defeat|story_beat)')
+  .option('--moment <moment>', 'Clip moment (intro|hit|finisher|defeat|miss|story_beat)')
   .option('--character <id>', 'Character ID')
   .option('--tags <tags>', 'Comma-separated tags')
   .action(async (files, options) => {
@@ -256,5 +378,14 @@ program
 
 // Storyboard commands (storyboard, shot, layer, camera, effect)
 registerStoryboardCommands(program)
+
+// P3: event + binding
+registerEventCommands(program)
+
+// Scene commands (Phase C)
+registerSceneCommands(program)
+
+// A1: Game-scoped audio library
+registerAudioCommands(program)
 
 program.parse()

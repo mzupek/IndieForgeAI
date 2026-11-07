@@ -13,6 +13,8 @@ import type {
 } from '@shared/types/exportManifest'
 import { EXPORT_MANIFEST_SCHEMA_VERSION } from '@shared/types/exportManifest'
 import { getAssetPipeline, saveStudio, updateAssetPipeline } from './studioStorage'
+import { getDataDir } from './dataDir'
+import { resolveShotBackgroundImagePath } from '../../shared/storyboard/shotBackground'
 import type { Game } from '@shared/types/assetPipeline'
 import { generateStoryboardThumbnails } from '../export/storyboardThumbnails'
 import { homedir } from 'os'
@@ -254,7 +256,7 @@ async function generateManifest(
   }))
   
   // Build storyboards for export (v2)
-  const storyboards = pipeline.storyboards?.filter(sb => sb.gameId === gameId) ?? []
+  const storyboards = pipeline.storyboards?.filter(sb => sb.gameId === game.id) ?? []
   const manifestStoryboards = storyboards.map(sb => {
     const shots = pipeline.storyboardShots?.filter(shot => sb.shotIds.includes(shot.id)) ?? []
     
@@ -297,7 +299,35 @@ async function generateManifest(
           
           return resolved
         })
+
+        const clipTrack = (shot.clipTrack || []).map((block) => {
+          const blockClip = pipeline.clips.find((c) => c.id === block.clipId)
+          return {
+            id: block.id,
+            clipId: block.clipId,
+            clipFile: blockClip ? `clips/${basename(blockClip.file)}` : undefined,
+            role: block.role,
+            layerId: block.layerId ?? null,
+            t: block.t,
+            durationSec: block.durationSec,
+            sourceInSec: block.sourceInSec,
+            sourceOutSec: block.sourceOutSec
+          }
+        })
         
+        const bgResolved = resolveShotBackgroundImagePath(shot, pipeline)
+        let backgroundFile: string | undefined
+        if (bgResolved.path) {
+          const dataDir = getDataDir(dataDirOverride)
+          const normalized = bgResolved.path.replace(/\\/g, '/')
+          const dataPrefix = dataDir.replace(/\\/g, '/')
+          if (normalized.startsWith(dataPrefix)) {
+            backgroundFile = normalized.slice(dataPrefix.length).replace(/^[/\\]+/, '')
+          } else {
+            backgroundFile = shot.backgroundImage || normalized
+          }
+        }
+
         return {
           id: shot.id,
           name: shot.name,
@@ -305,9 +335,13 @@ async function generateManifest(
           aspectRatio: shot.aspectRatio,
           backgroundImage: shot.backgroundImage,
           backgroundClipId: shot.backgroundClipId,
+          backgroundVisualAssetId: shot.backgroundVisualAssetId,
+          backgroundAssetStateId: shot.backgroundAssetStateId,
+          backgroundFile,
           layers,
           cameraTrack: shot.cameraTrack,
           effectsTrack: shot.effectsTrack,
+          clipTrack: clipTrack.length > 0 ? clipTrack : undefined,
           notes: shot.notes,
           thumbnail: shot.thumbnail
         }

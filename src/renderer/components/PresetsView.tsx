@@ -21,6 +21,7 @@ export function PresetsView() {
   
   const presets = activeProject?.assetPipeline?.scenePresets || []
   const characters = activeProject?.assetPipeline?.characters.filter(c => c.gameId === gameId) || []
+  const scenes = activeProject?.assetPipeline?.scenes?.filter(s => s.gameId === gameId) || []
   
   const filteredPresets = filterType 
     ? presets.filter(p => p.type === filterType)
@@ -63,9 +64,9 @@ export function PresetsView() {
   return (
     <div style={{ padding: '2rem', height: '100%', overflow: 'auto' }}>
       <div style={{ marginBottom: '2rem' }}>
-        <h2 style={{ margin: '0 0 0.5rem 0' }}>Scene & Camera Presets</h2>
+        <h2 style={{ margin: '0 0 0.5rem 0' }}>FX Presets</h2>
         <p style={{ margin: 0, color: 'var(--muted)' }}>
-          Reusable camera framings and visual effects for cutscenes and moments
+          Reusable effect recipes (shake, flash, freeze, zoom punch, versus layout) — attach to scenes for juice
         </p>
       </div>
 
@@ -105,15 +106,21 @@ export function PresetsView() {
             </p>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-              {filteredPresets.map(preset => (
-                <PresetListItem
-                  key={preset.id}
-                  preset={preset}
-                  isSelected={selectedPreset?.id === preset.id}
-                  onClick={() => setSelectedPreset(preset)}
-                  onRemove={() => handleRemovePreset(preset.id)}
-                />
-              ))}
+          {filteredPresets.map(preset => {
+            const usedInScenes = scenes
+              .filter(s => s.attachedPresets.includes(preset.id))
+              .map(s => s.name)
+            return (
+              <PresetListItem
+                key={preset.id}
+                preset={preset}
+                isSelected={selectedPreset?.id === preset.id}
+                onClick={() => setSelectedPreset(preset)}
+                onRemove={() => handleRemovePreset(preset.id)}
+                usedInScenes={usedInScenes}
+              />
+            )
+          })}
             </div>
           )}
         </div>
@@ -152,16 +159,43 @@ export function PresetsView() {
   )
 }
 
+function getParamsSummary(preset: ScenePreset): string {
+  const params = preset.params
+  switch (preset.type) {
+    case 'shake':
+      return `intensity ${params.intensity || 10} · ${params.durationMs || 300}ms`
+    case 'flash':
+      return `${params.color || 'white'} · ${params.durationMs || 200}ms`
+    case 'freeze':
+      return `${params.durationMs || 500}ms`
+    case 'zoom_punch':
+      return `zoom ${params.scale || 1.15}x · ${params.durationMs || 300}ms`
+    case 'versus':
+      return `${params.characterAId ? 'vs setup' : 'no chars'} · zoom ${params.zoom || 1.0}x`
+    default:
+      return ''
+  }
+}
+
+function getDisplayName(preset: ScenePreset): string {
+  if (preset.tags.length > 0) {
+    return `${getPresetTypeDisplayName(preset.type)} - ${preset.tags[0]}`
+  }
+  return getPresetTypeDisplayName(preset.type)
+}
+
 function PresetListItem({
   preset,
   isSelected,
   onClick,
-  onRemove
+  onRemove,
+  usedInScenes
 }: {
   preset: ScenePreset
   isSelected: boolean
   onClick: () => void
   onRemove: () => void
+  usedInScenes?: string[]
 }) {
   return (
     <div
@@ -175,17 +209,26 @@ function PresetListItem({
       onClick={onClick}
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '0.5rem' }}>
-        <span style={{ 
-          display: 'inline-block',
-          padding: '2px 8px',
-          background: 'var(--forge-gold)',
-          color: '#000',
-          borderRadius: '4px',
-          fontSize: '0.75rem',
-          fontWeight: 600
-        }}>
-          {getPresetTypeDisplayName(preset.type)}
-        </span>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontWeight: 'bold', marginBottom: '0.25rem' }}>
+            {getDisplayName(preset)}
+          </div>
+          <span style={{ 
+            display: 'inline-block',
+            padding: '2px 8px',
+            background: 'var(--forge-gold)',
+            color: '#000',
+            borderRadius: '4px',
+            fontSize: '0.75rem',
+            fontWeight: 600,
+            marginRight: '0.5rem'
+          }}>
+            {preset.type}
+          </span>
+          <span style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>
+            {getParamsSummary(preset)}
+          </span>
+        </div>
         <button
           type="button"
           onClick={(e) => {
@@ -203,9 +246,9 @@ function PresetListItem({
         </button>
       </div>
       
-      {preset.tags.length > 0 && (
-        <div style={{ fontSize: '0.875rem', color: 'var(--muted)' }}>
-          Tags: {preset.tags.join(', ')}
+      {preset.tags.length > 1 && (
+        <div style={{ fontSize: '0.75rem', color: 'var(--muted)', marginTop: '0.25rem' }}>
+          Tags: {preset.tags.slice(1).join(', ')}
         </div>
       )}
     </div>
