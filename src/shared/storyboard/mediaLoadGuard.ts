@@ -12,14 +12,32 @@ export function backgroundSourceKey(
   return `${shotId || ''}::${sourcePath || ''}`
 }
 
+export function backgroundPathFromKey(key: string): string {
+  const sep = key.indexOf('::')
+  return sep < 0 ? '' : key.slice(sep + 2)
+}
+
+/**
+ * Commit a finished still only when it is still the shot+source we asked for.
+ * `expectedKey` must remain that shot+source until onload — emptying it
+ * (e.g. a later selectedShotId reset) rejects a matching load and leaves
+ * the canvas blank.
+ */
 export function shouldApplyLoadedBackground(
   expectedKey: string,
   loadedKey: string
 ): boolean {
   if (!expectedKey || !loadedKey) return false
   if (expectedKey !== loadedKey) return false
-  const path = expectedKey.slice(expectedKey.indexOf('::') + 2)
-  return path.length > 0
+  return backgroundPathFromKey(expectedKey).length > 0
+}
+
+/** Blank the canvas only when shot or source actually changed. */
+export function shouldClearBackgroundForKeyChange(
+  previousKey: string,
+  nextKey: string
+): boolean {
+  return previousKey !== nextKey
 }
 
 export type VideoCacheStatus = 'loading' | 'ready' | 'error' | 'unsupported' | 'missing'

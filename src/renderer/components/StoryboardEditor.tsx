@@ -113,6 +113,7 @@ import {
   backgroundSourceKey,
   clampVideoSeekTime,
   shouldApplyLoadedBackground,
+  shouldClearBackgroundForKeyChange,
   shouldSkipVideoReload,
   videoHasDecodableFrame
 } from '@shared/storyboard/mediaLoadGuard'
@@ -711,34 +712,38 @@ export function StoryboardEditor() {
     }
   }, [selectedShot, editingNotes])
 
+  // Resolve still path each render (cheap). Effect deps are the path string +
+  // shot id so a new pipeline object identity cannot cancel/blank a matching load.
+  const resolvedBackground =
+    selectedShot && pipeline
+      ? resolveShotBackgroundImagePath(selectedShot, pipeline)
+      : selectedShot?.backgroundImage
+        ? { path: selectedShot.backgroundImage }
+        : {}
+  const backgroundStillPath = resolvedBackground.path || null
+
+  useEffect(() => {
+    setBackgroundError(resolvedBackground.error || null)
+  }, [resolvedBackground.error])
+
   // Load background image (Library full-res path or legacy/direct-import path)
   useEffect(() => {
     let cancelled = false
-    if (!selectedShot) {
-      backgroundLoadKeyRef.current = ''
-      setBackgroundImage(null)
-      return
-    }
-
-    const resolved = pipeline
-      ? resolveShotBackgroundImagePath(selectedShot, pipeline)
-      : selectedShot.backgroundImage
-        ? { path: selectedShot.backgroundImage }
-        : {}
-
-    if (resolved.error) {
-      setBackgroundError(resolved.error)
-    } else {
-      setBackgroundError(null)
-    }
-
-    const path = resolved.path || null
-    const loadKey = backgroundSourceKey(selectedShot.id, path)
+    const shotId = selectedShot?.id ?? null
+    const path = backgroundStillPath
+    const loadKey = backgroundSourceKey(shotId, path)
+    const previousKey = backgroundLoadKeyRef.current
     backgroundLoadKeyRef.current = loadKey
-    setBackgroundImage(null)
 
-    if (!path) {
+    if (!shotId || !path) {
+      if (shouldClearBackgroundForKeyChange(previousKey, loadKey)) {
+        setBackgroundImage(null)
+      }
       return
+    }
+
+    if (shouldClearBackgroundForKeyChange(previousKey, loadKey)) {
+      setBackgroundImage(null)
     }
 
     const loadBg = async () => {
@@ -768,14 +773,7 @@ export function StoryboardEditor() {
     return () => {
       cancelled = true
     }
-  }, [
-    selectedShot?.id,
-    selectedShot?.backgroundImage,
-    selectedShot?.backgroundVisualAssetId,
-    selectedShot?.backgroundAssetStateId,
-    pipeline,
-    gameId
-  ])
+  }, [selectedShot?.id, backgroundStillPath])
 
   // Keep preview engine catalog in sync; never persist preview holds
   useEffect(() => {
@@ -799,8 +797,6 @@ export function StoryboardEditor() {
     setShowAddEventCue(false)
     setEventCueError(null)
     setEventCueWarning(null)
-    backgroundLoadKeyRef.current = ''
-    setBackgroundImage(null)
   }, [selectedShotId])
 
   useEffect(() => {

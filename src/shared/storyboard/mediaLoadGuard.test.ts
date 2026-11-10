@@ -7,6 +7,7 @@ import {
   backgroundSourceKey,
   clampVideoSeekTime,
   shouldApplyLoadedBackground,
+  shouldClearBackgroundForKeyChange,
   shouldEvictVideoEntry,
   shouldSkipVideoReload,
   videoHasDecodableFrame
@@ -14,6 +15,23 @@ import {
 
 function assert(condition: boolean, message: string): void {
   if (!condition) throw new Error(`Assertion failed: ${message}`)
+}
+
+function simulateEditorApply(opts: {
+  shotId: string
+  path: string
+  /** 6f28e5a regression: a later selectedShotId effect emptied the expected key. */
+  wipeExpectedKeyAfterStart?: boolean
+  switchToShotId?: string
+  switchToPath?: string
+}): boolean {
+  const loadKey = backgroundSourceKey(opts.shotId, opts.path)
+  let expected = loadKey
+  if (opts.wipeExpectedKeyAfterStart) expected = ''
+  if (opts.switchToShotId !== undefined) {
+    expected = backgroundSourceKey(opts.switchToShotId, opts.switchToPath ?? opts.path)
+  }
+  return shouldApplyLoadedBackground(expected, loadKey)
 }
 
 function testBackgroundKeyAndStaleApply(): void {
@@ -31,6 +49,37 @@ function testBackgroundKeyAndStaleApply(): void {
     'empty path never applies a bitmap'
   )
   console.log('✓ background load key ignores stale/out-of-order stills')
+}
+
+function testMatchingLoadIsAccepted(): void {
+  const path = 'backgrounds/1793895282747.png'
+  assert(
+    simulateEditorApply({ shotId: 'establish', path }) === true,
+    'matching shot+source onload is accepted (not only stale rejected)'
+  )
+  assert(
+    simulateEditorApply({ shotId: 'establish', path, wipeExpectedKeyAfterStart: true }) === false,
+    'emptying expected key after load start would reject the matching still'
+  )
+  assert(
+    simulateEditorApply({
+      shotId: 'establish',
+      path,
+      switchToShotId: 'other',
+      switchToPath: 'backgrounds/other.png'
+    }) === false,
+    'previous shot onload rejected after a real shot switch'
+  )
+  const same = backgroundSourceKey('establish', path)
+  assert(
+    !shouldClearBackgroundForKeyChange(same, same),
+    'same shot+source does not blank the displayed still'
+  )
+  assert(
+    shouldClearBackgroundForKeyChange(same, backgroundSourceKey('other', path)),
+    'shot switch blanks immediately so the previous still cannot stick'
+  )
+  console.log('✓ matching still load is accepted; wipe/stale still rejected')
 }
 
 function testStuckVideoEvictAndRetry(): void {
@@ -65,6 +114,7 @@ function testSeekClampAndDecodableFrame(): void {
 
 function main(): void {
   testBackgroundKeyAndStaleApply()
+  testMatchingLoadIsAccepted()
   testStuckVideoEvictAndRetry()
   testSeekClampAndDecodableFrame()
   console.log('\nAll media load guard tests passed')
