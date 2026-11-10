@@ -183,6 +183,7 @@ export function EventBindingsPanel({
         Preview-fire in Forge only. Authored layer defaults and audioTrack are not overwritten.
         Bind playSfx on the same named event as a pose/state/text/visibility action to hear a hit
         and see Hurt together. playSfx is not tied to timed pose/state keys.
+        Place an Events-track cue to fire the same named event during timeline Play.
         Unity/Godot detect real hits.
       </div>
 

@@ -240,6 +240,9 @@ export async function loadStudio(dataDirOverride?: string): Promise<StudioData> 
           if (!shot.audioTrack) {
             shot.audioTrack = []
           }
+          if (!shot.eventCues) {
+            shot.eventCues = []
+          }
         }
       }
       

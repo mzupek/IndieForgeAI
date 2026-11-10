@@ -22,6 +22,7 @@ import {
   validateBindingReferences,
   validateEventDefinitionInput
 } from '../../shared/storyboard/eventValidation'
+import { collectEventCueUsage } from '../../shared/storyboard/eventCues'
 import { getAssetPipeline, updateAssetPipeline } from './studioStorage'
 
 export interface CreateEventInput {
@@ -137,8 +138,17 @@ export async function removeEvent(
     throw new Error(`Event not found: ${eventId}`)
   }
   const usage = collectEventBindingUsage(pipeline, eventId)
-  if (usage.labels.length > 0) {
+  const cueUsage = collectEventCueUsage(pipeline, eventId)
+  if (usage.labels.length > 0 && cueUsage.labels.length === 0) {
     throw new Error(formatBindingInUseError('event', event.name, usage.labels))
+  }
+  if (usage.labels.length > 0 || cueUsage.labels.length > 0) {
+    const labels = [...usage.labels, ...cueUsage.labels]
+    const preview = labels.slice(0, 3).join(', ')
+    const extra = labels.length > 3 ? '...' : ''
+    throw new Error(
+      `Cannot delete event '${event.name}': referenced by ${labels.length} item(s): ${preview}${extra}`
+    )
   }
   pipeline.eventDefinitions = pipeline.eventDefinitions.filter((e) => e.id !== eventId)
   await updateAssetPipeline(pipeline, dataDirOverride)

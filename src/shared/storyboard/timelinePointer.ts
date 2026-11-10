@@ -1,12 +1,22 @@
 /**
- * Y-aware hit test for the five timeline tracks (camera / pose / effects / clips / audio).
+ * Y-aware hit test for the six timeline tracks
+ * (camera / pose / effects / clips / audio / events).
  * Click on empty track time → playhead. Click on a marker/block → select (and drag if movable).
  */
 
 export const TIMELINE_NEAR_RATIO = 0.03
 export const TIMELINE_EDGE_RATIO = 0.012
+export const TIMELINE_TRACK_COUNT = 6
+export const TIMELINE_TRACK_ORDER = [
+  'camera',
+  'pose',
+  'effects',
+  'clips',
+  'audio',
+  'events'
+] as const
 
-export type TimelineTrack = 'camera' | 'pose' | 'effects' | 'clips' | 'audio'
+export type TimelineTrack = (typeof TIMELINE_TRACK_ORDER)[number]
 
 export type TimelineClipDrag = 'move' | 'trimIn' | 'trimOut'
 
@@ -30,13 +40,14 @@ export type TimelineHit =
       grabOffsetSec: number
       timeSec: number
     }
+  | { kind: 'eventCue'; cueId: string; timeSec: number }
 
 export function timelineTrackAtYRatio(yRatio: number): TimelineTrack {
-  if (yRatio < 0.2) return 'camera'
-  if (yRatio < 0.4) return 'pose'
-  if (yRatio < 0.6) return 'effects'
-  if (yRatio < 0.8) return 'clips'
-  return 'audio'
+  const band = Math.min(
+    TIMELINE_TRACK_COUNT - 1,
+    Math.max(0, Math.floor(yRatio * TIMELINE_TRACK_COUNT + 1e-9))
+  )
+  return TIMELINE_TRACK_ORDER[band]
 }
 
 export function nearMarkerTime(clickTime: number, markerTime: number, durationSec: number): boolean {
@@ -59,6 +70,7 @@ export function hitTestTimeline(input: {
   effectTimes: number[]
   clipBlocks: Array<{ id: string; t: number; durationSec: number; implicit?: boolean }>
   audioBlocks: Array<{ id: string; t: number; durationSec: number }>
+  eventCues?: Array<{ id: string; t: number }>
 }): TimelineHit {
   const duration = input.durationSec > 0 ? input.durationSec : 1
   const x = Math.max(0, Math.min(1, input.xRatio))
@@ -106,7 +118,7 @@ export function hitTestTimeline(input: {
         }
       }
     }
-  } else {
+  } else if (track === 'audio') {
     for (let i = input.audioBlocks.length - 1; i >= 0; i--) {
       const block = input.audioBlocks[i]
       const x0 = block.t / duration
@@ -119,6 +131,14 @@ export function hitTestTimeline(input: {
           grabOffsetSec: clickTime - block.t,
           timeSec: clickTime
         }
+      }
+    }
+  } else {
+    const cues = input.eventCues || []
+    for (let i = cues.length - 1; i >= 0; i--) {
+      const cue = cues[i]
+      if (nearMarkerTime(clickTime, cue.t, duration)) {
+        return { kind: 'eventCue', cueId: cue.id, timeSec: clickTime }
       }
     }
   }

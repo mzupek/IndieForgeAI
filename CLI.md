@@ -1181,6 +1181,20 @@ forge binding create --game <gameId> --shot <shotId> --event <eventId> --layer <
 forge event fire --game <gameId> --shot <shotId> --event <eventId> [--now-ms 0] [--tick-ms 200] [--json]
 ```
 
+### Event cues (timeline)
+
+Authored `shot.eventCues[]` are **one-shot markers** on the Events track. They are **not** P4 pose/state keys (those are step/hold samples). Play fires the named event once per **forward-play crossing** of `t`. Pause, reverse scrub, and seek-into do not fire (no bursts). Shot-loop wrap re-arms the cue for the next pass. Firing uses the same preview engine as the Fire button (all shot bindings, including `playSfx`) and does **not** mutate authored JSON. A4 export can carry cues later; this command does not export.
+
+Warns (does not fail) if the event has no bindings on this shot. Event delete is blocked while a cue still points at it. Shrinking the shot is refused if a cue would fall past the new end.
+
+```bash
+forge shot event-cue add --shot <shotId> --event <eventId> --time <seconds> [--json]
+forge shot event-cue list --shot <shotId> [--json]
+forge shot event-cue show --id <cueId> [--json]
+forge shot event-cue update --id <cueId> [--time <seconds>] [--event <eventId>] [--json]
+forge shot event-cue remove --id <cueId> [--json]
+```
+
 ---
 
 ## Layer Management

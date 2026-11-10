@@ -8,7 +8,8 @@ import type {
   LayerTimedKey,
   LayerTimedKeyAction,
   ShotClipBlock,
-  ShotAudioBlock
+  ShotAudioBlock,
+  ShotEventCue
 } from '@shared/types/assetPipeline'
 import { getAssetPipeline, updateAssetPipeline } from './studioStorage'
 import { validateLayerReferences } from '../../shared/storyboard/layerValidation'
@@ -38,6 +39,12 @@ import {
   validateShotAudioBlock
 } from '../../shared/storyboard/audioBlocks'
 import { assertShotDurationFitsContent } from '../../shared/storyboard/shotDuration'
+import {
+  ensureShotEventCues,
+  findEventCue,
+  parseEventCueTime,
+  validateEventCue
+} from '../../shared/storyboard/eventCues'
 
 /**
  * Create a new storyboard
@@ -173,6 +180,7 @@ export async function createShot(
     effectsTrack: [],
     clipTrack: [],
     audioTrack: [],
+    eventCues: [],
     notes: input.notes,
     createdAt: now,
     updatedAt: now
@@ -219,6 +227,7 @@ type ShotPatch = Partial<
     | 'effectsTrack'
     | 'clipTrack'
     | 'audioTrack'
+    | 'eventCues'
     | 'notes'
     | 'thumbnail'
     | 'stageTreatment'
@@ -250,6 +259,7 @@ export async function updateShot(
     layers: updates.layers ?? existingShot.layers,
     clipTrack: updates.clipTrack ?? existingShot.clipTrack,
     audioTrack: updates.audioTrack ?? existingShot.audioTrack,
+    eventCues: updates.eventCues ?? existingShot.eventCues,
     cameraTrack: updates.cameraTrack ?? existingShot.cameraTrack,
     effectsTrack: updates.effectsTrack ?? existingShot.effectsTrack
   }
@@ -904,6 +914,85 @@ export async function removeShotAudioBlock(
   const found = findAudioBlock(pipeline, blockId)
   if (!found) throw new Error(`Audio block not found: ${blockId}`)
   found.shot.audioTrack = (found.shot.audioTrack || []).filter((b) => b.id !== blockId)
+  found.shot.updatedAt = new Date().toISOString()
+  await updateAssetPipeline(pipeline, dataDirOverride)
+}
+
+export async function addShotEventCue(
+  shotId: string,
+  input: { t: number | string; eventId: string },
+  dataDirOverride?: string
+): Promise<{ cue: ShotEventCue; warning?: string }> {
+  const pipeline = await getAssetPipeline(dataDirOverride)
+  const shot = pipeline.storyboardShots.find((s) => s.id === shotId)
+  if (!shot) throw new Error(`Shot not found: ${shotId}`)
+  const cues = ensureShotEventCues(shot)
+  const t = parseEventCueTime(input.t, shot.durationSec)
+  const cue: ShotEventCue = {
+    id: randomUUID(),
+    t,
+    eventId: (input.eventId || '').trim(),
+    schemaVersion: 1
+  }
+  const { warning } = validateEventCue(cue, pipeline, shotId)
+  cues.push(cue)
+  cues.sort((a, b) => a.t - b.t || a.id.localeCompare(b.id))
+  shot.updatedAt = new Date().toISOString()
+  await updateAssetPipeline(pipeline, dataDirOverride)
+  return { cue, warning }
+}
+
+export async function listShotEventCues(
+  shotId: string,
+  dataDirOverride?: string
+): Promise<ShotEventCue[]> {
+  const shot = await getShot(shotId, dataDirOverride)
+  if (!shot) throw new Error(`Shot not found: ${shotId}`)
+  return [...(shot.eventCues || [])].sort((a, b) => a.t - b.t || a.id.localeCompare(b.id))
+}
+
+export async function getShotEventCue(
+  cueId: string,
+  dataDirOverride?: string
+): Promise<{ shotId: string; cue: ShotEventCue } | undefined> {
+  const pipeline = await getAssetPipeline(dataDirOverride)
+  const found = findEventCue(pipeline, cueId)
+  if (!found) return undefined
+  return { shotId: found.shot.id, cue: found.cue }
+}
+
+export async function updateShotEventCue(
+  cueId: string,
+  patch: { t?: number | string; eventId?: string },
+  dataDirOverride?: string
+): Promise<{ cue: ShotEventCue; warning?: string }> {
+  const pipeline = await getAssetPipeline(dataDirOverride)
+  const found = findEventCue(pipeline, cueId)
+  if (!found) throw new Error(`Event cue not found: ${cueId}`)
+  const next: ShotEventCue = {
+    ...found.cue,
+    t:
+      patch.t !== undefined
+        ? parseEventCueTime(patch.t, found.shot.durationSec)
+        : found.cue.t,
+    eventId: patch.eventId !== undefined ? patch.eventId.trim() : found.cue.eventId
+  }
+  const { warning } = validateEventCue(next, pipeline, found.shot.id)
+  found.shot.eventCues = (found.shot.eventCues || []).map((c) => (c.id === cueId ? next : c))
+  found.shot.eventCues.sort((a, b) => a.t - b.t || a.id.localeCompare(b.id))
+  found.shot.updatedAt = new Date().toISOString()
+  await updateAssetPipeline(pipeline, dataDirOverride)
+  return { cue: next, warning }
+}
+
+export async function removeShotEventCue(
+  cueId: string,
+  dataDirOverride?: string
+): Promise<void> {
+  const pipeline = await getAssetPipeline(dataDirOverride)
+  const found = findEventCue(pipeline, cueId)
+  if (!found) throw new Error(`Event cue not found: ${cueId}`)
+  found.shot.eventCues = (found.shot.eventCues || []).filter((c) => c.id !== cueId)
   found.shot.updatedAt = new Date().toISOString()
   await updateAssetPipeline(pipeline, dataDirOverride)
 }

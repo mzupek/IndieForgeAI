@@ -9,7 +9,17 @@ import { AUDIO_BLOCK_TIME_EPS, audioBlockEnd } from './audioBlocks'
 import { CLIP_BLOCK_TIME_EPS, clipBlockEnd } from './clipBlocks'
 import { TIMED_KEY_TIME_EPS } from './timedKeys'
 
-export type ShotDurationBlockerKind = 'audio' | 'clip' | 'timed-key' | 'camera' | 'effect'
+export type ShotDurationBlockerKind =
+  | 'audio'
+  | 'clip'
+  | 'timed-key'
+  | 'camera'
+  | 'effect'
+  | 'event-cue'
+
+export function eventCueOutsideDuration(cue: { t: number }, durationSec: number): boolean {
+  return durationSec + TIMED_KEY_TIME_EPS < cue.t
+}
 
 export interface ShotDurationBlocker {
   kind: ShotDurationBlockerKind
@@ -98,6 +108,17 @@ export function collectShotDurationBlockers(
         id: `t=${marker.t}`,
         t: marker.t,
         label: `effect marker at t=${marker.t}s`
+      })
+    }
+  }
+
+  for (const cue of shot.eventCues || []) {
+    if (eventCueOutsideDuration(cue, durationSec)) {
+      blockers.push({
+        kind: 'event-cue',
+        id: cue.id,
+        t: cue.t,
+        label: `an event cue exists at t=${cue.t}s (${cue.id})`
       })
     }
   }

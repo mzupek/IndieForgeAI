@@ -536,6 +536,12 @@ export interface StoryboardShot {
    * Playback uses HTMLAudioElement.play()/pause() (paused currentTime seeks stay silent).
    */
   audioTrack?: ShotAudioBlock[]
+
+  /**
+   * Authored one-shot event cues. Independent of P4 pose/state keys.
+   * Timeline Play fires each cue once per forward-play crossing of `t`.
+   */
+  eventCues?: ShotEventCue[]
   
   /** Notes for engineer */
   notes?: string
@@ -545,6 +551,14 @@ export interface StoryboardShot {
   
   createdAt: string
   updatedAt: string
+}
+
+export interface ShotEventCue {
+  id: string
+  /** Shot time (seconds) when Play should fire this named event */
+  t: number
+  eventId: string
+  schemaVersion: 1
 }
 
 /**

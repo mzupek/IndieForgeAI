@@ -13,7 +13,8 @@ export type {
   EventBindingAction,
   EventDefinition,
   EventPayloadSchema,
-  EventReturnPolicy
+  EventReturnPolicy,
+  ShotEventCue
 } from './assetPipeline'
 
 export {

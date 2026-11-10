@@ -95,6 +95,8 @@ import {
   type PointerSessionEvent
 } from '@shared/storyboard/pointerCapture'
 import { hitTestTimeline } from '@shared/storyboard/timelinePointer'
+import { collectEventCueCrossings } from '@shared/storyboard/eventCuePlayback'
+import { eventCueIssues } from '@shared/storyboard/eventCues'
 
 type EditorMode = 'layout' | 'camera'
 type DragMode = 'move' | 'scale' | 'rotate' | 'framingRect' | 'cameraMarker' | 'effectMarker' | null
@@ -466,11 +468,12 @@ export function StoryboardEditor() {
   const [dragMode, setDragMode] = useState<DragMode>(null)
   const [dragStart, setDragStart] = useState<any>(null)
   const [draggedMarker, setDraggedMarker] = useState<{
-    type: 'camera' | 'effect' | 'timedKey' | 'clipBlock' | 'audioBlock'
+    type: 'camera' | 'effect' | 'timedKey' | 'clipBlock' | 'audioBlock' | 'eventCue'
     index: number
     layerId?: string
     keyId?: string
     blockId?: string
+    cueId?: string
     clipDrag?: 'move' | 'trimIn' | 'trimOut'
     grabOffsetSec?: number
   } | null>(null)
@@ -525,6 +528,13 @@ export function StoryboardEditor() {
   const [audioFadeOutDraft, setAudioFadeOutDraft] = useState('0')
   const [audioLoopDraft, setAudioLoopDraft] = useState(false)
   const [audioError, setAudioError] = useState<string | null>(null)
+  const [selectedEventCueId, setSelectedEventCueId] = useState<string | null>(null)
+  const [showAddEventCue, setShowAddEventCue] = useState(false)
+  const [addEventCueEventId, setAddEventCueEventId] = useState('')
+  const [confirmDeleteEventCueId, setConfirmDeleteEventCueId] = useState<string | null>(null)
+  const [eventCueTimeDraft, setEventCueTimeDraft] = useState('')
+  const [eventCueError, setEventCueError] = useState<string | null>(null)
+  const [eventCueWarning, setEventCueWarning] = useState<string | null>(null)
   const [shotDurationDraft, setShotDurationDraft] = useState('')
   const [shotDurationError, setShotDurationError] = useState<string | null>(null)
   const audioVoicesRef = useRef<Map<string, AudioVoice>>(new Map())
@@ -605,6 +615,8 @@ export function StoryboardEditor() {
   const selectedClipBlock = clipBlocks.find((b) => b.id === selectedClipBlockId)
   const audioBlocks = selectedShot?.audioTrack || []
   const selectedAudioBlock = audioBlocks.find((b) => b.id === selectedAudioBlockId)
+  const eventCues = selectedShot?.eventCues || []
+  const selectedEventCue = eventCues.find((c) => c.id === selectedEventCueId)
 
   const timedKeyActionLabel = (key: LayerTimedKey): string => {
     if (key.action.type === 'setPose') {
@@ -730,6 +742,11 @@ export function StoryboardEditor() {
     setConfirmDeleteClipBlockId(null)
     setShowAddClip(false)
     setPendingExtend(null)
+    setSelectedEventCueId(null)
+    setConfirmDeleteEventCueId(null)
+    setShowAddEventCue(false)
+    setEventCueError(null)
+    setEventCueWarning(null)
   }, [selectedShotId])
 
   useEffect(() => {
@@ -769,6 +786,16 @@ export function StoryboardEditor() {
     selectedAudioBlock?.fadeOutSec,
     selectedAudioBlock?.loop
   ])
+
+  useEffect(() => {
+    if (!selectedEventCue) return
+    setEventCueTimeDraft(selectedEventCue.t.toFixed(2))
+    setEventCueWarning(
+      pipeline && selectedShot
+        ? eventCueIssues(selectedEventCue, pipeline, selectedShot.id)
+        : null
+    )
+  }, [selectedEventCueId, selectedEventCue?.t, selectedEventCue?.eventId, pipeline, selectedShot?.id])
 
   useEffect(() => {
     if (!selectedShot) return
@@ -1040,6 +1067,23 @@ export function StoryboardEditor() {
         setAudioEpoch((n) => n + 1)
       }
     })
+    const crossed = collectEventCueCrossings(
+      selectedShot.eventCues || [],
+      lastPlaybackTimeRef.current,
+      playbackTime,
+      {
+        transport: playbackState,
+        scrubbing: dragMode === ('playhead' as any),
+        shotDurationSec: selectedShot.durationSec
+      }
+    )
+    if (crossed.length > 0) {
+      setEventSfxError(null)
+      for (const cue of crossed) {
+        previewEngineRef.current.fire(cue.eventId, performance.now())
+      }
+      commitPreview()
+    }
     lastPlaybackTimeRef.current = playbackTime
   }, [playbackTime, playbackState, selectedShot, audioEpoch, dragMode])
 
@@ -1945,16 +1989,19 @@ export function StoryboardEditor() {
         id: b.id,
         t: b.t,
         durationSec: b.durationSec
-      }))
+      })),
+      eventCues: eventCues.map((c) => ({ id: c.id, t: c.t }))
     })
 
     if (hit.kind === 'camera') {
+      setSelectedEventCueId(null)
       setDraggedMarker({ type: 'camera', index: hit.index })
       setDragMode('marker' as any)
       capturePointer(e.currentTarget, e.pointerId)
       return
     }
     if (hit.kind === 'timedKey') {
+      setSelectedEventCueId(null)
       setDraggedMarker({
         type: 'timedKey',
         index: hit.index,
@@ -1966,6 +2013,7 @@ export function StoryboardEditor() {
       return
     }
     if (hit.kind === 'effect') {
+      setSelectedEventCueId(null)
       setDraggedMarker({ type: 'effect', index: hit.index })
       setDragMode('marker' as any)
       capturePointer(e.currentTarget, e.pointerId)
@@ -1975,6 +2023,7 @@ export function StoryboardEditor() {
       setSelectedClipBlockId(hit.blockId)
       setSelectedTimedKeyId(null)
       setSelectedAudioBlockId(null)
+      setSelectedEventCueId(null)
       setEditingCamera(false)
       setSelectedCameraIndex(null)
       setEditingEffect(false)
@@ -1998,6 +2047,7 @@ export function StoryboardEditor() {
       setSelectedAudioBlockId(hit.blockId)
       setSelectedClipBlockId(null)
       setSelectedTimedKeyId(null)
+      setSelectedEventCueId(null)
       setEditingCamera(false)
       setSelectedCameraIndex(null)
       setEditingEffect(false)
@@ -2008,6 +2058,24 @@ export function StoryboardEditor() {
         blockId: hit.blockId,
         clipDrag: hit.clipDrag,
         grabOffsetSec: hit.grabOffsetSec
+      })
+      setDragMode('marker' as any)
+      capturePointer(e.currentTarget, e.pointerId)
+      return
+    }
+    if (hit.kind === 'eventCue') {
+      setSelectedEventCueId(hit.cueId)
+      setSelectedAudioBlockId(null)
+      setSelectedClipBlockId(null)
+      setSelectedTimedKeyId(null)
+      setEditingCamera(false)
+      setSelectedCameraIndex(null)
+      setEditingEffect(false)
+      setSelectedEffectIndex(null)
+      setDraggedMarker({
+        type: 'eventCue',
+        index: eventCues.findIndex((c) => c.id === hit.cueId),
+        cueId: hit.cueId
       })
       setDragMode('marker' as any)
       capturePointer(e.currentTarget, e.pointerId)
@@ -2182,6 +2250,28 @@ export function StoryboardEditor() {
           }
           setActiveProject(updatedProject)
         }
+      } else if (draggedMarker.type === 'eventCue' && draggedMarker.cueId) {
+        const cueId = draggedMarker.cueId
+        const clamped = Math.max(0, Math.min(selectedShot.durationSec, newTime))
+        if (activeProject && activeProject.assetPipeline) {
+          const updatedProject = {
+            ...activeProject,
+            assetPipeline: {
+              ...activeProject.assetPipeline,
+              storyboardShots: activeProject.assetPipeline.storyboardShots?.map((s) =>
+                s.id === selectedShotId
+                  ? {
+                      ...s,
+                      eventCues: (s.eventCues || []).map((c) =>
+                        c.id === cueId ? { ...c, t: clamped } : c
+                      )
+                    }
+                  : s
+              )
+            }
+          }
+          setActiveProject(updatedProject)
+        }
       } else {
         const updated = [...selectedShot.effectsTrack]
         updated[draggedMarker.index] = { ...updated[draggedMarker.index], t: newTime }
@@ -2338,6 +2428,21 @@ export function StoryboardEditor() {
             setLayerError(msg)
             setAudioError(msg)
           }
+          const proj = await window.indieForge.projects.open(projectId!)
+          setActiveProject(proj)
+        }
+      } else if (draggedMarker.type === 'eventCue' && draggedMarker.cueId) {
+        const cue = (selectedShot.eventCues || []).find((c) => c.id === draggedMarker.cueId)
+        try {
+          if (cue) {
+            await window.indieForge.pipeline.updateShotEventCue(projectId!, cue.id, { t: cue.t })
+          }
+          const proj = await window.indieForge.projects.open(projectId!)
+          setActiveProject(proj)
+          setSelectedEventCueId(draggedMarker.cueId)
+          setEventCueError(null)
+        } catch (err) {
+          setEventCueError(err instanceof Error ? err.message : 'Failed to move event cue')
           const proj = await window.indieForge.projects.open(projectId!)
           setActiveProject(proj)
         }
@@ -3135,6 +3240,55 @@ export function StoryboardEditor() {
     }
   }
 
+  const handleAddEventCue = async () => {
+    if (!selectedShot || !addEventCueEventId) {
+      setEventCueError('Select a named event from this Game')
+      return
+    }
+    try {
+      setEventCueError(null)
+      await window.indieForge.pipeline.addShotEventCue(projectId!, selectedShotId!, {
+        t: playbackTime,
+        eventId: addEventCueEventId
+      })
+      await reloadProject()
+      setShowAddEventCue(false)
+    } catch (err) {
+      setEventCueError(err instanceof Error ? err.message : 'Failed to add event cue')
+    }
+  }
+
+  const handleCommitEventCueEdits = async (eventIdOverride?: string) => {
+    if (!selectedEventCue) return
+    const t = Number(eventCueTimeDraft)
+    const eventId = eventIdOverride ?? selectedEventCue.eventId
+    try {
+      setEventCueError(null)
+      await window.indieForge.pipeline.updateShotEventCue(projectId!, selectedEventCue.id, {
+        t,
+        eventId
+      })
+      await reloadProject()
+    } catch (err) {
+      setEventCueError(err instanceof Error ? err.message : 'Failed to update event cue')
+      setEventCueTimeDraft(selectedEventCue.t.toFixed(2))
+    }
+  }
+
+  const confirmDeleteEventCueNow = async () => {
+    if (!confirmDeleteEventCueId) return
+    try {
+      setEventCueError(null)
+      await window.indieForge.pipeline.deleteShotEventCue(projectId!, confirmDeleteEventCueId)
+      await reloadProject()
+      if (selectedEventCueId === confirmDeleteEventCueId) setSelectedEventCueId(null)
+    } catch (err) {
+      setEventCueError(err instanceof Error ? err.message : 'Failed to delete event cue')
+    } finally {
+      setConfirmDeleteEventCueId(null)
+    }
+  }
+
   const confirmExtendShotNow = async () => {
     if (!pendingExtend) return
     try {
@@ -3146,6 +3300,7 @@ export function StoryboardEditor() {
       setPendingExtend(null)
       setShowAddClip(false)
       setShowAddAudio(false)
+      setShowAddEventCue(false)
     }
   }
 
@@ -3841,6 +3996,18 @@ export function StoryboardEditor() {
                   >
                     + Audio @ {playbackTime.toFixed(1)}s
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowAddEventCue(true)
+                      setAddEventCueEventId(eventDefinitions[0]?.id || '')
+                      setEventCueError(null)
+                    }}
+                    style={{ fontSize: '0.8rem', padding: '0.25rem 0.5rem' }}
+                    title="Place a one-shot named-event cue. Play fires it once when the playhead crosses this time going forward."
+                  >
+                    + Event @ {playbackTime.toFixed(1)}s
+                  </button>
                   <label style={{ fontSize: '0.75rem', color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
                     {playbackTime.toFixed(2)}s /
                     <input
@@ -3864,7 +4031,7 @@ export function StoryboardEditor() {
               <div 
                 style={{ 
                   position: 'relative', 
-                  height: '200px', 
+                  height: '240px', 
                   background: 'var(--bg)', 
                   borderRadius: '4px', 
                   cursor: 'pointer',
@@ -3892,12 +4059,16 @@ export function StoryboardEditor() {
                 <div style={{ position: 'absolute', left: '0.5rem', top: '165px', fontSize: '0.7rem', fontWeight: 'bold', color: '#FFB347', zIndex: 5, pointerEvents: 'none' }}>
                   Audio
                 </div>
+                <div style={{ position: 'absolute', left: '0.5rem', top: '205px', fontSize: '0.7rem', fontWeight: 'bold', color: '#F48FB1', zIndex: 5, pointerEvents: 'none' }}>
+                  Events
+                </div>
                 
                 {/* Track Dividers */}
                 <div style={{ position: 'absolute', left: 0, right: 0, top: '40px', height: '1px', background: 'rgba(255,255,255,0.1)', pointerEvents: 'none' }} />
                 <div style={{ position: 'absolute', left: 0, right: 0, top: '80px', height: '1px', background: 'rgba(255,255,255,0.1)', pointerEvents: 'none' }} />
                 <div style={{ position: 'absolute', left: 0, right: 0, top: '120px', height: '1px', background: 'rgba(255,255,255,0.1)', pointerEvents: 'none' }} />
                 <div style={{ position: 'absolute', left: 0, right: 0, top: '160px', height: '1px', background: 'rgba(255,255,255,0.1)', pointerEvents: 'none' }} />
+                <div style={{ position: 'absolute', left: 0, right: 0, top: '200px', height: '1px', background: 'rgba(255,255,255,0.1)', pointerEvents: 'none' }} />
                 
                 {/* Playhead - visual indicator, clicks handled by timeline */}
                 <div
@@ -3953,6 +4124,7 @@ export function StoryboardEditor() {
                         // Clear effect selection to show only one inspector
                         setEditingEffect(false)
                         setSelectedEffectIndex(null)
+                        setSelectedEventCueId(null)
                         // Auto-switch to Camera & Effects tab
                         setSidebarTab('camera')
                       }}
@@ -3993,6 +4165,7 @@ export function StoryboardEditor() {
                         setSelectedCameraIndex(null)
                         setEditingEffect(false)
                         setSelectedEffectIndex(null)
+                        setSelectedEventCueId(null)
                       }}
                       style={{
                         position: 'absolute',
@@ -4080,6 +4253,7 @@ export function StoryboardEditor() {
                         setSelectedEffectIndex(null)
                         setSelectedTimedKeyId(null)
                         setSelectedAudioBlockId(null)
+                        setSelectedEventCueId(null)
                       }}
                       style={{
                         position: 'absolute',
@@ -4139,6 +4313,7 @@ export function StoryboardEditor() {
                         setSelectedEffectIndex(null)
                         setSelectedTimedKeyId(null)
                         setSelectedClipBlockId(null)
+                        setSelectedEventCueId(null)
                       }}
                       style={{
                         position: 'absolute',
@@ -4164,6 +4339,45 @@ export function StoryboardEditor() {
                     >
                       {(asset?.name || block.role).slice(0, 12)}
                     </div>
+                  )
+                })}
+
+                {eventCues.map((cue) => {
+                  const duration = selectedShot.durationSec || 1
+                  const selected = selectedEventCueId === cue.id
+                  const event = eventDefinitions.find((e) => e.id === cue.eventId)
+                  const issue = pipeline ? eventCueIssues(cue, pipeline, selectedShot.id) : null
+                  const tooltip = `${event?.name || cue.eventId} @ ${cue.t.toFixed(2)}s\nFires once per forward Play crossing${issue ? `\n${issue}` : ''}`
+                  return (
+                    <div
+                      key={cue.id}
+                      onPointerDown={() => {
+                        setSelectedEventCueId(cue.id)
+                        setSidebarTab('background')
+                        setEditingCamera(false)
+                        setSelectedCameraIndex(null)
+                        setEditingEffect(false)
+                        setSelectedEffectIndex(null)
+                        setSelectedTimedKeyId(null)
+                        setSelectedClipBlockId(null)
+                        setSelectedAudioBlockId(null)
+                      }}
+                      style={{
+                        position: 'absolute',
+                        left: `${(cue.t / duration) * 100}%`,
+                        top: '208px',
+                        width: '18px',
+                        height: '18px',
+                        background: selected ? '#FFD700' : issue ? '#C44' : '#F48FB1',
+                        borderRadius: '50%',
+                        transform: 'translateX(-50%)',
+                        cursor: 'move',
+                        border: selected ? '3px solid #FFF' : '2px solid #fff',
+                        boxShadow: selected ? '0 0 8px rgba(255, 215, 0, 0.6)' : '0 2px 4px rgba(0,0,0,0.3)',
+                        zIndex: selected ? 11 : 5
+                      }}
+                      title={tooltip}
+                    />
                   )
                 })}
               </div>
@@ -4689,6 +4903,110 @@ export function StoryboardEditor() {
                       Delete block
                     </button>
                   </div>
+                </div>
+              )}
+
+              {showAddEventCue && (
+                <div style={{ marginTop: '0.5rem', padding: '0.6rem', background: 'var(--bg)', borderRadius: '4px', fontSize: '0.8rem' }}>
+                  <div style={{ fontWeight: 'bold', marginBottom: '0.35rem' }}>
+                    Add event cue @ {playbackTime.toFixed(2)}s
+                  </div>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--muted)', marginBottom: '0.4rem' }}>
+                    Play fires this named event once when the playhead crosses this time going forward.
+                    Pause, reverse scrub, and seek-into do not fire. Fire in the Events panel still works.
+                  </div>
+                  {eventDefinitions.length === 0 ? (
+                    <div style={{ color: '#ff8a8a', fontSize: '0.75rem' }}>
+                      Create a named event first (sidebar Events). Example: button_touch.
+                    </div>
+                  ) : (
+                    <label style={{ display: 'block', fontSize: '0.75rem' }}>
+                      Event
+                      <select
+                        value={addEventCueEventId}
+                        onChange={(e) => setAddEventCueEventId(e.target.value)}
+                        style={{ marginLeft: '0.35rem' }}
+                      >
+                        {eventDefinitions.map((ev) => (
+                          <option key={ev.id} value={ev.id}>
+                            {ev.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                  {eventCueError && (
+                    <div style={{ color: '#ff8a8a', fontSize: '0.75rem', marginTop: '0.35rem' }}>{eventCueError}</div>
+                  )}
+                  <div style={{ display: 'flex', gap: '0.35rem', marginTop: '0.5rem' }}>
+                    <button
+                      type="button"
+                      onClick={() => void handleAddEventCue()}
+                      disabled={!addEventCueEventId}
+                      style={{ flex: 1, fontSize: '0.85rem', background: '#F48FB1', color: '#1a1a1a' }}
+                    >
+                      Place cue
+                    </button>
+                    <button type="button" onClick={() => setShowAddEventCue(false)} style={{ flex: 1, fontSize: '0.85rem' }}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {selectedEventCue && selectedShot && (
+                <div style={{ marginTop: '0.5rem', padding: '0.6rem', background: 'var(--bg)', borderRadius: '4px', fontSize: '0.8rem' }}>
+                  <div>
+                    <strong>Event cue</strong>
+                    {' · '}
+                    {eventDefinitions.find((e) => e.id === selectedEventCue.eventId)?.name || selectedEventCue.eventId}
+                    {' @ '}
+                    {selectedEventCue.t.toFixed(2)}s
+                  </div>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--muted)', marginTop: '0.25rem' }}>
+                    One-shot forward-play crossing. Does not change authored layers or audioTrack.
+                  </div>
+                  {eventCueWarning && (
+                    <div style={{ color: '#e6b800', fontSize: '0.75rem', marginTop: '0.35rem' }}>{eventCueWarning}</div>
+                  )}
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '0.45rem', alignItems: 'center' }}>
+                    <label style={{ fontSize: '0.75rem' }}>
+                      t
+                      <input
+                        type="number"
+                        step="0.05"
+                        min="0"
+                        value={eventCueTimeDraft}
+                        onChange={(e) => setEventCueTimeDraft(e.target.value)}
+                        onBlur={() => void handleCommitEventCueEdits()}
+                        style={{ width: '4.5rem', marginLeft: '0.25rem' }}
+                      />
+                    </label>
+                    <label style={{ fontSize: '0.75rem' }}>
+                      event
+                      <select
+                        value={selectedEventCue.eventId}
+                        onChange={(e) => void handleCommitEventCueEdits(e.target.value)}
+                        style={{ marginLeft: '0.25rem' }}
+                      >
+                        {eventDefinitions.map((ev) => (
+                          <option key={ev.id} value={ev.id}>
+                            {ev.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDeleteEventCueId(selectedEventCue.id)}
+                      style={{ fontSize: '0.75rem', background: 'var(--danger)', color: 'white' }}
+                    >
+                      Delete cue
+                    </button>
+                  </div>
+                  {eventCueError && (
+                    <div style={{ color: '#ff8a8a', fontSize: '0.75rem', marginTop: '0.35rem' }}>{eventCueError}</div>
+                  )}
                 </div>
               )}
               
@@ -5907,6 +6225,16 @@ export function StoryboardEditor() {
           danger
           onConfirm={confirmDeleteAudioBlockNow}
           onCancel={() => setConfirmDeleteAudioBlockId(null)}
+        />
+      )}
+      {confirmDeleteEventCueId && (
+        <ConfirmModal
+          title="Delete event cue"
+          message="Remove this timeline event cue? The named event and its bindings stay. Fire still works."
+          confirmLabel="Delete"
+          danger
+          onConfirm={confirmDeleteEventCueNow}
+          onCancel={() => setConfirmDeleteEventCueId(null)}
         />
       )}
       {pendingExtend && (

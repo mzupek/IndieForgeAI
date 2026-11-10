@@ -125,15 +125,18 @@ function testKeysCameraEffects(): void {
       })
     ],
     cameraTrack: [{ t: 4.2, target: { x: 0.5, y: 0.5 }, zoom: 1 }],
-    effectsTrack: [{ t: 3.8, inlineType: 'shake' }]
+    effectsTrack: [{ t: 3.8, inlineType: 'shake' }],
+    eventCues: [{ id: 'cue-1', t: 4.1, eventId: 'evt-touch', schemaVersion: 1 }]
   })
   const blockers = collectShotDurationBlockers(s, 3)
   assert(blockers.some((b) => b.kind === 'timed-key' && b.id === 'k1'), 'timed key')
   assert(blockers.some((b) => b.kind === 'camera'), 'camera')
   assert(blockers.some((b) => b.kind === 'effect'), 'effect')
+  assert(blockers.some((b) => b.kind === 'event-cue' && b.id === 'cue-1'), 'event cue')
   assertThrows(() => assertShotDurationFitsContent(s, 3), 'a timed key exists at t=4.5s', 'key message')
   assertThrows(() => assertShotDurationFitsContent(s, 3), 'camera keyframe at t=4.2s', 'camera message')
   assertThrows(() => assertShotDurationFitsContent(s, 3), 'effect marker at t=3.8s', 'effect message')
+  assertThrows(() => assertShotDurationFitsContent(s, 3), 'an event cue exists at t=4.1s', 'cue message')
   assertShotDurationFitsContent(s, 4.5)
   assertShotDurationFitsContent(s, 8)
   console.log('✓ timed keys, camera, and effects listed; exact-end allowed')

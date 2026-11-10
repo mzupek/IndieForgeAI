@@ -69,6 +69,7 @@ function testShotStructure() {
     layers: [layer],
     cameraTrack: [cameraKeyframe],
     effectsTrack: [effectMarker],
+    eventCues: [{ id: 'cue-1', t: 1.2, eventId: 'evt-touch', schemaVersion: 1 }],
     notes: 'Test notes',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
@@ -80,6 +81,7 @@ function testShotStructure() {
   assert(shot.layers[0].opacity >= 0 && shot.layers[0].opacity <= 1, 'Layer opacity normalized')
   assert(shot.cameraTrack.length === 1, 'Camera keyframe count')
   assert(shot.effectsTrack.length === 1, 'Effect marker count')
+  assert(shot.eventCues?.length === 1, 'Event cue count')
   assert(shot.aspectRatio.width === 16, 'Aspect ratio width')
   assert(shot.aspectRatio.height === 9, 'Aspect ratio height')
   console.log('✓ Shot structure with layers, camera, effects')

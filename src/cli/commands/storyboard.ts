@@ -30,7 +30,12 @@ import {
   listShotAudioBlocks,
   getShotAudioBlock,
   updateShotAudioBlock,
-  removeShotAudioBlock
+  removeShotAudioBlock,
+  addShotEventCue,
+  listShotEventCues,
+  getShotEventCue,
+  updateShotEventCue,
+  removeShotEventCue
 } from '../../core/storage/storyboardService'
 import type {
   CameraKeyframe,
@@ -200,7 +205,9 @@ export function registerStoryboardCommands(program: Command): void {
     })
 
   // Shot commands
-  const shotCmd = program.command('shot').description('Manage shots, clip blocks, audio blocks, and cinematography')
+  const shotCmd = program
+    .command('shot')
+    .description('Manage shots, clip blocks, audio blocks, event cues, and cinematography')
 
   shotCmd
     .command('add')
@@ -238,7 +245,7 @@ export function registerStoryboardCommands(program: Command): void {
     .description('Update shot properties')
     .requiredOption('--id <shotId>', 'Shot ID')
     .option('--name <name>', 'New name')
-    .option('--duration <seconds>', 'Duration in seconds (user-entered; shrink is refused if audio/clips/keys/camera/effects would be cut; previous length is not restored from history)')
+    .option('--duration <seconds>', 'Duration in seconds (user-entered; shrink is refused if audio/clips/keys/camera/effects/event-cues would be cut; previous length is not restored from history)')
     .option('--notes <text>', 'Notes for engineer')
     .option('--background-image <path>', 'Direct-import image (copied into studio backgrounds/; not an external path)')
     .option('--background-asset <id>', 'Library visual asset id (selected Game; full image, not thumbnail)')
@@ -767,6 +774,134 @@ export function registerStoryboardCommands(program: Command): void {
               `t=${timeSec}s  ${sample.role} audio=${sample.audioId} source=${sample.sourceTimeSec.toFixed(3)}s gain=${sample.gain.toFixed(3)}${sample.loop ? ' loop' : ''}`
             )
           }
+        }
+      } catch (err) {
+        console.error('Error:', err instanceof Error ? err.message : err)
+        process.exit(1)
+      }
+    })
+
+  const shotEventCueCmd = shotCmd
+    .command('event-cue')
+    .description(
+      'Authored timeline event cues. Play fires the named event once per forward-play crossing. Not pause/reverse/seek-into. Independent of P4 pose/state keys.'
+    )
+
+  shotEventCueCmd
+    .command('add')
+    .description('Create an event cue at a shot time (fires that named event on Play)')
+    .requiredOption('--shot <shotId>', 'Shot ID')
+    .requiredOption('--event <eventId>', 'Event definition ID')
+    .requiredOption('--time <seconds>', 'Shot time to fire')
+    .option('--json', 'Output as JSON')
+    .action(async (options, cmd) => {
+      try {
+        const mergedOpts = { ...cmd.parent!.parent!.parent!.opts(), ...options }
+        const result = await addShotEventCue(
+          options.shot,
+          { t: options.time, eventId: options.event },
+          getDataDir(mergedOpts.dataDir)
+        )
+        if (mergedOpts.json) {
+          console.log(JSON.stringify(result, null, 2))
+        } else {
+          console.log(`✓ Event cue ${result.cue.id} @ ${result.cue.t}s → ${result.cue.eventId}`)
+          if (result.warning) console.log(`⚠ ${result.warning}`)
+        }
+      } catch (err) {
+        console.error('Error:', err instanceof Error ? err.message : err)
+        process.exit(1)
+      }
+    })
+
+  shotEventCueCmd
+    .command('list')
+    .description('List event cues on a shot')
+    .requiredOption('--shot <shotId>', 'Shot ID')
+    .option('--json', 'Output as JSON')
+    .action(async (options, cmd) => {
+      try {
+        const mergedOpts = { ...cmd.parent!.parent!.parent!.opts(), ...options }
+        const cues = await listShotEventCues(options.shot, getDataDir(mergedOpts.dataDir))
+        if (mergedOpts.json) {
+          console.log(JSON.stringify(cues, null, 2))
+        } else if (cues.length === 0) {
+          console.log('No event cues')
+        } else {
+          for (const cue of cues) {
+            console.log(`${cue.id}  t=${cue.t}s  event=${cue.eventId}`)
+          }
+        }
+      } catch (err) {
+        console.error('Error:', err instanceof Error ? err.message : err)
+        process.exit(1)
+      }
+    })
+
+  shotEventCueCmd
+    .command('show')
+    .description('Show one event cue')
+    .requiredOption('--id <cueId>', 'Event cue ID')
+    .option('--json', 'Output as JSON')
+    .action(async (options, cmd) => {
+      try {
+        const mergedOpts = { ...cmd.parent!.parent!.parent!.opts(), ...options }
+        const found = await getShotEventCue(options.id, getDataDir(mergedOpts.dataDir))
+        if (!found) throw new Error(`Event cue not found: ${options.id}`)
+        if (mergedOpts.json) {
+          console.log(JSON.stringify(found, null, 2))
+        } else {
+          console.log(`${found.cue.id}  shot=${found.shotId}  t=${found.cue.t}s  event=${found.cue.eventId}`)
+        }
+      } catch (err) {
+        console.error('Error:', err instanceof Error ? err.message : err)
+        process.exit(1)
+      }
+    })
+
+  shotEventCueCmd
+    .command('update')
+    .description('Move a cue or retarget its event')
+    .requiredOption('--id <cueId>', 'Event cue ID')
+    .option('--time <seconds>', 'New shot time')
+    .option('--event <eventId>', 'New event definition ID')
+    .option('--json', 'Output as JSON')
+    .action(async (options, cmd) => {
+      try {
+        const mergedOpts = { ...cmd.parent!.parent!.parent!.opts(), ...options }
+        if (options.time === undefined && options.event === undefined) {
+          throw new Error('Provide --time and/or --event')
+        }
+        const result = await updateShotEventCue(
+          options.id,
+          { t: options.time, eventId: options.event },
+          getDataDir(mergedOpts.dataDir)
+        )
+        if (mergedOpts.json) {
+          console.log(JSON.stringify(result, null, 2))
+        } else {
+          console.log(`✓ Updated event cue ${result.cue.id} @ ${result.cue.t}s → ${result.cue.eventId}`)
+          if (result.warning) console.log(`⚠ ${result.warning}`)
+        }
+      } catch (err) {
+        console.error('Error:', err instanceof Error ? err.message : err)
+        process.exit(1)
+      }
+    })
+
+  shotEventCueCmd
+    .command('remove')
+    .description('Remove an event cue (does not delete the named event or its bindings)')
+    .requiredOption('--id <cueId>', 'Event cue ID')
+    .option('--json', 'Output as JSON')
+    .action(async (options, cmd) => {
+      try {
+        const mergedOpts = { ...cmd.parent!.parent!.parent!.opts(), ...options }
+        await removeShotEventCue(options.id, getDataDir(mergedOpts.dataDir))
+        if (mergedOpts.json) {
+          console.log(JSON.stringify({ deleted: true, cueId: options.id }, null, 2))
+        } else {
+          console.log(`✓ Removed event cue: ${options.id}`)
         }
       } catch (err) {
         console.error('Error:', err instanceof Error ? err.message : err)

@@ -629,6 +629,19 @@ export interface IndieForgeAPI {
       }
     ) => Promise<any>
     deleteShotAudioBlock: (projectId: string, blockId: string) => Promise<any>
+    addShotEventCue: (
+      projectId: string,
+      shotId: string,
+      input: { t: number; eventId: string }
+    ) => Promise<any>
+    listShotEventCues: (shotId: string) => Promise<any[]>
+    getShotEventCue: (cueId: string) => Promise<any>
+    updateShotEventCue: (
+      projectId: string,
+      cueId: string,
+      updates: { t?: number; eventId?: string }
+    ) => Promise<any>
+    deleteShotEventCue: (projectId: string, cueId: string) => Promise<any>
     createScene: (gameId: string, input: any) => Promise<any>
     getScene: (sceneId: string) => Promise<any | undefined>
     listScenes: (gameId: string) => Promise<any[]>
