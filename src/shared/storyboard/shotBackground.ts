@@ -7,10 +7,72 @@
 import type { AssetPipelineProject, StoryboardShot } from '../types/assetPipeline'
 import { getShotGameId, resolveVisualAssetImagePath } from './layerValidation'
 
+export type BackgroundStillRefs = {
+  backgroundVisualAssetId?: string
+  backgroundAssetStateId?: string | null
+  backgroundImage?: string
+}
+
 export function clearShotBackgroundImageFields(shot: StoryboardShot): void {
   delete shot.backgroundImage
   delete shot.backgroundVisualAssetId
   delete shot.backgroundAssetStateId
+}
+
+/**
+ * Full-resolution path for one still (static shot fields or a timed key).
+ * Prefers a Game-scoped Library visual asset (explicit state, else default,
+ * else static image). Falls back to a direct-import `backgroundImage`.
+ * Missing/invalid refs return an error, not a throw.
+ */
+export function resolveBackgroundStillRefs(
+  refs: BackgroundStillRefs,
+  pipeline: AssetPipelineProject,
+  shotId: string
+): { path?: string; error?: string } {
+  try {
+    if (refs.backgroundVisualAssetId) {
+      let gameId: string
+      try {
+        gameId = getShotGameId(pipeline, shotId)
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) }
+      }
+      const asset = (pipeline.visualAssets || []).find((a) => a.id === refs.backgroundVisualAssetId)
+      if (!asset) {
+        return { error: `Visual asset '${refs.backgroundVisualAssetId}' not found` }
+      }
+      if (asset.gameId !== gameId) {
+        return {
+          error: `Visual asset '${asset.name}' belongs to game '${asset.gameId}', not shot game '${gameId}'`
+        }
+      }
+      const owned = (pipeline.assetStates || []).filter((s) => s.assetId === asset.id)
+      if (refs.backgroundAssetStateId) {
+        const state = owned.find((s) => s.id === refs.backgroundAssetStateId)
+        if (!state) {
+          return {
+            error: `Asset state '${refs.backgroundAssetStateId}' not found for asset '${asset.name}'`
+          }
+        }
+      }
+      const resolved = resolveVisualAssetImagePath(asset, refs.backgroundAssetStateId, owned)
+      if (resolved.path) return { path: resolved.path }
+      return { error: resolved.error || `Visual asset '${asset.name}' has no static image` }
+    }
+
+    if (refs.backgroundAssetStateId) {
+      return { error: 'backgroundAssetStateId requires backgroundVisualAssetId' }
+    }
+
+    if (refs.backgroundImage) {
+      return { path: refs.backgroundImage }
+    }
+
+    return {}
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) }
+  }
 }
 
 /**
@@ -22,49 +84,7 @@ export function resolveShotBackgroundImagePath(
   shot: StoryboardShot,
   pipeline: AssetPipelineProject
 ): { path?: string; error?: string } {
-  try {
-    if (shot.backgroundVisualAssetId) {
-      let gameId: string
-      try {
-        gameId = getShotGameId(pipeline, shot.id)
-      } catch (err) {
-        return { error: err instanceof Error ? err.message : String(err) }
-      }
-      const asset = (pipeline.visualAssets || []).find((a) => a.id === shot.backgroundVisualAssetId)
-      if (!asset) {
-        return { error: `Visual asset '${shot.backgroundVisualAssetId}' not found` }
-      }
-      if (asset.gameId !== gameId) {
-        return {
-          error: `Visual asset '${asset.name}' belongs to game '${asset.gameId}', not shot game '${gameId}'`
-        }
-      }
-      const owned = (pipeline.assetStates || []).filter((s) => s.assetId === asset.id)
-      if (shot.backgroundAssetStateId) {
-        const state = owned.find((s) => s.id === shot.backgroundAssetStateId)
-        if (!state) {
-          return {
-            error: `Asset state '${shot.backgroundAssetStateId}' not found for asset '${asset.name}'`
-          }
-        }
-      }
-      const resolved = resolveVisualAssetImagePath(asset, shot.backgroundAssetStateId, owned)
-      if (resolved.path) return { path: resolved.path }
-      return { error: resolved.error || `Visual asset '${asset.name}' has no static image` }
-    }
-
-    if (shot.backgroundAssetStateId) {
-      return { error: 'backgroundAssetStateId requires backgroundVisualAssetId' }
-    }
-
-    if (shot.backgroundImage) {
-      return { path: shot.backgroundImage }
-    }
-
-    return {}
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : String(err) }
-  }
+  return resolveBackgroundStillRefs(shot, pipeline, shot.id)
 }
 
 /**

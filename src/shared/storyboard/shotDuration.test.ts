@@ -126,20 +126,33 @@ function testKeysCameraEffects(): void {
     ],
     cameraTrack: [{ t: 4.2, target: { x: 0.5, y: 0.5 }, zoom: 1 }],
     effectsTrack: [{ t: 3.8, inlineType: 'shake' }],
-    eventCues: [{ id: 'cue-1', t: 4.1, eventId: 'evt-touch', schemaVersion: 1 }]
+    eventCues: [{ id: 'cue-1', t: 4.1, eventId: 'evt-touch', schemaVersion: 1 }],
+    backgroundKeys: [
+      {
+        id: 'bgk-1',
+        t: 4.3,
+        backgroundImage: 'backgrounds/cut.png',
+        schemaVersion: 1
+      }
+    ]
   })
+  s.layers[0].visibleToSec = 4.4
   const blockers = collectShotDurationBlockers(s, 3)
   assert(blockers.some((b) => b.kind === 'timed-key' && b.id === 'k1'), 'timed key')
   assert(blockers.some((b) => b.kind === 'camera'), 'camera')
   assert(blockers.some((b) => b.kind === 'effect'), 'effect')
   assert(blockers.some((b) => b.kind === 'event-cue' && b.id === 'cue-1'), 'event cue')
+  assert(blockers.some((b) => b.kind === 'background-key' && b.id === 'bgk-1'), 'background key')
+  assert(blockers.some((b) => b.kind === 'visibility-range' && b.id === 'layer-hero'), 'visibility to')
   assertThrows(() => assertShotDurationFitsContent(s, 3), 'a timed key exists at t=4.5s', 'key message')
   assertThrows(() => assertShotDurationFitsContent(s, 3), 'camera keyframe at t=4.2s', 'camera message')
   assertThrows(() => assertShotDurationFitsContent(s, 3), 'effect marker at t=3.8s', 'effect message')
   assertThrows(() => assertShotDurationFitsContent(s, 3), 'an event cue exists at t=4.1s', 'cue message')
+  assertThrows(() => assertShotDurationFitsContent(s, 3), 'a background key exists at t=4.3s', 'bg key message')
+  assertThrows(() => assertShotDurationFitsContent(s, 3), 'present until t=4.4s', 'visibility message')
   assertShotDurationFitsContent(s, 4.5)
   assertShotDurationFitsContent(s, 8)
-  console.log('✓ timed keys, camera, and effects listed; exact-end allowed')
+  console.log('✓ timed keys, camera, effects, background keys, and visibility listed; exact-end allowed')
 }
 
 function testUserEnteredRecoveryWithoutHistory(): void {

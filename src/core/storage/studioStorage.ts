@@ -243,6 +243,9 @@ export async function loadStudio(dataDirOverride?: string): Promise<StudioData> 
           if (!shot.eventCues) {
             shot.eventCues = []
           }
+          if (!shot.backgroundKeys) {
+            shot.backgroundKeys = []
+          }
         }
       }
       

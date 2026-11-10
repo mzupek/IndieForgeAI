@@ -642,6 +642,29 @@ export interface IndieForgeAPI {
       updates: { t?: number; eventId?: string }
     ) => Promise<any>
     deleteShotEventCue: (projectId: string, cueId: string) => Promise<any>
+    addShotBackgroundKey: (
+      projectId: string,
+      shotId: string,
+      input: {
+        t: number
+        backgroundVisualAssetId?: string | null
+        backgroundAssetStateId?: string | null
+        backgroundImage?: string | null
+      }
+    ) => Promise<any>
+    listShotBackgroundKeys: (shotId: string) => Promise<any[]>
+    getShotBackgroundKey: (keyId: string) => Promise<any>
+    updateShotBackgroundKey: (
+      projectId: string,
+      keyId: string,
+      updates: {
+        t?: number
+        backgroundVisualAssetId?: string | null
+        backgroundAssetStateId?: string | null
+        backgroundImage?: string | null
+      }
+    ) => Promise<any>
+    deleteShotBackgroundKey: (projectId: string, keyId: string) => Promise<any>
     createScene: (gameId: string, input: any) => Promise<any>
     getScene: (sceneId: string) => Promise<any | undefined>
     listScenes: (gameId: string) => Promise<any[]>

@@ -349,6 +349,12 @@ export function collectAssetLayerUsage(
       if (!shotIds.includes(shot.id)) shotIds.push(shot.id)
       labels.push(`${shot.name} background`)
     }
+    for (const key of shot.backgroundKeys || []) {
+      if (key.backgroundVisualAssetId === assetId) {
+        if (!shotIds.includes(shot.id)) shotIds.push(shot.id)
+        labels.push(`${shot.name} background key ${key.id}`)
+      }
+    }
   }
   return { layerIds, shotIds, labels }
 }
@@ -371,6 +377,12 @@ export function collectAssetStateLayerUsage(
     if (shot.backgroundAssetStateId === stateId) {
       if (!shotIds.includes(shot.id)) shotIds.push(shot.id)
       labels.push(`${shot.name} background`)
+    }
+    for (const key of shot.backgroundKeys || []) {
+      if (key.backgroundAssetStateId === stateId) {
+        if (!shotIds.includes(shot.id)) shotIds.push(shot.id)
+        labels.push(`${shot.name} background key ${key.id}`)
+      }
     }
   }
   return { layerIds, shotIds, labels }

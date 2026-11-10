@@ -70,6 +70,18 @@ export interface ExportManifestLayer {
   rotation: number
   flipX: boolean
   opacity: number
+  visible?: boolean
+  visibleFromSec?: number
+  visibleToSec?: number
+}
+
+export interface ExportManifestBackgroundKey {
+  id: string
+  t: number
+  backgroundVisualAssetId?: string
+  backgroundAssetStateId?: string | null
+  backgroundImage?: string
+  backgroundFile?: string
 }
 
 export interface ExportManifestCameraKeyframe {
@@ -110,6 +122,7 @@ export interface ExportManifestShot {
   backgroundAssetStateId?: string | null
   /** Resolved studio-relative full-resolution image (not thumbnail, not an external source path). */
   backgroundFile?: string
+  backgroundKeys?: ExportManifestBackgroundKey[]
   layers: ExportManifestLayer[]
   cameraTrack: ExportManifestCameraKeyframe[]
   effectsTrack: ExportManifestEffectMarker[]

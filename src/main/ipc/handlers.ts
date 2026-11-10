@@ -120,7 +120,12 @@ import {
   listShotEventCues,
   getShotEventCue,
   updateShotEventCue,
-  removeShotEventCue
+  removeShotEventCue,
+  addShotBackgroundKey,
+  listShotBackgroundKeys,
+  getShotBackgroundKey,
+  updateShotBackgroundKey,
+  removeShotBackgroundKey
 } from '../../core/storage/storyboardService'
 import {
   getVisualAssets,
@@ -1133,6 +1138,44 @@ export function registerIpcHandlers(): void {
     IPC_CHANNELS.SHOT_EVENT_CUE_DELETE,
     async (_e, projectId: string, cueId: string) => {
       await removeShotEventCue(cueId)
+      return await loadProject(projectId)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SHOT_BACKGROUND_KEY_ADD,
+    async (_e, projectId: string, shotId: string, input: any) => {
+      await addShotBackgroundKey(shotId, input)
+      return await loadProject(projectId)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SHOT_BACKGROUND_KEY_LIST,
+    async (_e, shotId: string) => {
+      return await listShotBackgroundKeys(shotId)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SHOT_BACKGROUND_KEY_GET,
+    async (_e, keyId: string) => {
+      return await getShotBackgroundKey(keyId)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SHOT_BACKGROUND_KEY_UPDATE,
+    async (_e, projectId: string, keyId: string, updates: any) => {
+      await updateShotBackgroundKey(keyId, updates)
+      return await loadProject(projectId)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SHOT_BACKGROUND_KEY_DELETE,
+    async (_e, projectId: string, keyId: string) => {
+      await removeShotBackgroundKey(keyId)
       return await loadProject(projectId)
     }
   )

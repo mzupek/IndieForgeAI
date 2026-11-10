@@ -225,6 +225,16 @@ const api: IndieForgeAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.SHOT_EVENT_CUE_UPDATE, projectId, cueId, updates),
     deleteShotEventCue: (projectId, cueId) =>
       ipcRenderer.invoke(IPC_CHANNELS.SHOT_EVENT_CUE_DELETE, projectId, cueId),
+    addShotBackgroundKey: (projectId, shotId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_BACKGROUND_KEY_ADD, projectId, shotId, input),
+    listShotBackgroundKeys: (shotId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_BACKGROUND_KEY_LIST, shotId),
+    getShotBackgroundKey: (keyId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_BACKGROUND_KEY_GET, keyId),
+    updateShotBackgroundKey: (projectId, keyId, updates) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_BACKGROUND_KEY_UPDATE, projectId, keyId, updates),
+    deleteShotBackgroundKey: (projectId, keyId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_BACKGROUND_KEY_DELETE, projectId, keyId),
     createScene: (gameId, input) =>
       ipcRenderer.invoke(IPC_CHANNELS.SCENE_CREATE, gameId, input),
     getScene: (sceneId) =>

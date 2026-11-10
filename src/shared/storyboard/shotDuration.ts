@@ -16,6 +16,8 @@ export type ShotDurationBlockerKind =
   | 'camera'
   | 'effect'
   | 'event-cue'
+  | 'background-key'
+  | 'visibility-range'
 
 export function eventCueOutsideDuration(cue: { t: number }, durationSec: number): boolean {
   return durationSec + TIMED_KEY_TIME_EPS < cue.t
@@ -119,6 +121,39 @@ export function collectShotDurationBlockers(
         id: cue.id,
         t: cue.t,
         label: `an event cue exists at t=${cue.t}s (${cue.id})`
+      })
+    }
+  }
+
+  for (const key of shot.backgroundKeys || []) {
+    if (durationSec + TIMED_KEY_TIME_EPS < key.t) {
+      blockers.push({
+        kind: 'background-key',
+        id: key.id,
+        t: key.t,
+        label: `a background key exists at t=${key.t}s (${key.id})`
+      })
+    }
+  }
+
+  for (const layer of shot.layers || []) {
+    if (layer.visibleToSec !== undefined && durationSec + TIMED_KEY_TIME_EPS < layer.visibleToSec) {
+      blockers.push({
+        kind: 'visibility-range',
+        id: layer.id,
+        t: layer.visibleToSec,
+        end: layer.visibleToSec,
+        label: `layer ${layer.id} is present until t=${layer.visibleToSec}s`
+      })
+    } else if (
+      layer.visibleFromSec !== undefined &&
+      durationSec + TIMED_KEY_TIME_EPS < layer.visibleFromSec
+    ) {
+      blockers.push({
+        kind: 'visibility-range',
+        id: layer.id,
+        t: layer.visibleFromSec,
+        label: `layer ${layer.id} appears at t=${layer.visibleFromSec}s`
       })
     }
   }

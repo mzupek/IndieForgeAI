@@ -14,7 +14,8 @@ import type {
 import { EXPORT_MANIFEST_SCHEMA_VERSION } from '@shared/types/exportManifest'
 import { getAssetPipeline, saveStudio, updateAssetPipeline } from './studioStorage'
 import { getDataDir } from './dataDir'
-import { resolveShotBackgroundImagePath } from '../../shared/storyboard/shotBackground'
+import { resolveBackgroundStillRefs, resolveShotBackgroundImagePath } from '../../shared/storyboard/shotBackground'
+import { backgroundKeyRefs } from '../../shared/storyboard/backgroundKeys'
 import type { Game } from '@shared/types/assetPipeline'
 import { generateStoryboardThumbnails } from '../export/storyboardThumbnails'
 import { homedir } from 'os'
@@ -296,6 +297,9 @@ async function generateManifest(
             }
           }
           if (layer.imagePath) resolved.imagePath = layer.imagePath
+          if (layer.visible === false) resolved.visible = false
+          if (layer.visibleFromSec !== undefined) resolved.visibleFromSec = layer.visibleFromSec
+          if (layer.visibleToSec !== undefined) resolved.visibleToSec = layer.visibleToSec
           
           return resolved
         })
@@ -338,6 +342,28 @@ async function generateManifest(
           backgroundVisualAssetId: shot.backgroundVisualAssetId,
           backgroundAssetStateId: shot.backgroundAssetStateId,
           backgroundFile,
+          backgroundKeys: (shot.backgroundKeys || []).map((key) => {
+            const keyResolved = resolveBackgroundStillRefs(backgroundKeyRefs(key), pipeline, shot.id)
+            let keyFile: string | undefined
+            if (keyResolved.path) {
+              const dataDir = getDataDir(dataDirOverride)
+              const normalized = keyResolved.path.replace(/\\/g, '/')
+              const dataPrefix = dataDir.replace(/\\/g, '/')
+              if (normalized.startsWith(dataPrefix)) {
+                keyFile = normalized.slice(dataPrefix.length).replace(/^[/\\]+/, '')
+              } else {
+                keyFile = key.backgroundImage || normalized
+              }
+            }
+            return {
+              id: key.id,
+              t: key.t,
+              backgroundVisualAssetId: key.backgroundVisualAssetId,
+              backgroundAssetStateId: key.backgroundAssetStateId,
+              backgroundImage: key.backgroundImage,
+              backgroundFile: keyFile
+            }
+          }),
           layers,
           cameraTrack: shot.cameraTrack,
           effectsTrack: shot.effectsTrack,

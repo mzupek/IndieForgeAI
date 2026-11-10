@@ -47,7 +47,17 @@ import {
   DEFAULT_FONT_REF,
   DEFAULT_PALETTE_REF
 } from '@shared/storyboard/layerValidation'
-import { resolveShotBackgroundImagePath } from '@shared/storyboard/shotBackground'
+import {
+  collectShotBackgroundStillPaths,
+  describeBackgroundKey,
+  resolveShotBackgroundAtTime,
+  backgroundKeyIssues
+} from '@shared/storyboard/backgroundKeys'
+import {
+  clampVisibilityRange,
+  isLayerPresentAtTime,
+  layerPresenceRange
+} from '@shared/storyboard/layerVisibilityRange'
 import { ShotBackgroundPicker } from './ShotBackgroundPicker'
 import {
   describeLayerLabel,
@@ -96,7 +106,7 @@ import {
   releasePointerCaptureIfHeld,
   type PointerSessionEvent
 } from '@shared/storyboard/pointerCapture'
-import { hitTestTimeline } from '@shared/storyboard/timelinePointer'
+import { hitTestTimeline, TIMELINE_HEIGHT_PX } from '@shared/storyboard/timelinePointer'
 import { collectEventCueCrossings } from '@shared/storyboard/eventCuePlayback'
 import { eventCueIssues } from '@shared/storyboard/eventCues'
 import {
@@ -508,7 +518,7 @@ export function StoryboardEditor() {
   const [dragMode, setDragMode] = useState<DragMode>(null)
   const [dragStart, setDragStart] = useState<any>(null)
   const [draggedMarker, setDraggedMarker] = useState<{
-    type: 'camera' | 'effect' | 'timedKey' | 'clipBlock' | 'audioBlock' | 'eventCue'
+    type: 'camera' | 'effect' | 'timedKey' | 'clipBlock' | 'audioBlock' | 'eventCue' | 'backgroundKey' | 'layerRange'
     index: number
     layerId?: string
     keyId?: string
@@ -519,7 +529,7 @@ export function StoryboardEditor() {
   } | null>(null)
   
   const [loadedImages, setLoadedImages] = useState<Map<string, LoadedImage>>(new Map())
-  const [backgroundImage, setBackgroundImage] = useState<LoadedImage | null>(null)
+  const [backgroundStills, setBackgroundStills] = useState<Map<string, LoadedImage>>(new Map())
   const [showAddCharacter, setShowAddCharacter] = useState(false)
   const [showAddAsset, setShowAddAsset] = useState(false)
   const [showAddText, setShowAddText] = useState(false)
@@ -532,6 +542,7 @@ export function StoryboardEditor() {
     onAction?: (action: LibraryPickAction) => void
   } | null>(null)
   const backgroundLoadKeyRef = useRef('')
+  const backgroundShotIdRef = useRef<string | null>(null)
   const [clipThumbs, setClipThumbs] = useState<Map<string, LoadedImage>>(new Map())
   const [addTextContent, setAddTextContent] = useState('New text')
   const [addTextFont, setAddTextFont] = useState(DEFAULT_FONT_REF)
@@ -583,6 +594,11 @@ export function StoryboardEditor() {
   const [eventCueTimeDraft, setEventCueTimeDraft] = useState('')
   const [eventCueError, setEventCueError] = useState<string | null>(null)
   const [eventCueWarning, setEventCueWarning] = useState<string | null>(null)
+  const [selectedBackgroundKeyId, setSelectedBackgroundKeyId] = useState<string | null>(null)
+  const [confirmDeleteBackgroundKeyId, setConfirmDeleteBackgroundKeyId] = useState<string | null>(null)
+  const [backgroundKeyTimeDraft, setBackgroundKeyTimeDraft] = useState('')
+  const [backgroundKeyError, setBackgroundKeyError] = useState<string | null>(null)
+  const [backgroundKeyPickPending, setBackgroundKeyPickPending] = useState(false)
   const [shotDurationDraft, setShotDurationDraft] = useState('')
   const [shotDurationError, setShotDurationError] = useState<string | null>(null)
   const audioVoicesRef = useRef<Map<string, AudioVoice>>(new Map())
@@ -666,6 +682,24 @@ export function StoryboardEditor() {
   const selectedAudioBlock = audioBlocks.find((b) => b.id === selectedAudioBlockId)
   const eventCues = selectedShot?.eventCues || []
   const selectedEventCue = eventCues.find((c) => c.id === selectedEventCueId)
+  const backgroundKeys = selectedShot?.backgroundKeys || []
+  const selectedBackgroundKey = backgroundKeys.find((k) => k.id === selectedBackgroundKeyId)
+  const backgroundStillPaths =
+    selectedShot && pipeline
+      ? collectShotBackgroundStillPaths(selectedShot, pipeline)
+      : selectedShot?.backgroundImage
+        ? [selectedShot.backgroundImage]
+        : []
+  const backgroundStillPathList = backgroundStillPaths.join('\n')
+  const sampledBackground =
+    selectedShot && pipeline
+      ? resolveShotBackgroundAtTime(selectedShot, pipeline, playbackTime)
+      : selectedShot?.backgroundImage
+        ? { path: selectedShot.backgroundImage }
+        : {}
+  const backgroundImage = sampledBackground.path
+    ? backgroundStills.get(sampledBackground.path) ?? null
+    : null
 
   const timedKeyActionLabel = (key: LayerTimedKey): string => {
     if (key.action.type === 'setPose') {
@@ -712,68 +746,80 @@ export function StoryboardEditor() {
     }
   }, [selectedShot, editingNotes])
 
-  // Resolve still path each render (cheap). Effect deps are the path string +
-  // shot id so a new pipeline object identity cannot cancel/blank a matching load.
-  const resolvedBackground =
-    selectedShot && pipeline
-      ? resolveShotBackgroundImagePath(selectedShot, pipeline)
-      : selectedShot?.backgroundImage
-        ? { path: selectedShot.backgroundImage }
-        : {}
-  const backgroundStillPath = resolvedBackground.path || null
-
   useEffect(() => {
-    setBackgroundError(resolvedBackground.error || null)
-  }, [resolvedBackground.error])
+    setBackgroundError(sampledBackground.error || null)
+  }, [sampledBackground.error])
 
-  // Load background image (Library full-res path or legacy/direct-import path)
+  // Preload static + key stills. Keyed by shot id so a previous shot cannot stick;
+  // matching shot+path onloads are accepted. Path-list string (not pipeline object)
+  // is the dep so project identity churn cannot blank a matching load.
   useEffect(() => {
     let cancelled = false
     const shotId = selectedShot?.id ?? null
-    const path = backgroundStillPath
-    const loadKey = backgroundSourceKey(shotId, path)
+    const paths = backgroundStillPathList ? backgroundStillPathList.split('\n').filter(Boolean) : []
+    const previousShot = backgroundShotIdRef.current
     const previousKey = backgroundLoadKeyRef.current
-    backgroundLoadKeyRef.current = loadKey
+    const shotToken = backgroundSourceKey(shotId, paths[0] || null)
+    backgroundShotIdRef.current = shotId
+    backgroundLoadKeyRef.current = shotToken
 
-    if (!shotId || !path) {
-      if (shouldClearBackgroundForKeyChange(previousKey, loadKey)) {
-        setBackgroundImage(null)
+    if (!shotId) {
+      if (shouldClearBackgroundForKeyChange(previousKey, shotToken)) {
+        setBackgroundStills(new Map())
       }
       return
     }
 
-    if (shouldClearBackgroundForKeyChange(previousKey, loadKey)) {
-      setBackgroundImage(null)
+    if (previousShot !== shotId) {
+      setBackgroundStills(new Map())
+    } else {
+      setBackgroundStills((prev) => {
+        const next = new Map(prev)
+        for (const stored of next.keys()) {
+          if (!paths.includes(stored)) next.delete(stored)
+        }
+        return next
+      })
     }
 
-    const loadBg = async () => {
+    const loadOne = async (path: string) => {
+      const loadKey = backgroundSourceKey(shotId, path)
       try {
         const { localUrl } = await window.indieForge.files.getLocalUrl(path)
-        if (cancelled || !shouldApplyLoadedBackground(backgroundLoadKeyRef.current, loadKey)) return
+        if (cancelled || backgroundShotIdRef.current !== shotId) return
+        if (!shouldApplyLoadedBackground(backgroundSourceKey(backgroundShotIdRef.current, path), loadKey)) {
+          return
+        }
         const img = new Image()
         img.onload = () => {
-          if (cancelled || !shouldApplyLoadedBackground(backgroundLoadKeyRef.current, loadKey)) return
-          setBackgroundImage({ element: img, url: localUrl, width: img.width, height: img.height })
+          if (cancelled || backgroundShotIdRef.current !== shotId) return
+          if (!shouldApplyLoadedBackground(backgroundSourceKey(backgroundShotIdRef.current, path), loadKey)) {
+            return
+          }
+          setBackgroundStills((prev) => {
+            if (backgroundShotIdRef.current !== shotId) return prev
+            const next = new Map(prev)
+            next.set(path, { element: img, url: localUrl, width: img.width, height: img.height })
+            return next
+          })
         }
         img.onerror = () => {
-          if (cancelled || !shouldApplyLoadedBackground(backgroundLoadKeyRef.current, loadKey)) return
+          if (cancelled || backgroundShotIdRef.current !== shotId) return
           console.error('Failed to load background image:', path)
-          setBackgroundImage(null)
           setBackgroundError('Failed to load background image')
         }
         img.src = localUrl
       } catch (err) {
-        if (cancelled || !shouldApplyLoadedBackground(backgroundLoadKeyRef.current, loadKey)) return
+        if (cancelled || backgroundShotIdRef.current !== shotId) return
         console.error('Error loading background image:', err)
-        setBackgroundImage(null)
         setBackgroundError(err instanceof Error ? err.message : 'Failed to load background image')
       }
     }
-    void loadBg()
+    for (const path of paths) void loadOne(path)
     return () => {
       cancelled = true
     }
-  }, [selectedShot?.id, backgroundStillPath])
+  }, [selectedShot?.id, backgroundStillPathList])
 
   // Keep preview engine catalog in sync; never persist preview holds
   useEffect(() => {
@@ -797,6 +843,10 @@ export function StoryboardEditor() {
     setShowAddEventCue(false)
     setEventCueError(null)
     setEventCueWarning(null)
+    setSelectedBackgroundKeyId(null)
+    setConfirmDeleteBackgroundKeyId(null)
+    setBackgroundKeyError(null)
+    setBackgroundKeyPickPending(false)
   }, [selectedShotId])
 
   useEffect(() => {
@@ -846,6 +896,17 @@ export function StoryboardEditor() {
         : null
     )
   }, [selectedEventCueId, selectedEventCue?.t, selectedEventCue?.eventId, pipeline, selectedShot?.id])
+
+  useEffect(() => {
+    if (!selectedBackgroundKey) return
+    setBackgroundKeyTimeDraft(selectedBackgroundKey.t.toFixed(2))
+  }, [
+    selectedBackgroundKeyId,
+    selectedBackgroundKey?.t,
+    selectedBackgroundKey?.backgroundVisualAssetId,
+    selectedBackgroundKey?.backgroundAssetStateId,
+    selectedBackgroundKey?.backgroundImage
+  ])
 
   useEffect(() => {
     if (!selectedShot) return
@@ -1407,6 +1468,7 @@ export function StoryboardEditor() {
       for (const raw of selectedShot.layers) {
         const layer = previewLayer(raw)
         if (layer.visible === false) continue
+        if (!isLayerPresentAtTime(layer, playbackTime, selectedShot.durationSec)) continue
         let path: string | undefined
         if (pipe && (layer.visualAssetId || layer.poseId || layer.clipId || layer.imagePath)) {
           const resolved = resolveLayerImagePath(layer, pipe)
@@ -1653,6 +1715,7 @@ export function StoryboardEditor() {
     
     for (const layer of sortedLayers) {
       if (layer.visible === false) continue
+      if (!isLayerPresentAtTime(layer, playbackTime, selectedShot.durationSec)) continue
 
       const img = loadedImages.get(layer.id)
       const clipSample = sampleLayerClip(selectedShot, clips, layer.id, playbackTime)
@@ -1993,6 +2056,7 @@ export function StoryboardEditor() {
       // Select layer
       const sortedLayers = [...selectedShot.layers].map(previewLayer).sort((a, b) => b.zOrder - a.zOrder)
       for (const layer of sortedLayers) {
+        if (!isLayerPresentAtTime(layer, playbackTime, selectedShot.durationSec)) continue
         const img = loadedImages.get(layer.id)
         const naturalSize = img
           ? { width: img.width, height: img.height }
@@ -2143,18 +2207,46 @@ export function StoryboardEditor() {
         t: b.t,
         durationSec: b.durationSec
       })),
-      eventCues: eventCues.map((c) => ({ id: c.id, t: c.t }))
+      eventCues: eventCues.map((c) => ({ id: c.id, t: c.t })),
+      backgroundKeys: backgroundKeys.map((k) => ({ id: k.id, t: k.t })),
+      layerRange: selectedLayer
+        ? {
+            layerId: selectedLayer.id,
+            ...layerPresenceRange(selectedLayer, selectedShot.durationSec)
+          }
+        : undefined
     })
 
     if (hit.kind === 'camera') {
       setSelectedEventCueId(null)
+      setSelectedBackgroundKeyId(null)
       setDraggedMarker({ type: 'camera', index: hit.index })
+      setDragMode('marker' as any)
+      capturePointer(e.currentTarget, e.pointerId)
+      return
+    }
+    if (hit.kind === 'backgroundKey') {
+      setSelectedBackgroundKeyId(hit.keyId)
+      setSelectedEventCueId(null)
+      setSelectedTimedKeyId(null)
+      setSelectedClipBlockId(null)
+      setSelectedAudioBlockId(null)
+      setEditingCamera(false)
+      setSelectedCameraIndex(null)
+      setEditingEffect(false)
+      setSelectedEffectIndex(null)
+      setDraggedMarker({
+        type: 'backgroundKey',
+        index: backgroundKeys.findIndex((k) => k.id === hit.keyId),
+        keyId: hit.keyId
+      })
       setDragMode('marker' as any)
       capturePointer(e.currentTarget, e.pointerId)
       return
     }
     if (hit.kind === 'timedKey') {
       setSelectedEventCueId(null)
+      setSelectedBackgroundKeyId(null)
       setDraggedMarker({
         type: 'timedKey',
         index: hit.index,
@@ -2218,6 +2310,7 @@ export function StoryboardEditor() {
     }
     if (hit.kind === 'eventCue') {
       setSelectedEventCueId(hit.cueId)
+      setSelectedBackgroundKeyId(null)
       setSelectedAudioBlockId(null)
       setSelectedClipBlockId(null)
       setSelectedTimedKeyId(null)
@@ -2229,6 +2322,20 @@ export function StoryboardEditor() {
         type: 'eventCue',
         index: eventCues.findIndex((c) => c.id === hit.cueId),
         cueId: hit.cueId
+      })
+      setDragMode('marker' as any)
+      capturePointer(e.currentTarget, e.pointerId)
+      return
+    }
+    if (hit.kind === 'layerRange') {
+      setSelectedLayerId(hit.layerId)
+      setSelectedBackgroundKeyId(null)
+      setSelectedEventCueId(null)
+      setDraggedMarker({
+        type: 'layerRange',
+        index: 0,
+        layerId: hit.layerId,
+        clipDrag: hit.clipDrag
       })
       setDragMode('marker' as any)
       capturePointer(e.currentTarget, e.pointerId)
@@ -2398,6 +2505,53 @@ export function StoryboardEditor() {
                 s.id === selectedShotId
                   ? { ...s, audioTrack: (s.audioTrack || []).map((b) => (b.id === next.id ? next : b)) }
                   : s
+              )
+            }
+          }
+          setActiveProject(updatedProject)
+        }
+      } else if (draggedMarker.type === 'backgroundKey' && draggedMarker.keyId) {
+        const keyId = draggedMarker.keyId
+        const clamped = Math.max(0, Math.min(selectedShot.durationSec, newTime))
+        if (activeProject && activeProject.assetPipeline) {
+          const updatedProject = {
+            ...activeProject,
+            assetPipeline: {
+              ...activeProject.assetPipeline,
+              storyboardShots: activeProject.assetPipeline.storyboardShots?.map((s) =>
+                s.id === selectedShotId
+                  ? {
+                      ...s,
+                      backgroundKeys: (s.backgroundKeys || []).map((k) =>
+                        k.id === keyId ? { ...k, t: clamped } : k
+                      )
+                    }
+                  : s
+              )
+            }
+          }
+          setActiveProject(updatedProject)
+        }
+      } else if (draggedMarker.type === 'layerRange' && draggedMarker.layerId) {
+        const layer = selectedShot.layers.find((l) => l.id === draggedMarker.layerId)
+        if (layer && activeProject && activeProject.assetPipeline) {
+          const current = layerPresenceRange(layer, selectedShot.durationSec)
+          let from = current.from
+          let to = current.to
+          if (draggedMarker.clipDrag === 'trimIn') from = newTime
+          else to = newTime
+          const next = clampVisibilityRange(from, to, selectedShot.durationSec)
+          const layers = selectedShot.layers.map((l) =>
+            l.id !== draggedMarker.layerId
+              ? l
+              : { ...l, visibleFromSec: next.from, visibleToSec: next.to }
+          )
+          const updatedProject = {
+            ...activeProject,
+            assetPipeline: {
+              ...activeProject.assetPipeline,
+              storyboardShots: activeProject.assetPipeline.storyboardShots?.map((s) =>
+                s.id === selectedShotId ? { ...s, layers } : s
               )
             }
           }
@@ -2581,6 +2735,38 @@ export function StoryboardEditor() {
             setLayerError(msg)
             setAudioError(msg)
           }
+          const proj = await window.indieForge.projects.open(projectId!)
+          setActiveProject(proj)
+        }
+      } else if (draggedMarker.type === 'backgroundKey' && draggedMarker.keyId) {
+        const key = (selectedShot.backgroundKeys || []).find((k) => k.id === draggedMarker.keyId)
+        try {
+          if (key) {
+            await window.indieForge.pipeline.updateShotBackgroundKey(projectId!, key.id, { t: key.t })
+          }
+          const proj = await window.indieForge.projects.open(projectId!)
+          setActiveProject(proj)
+          setSelectedBackgroundKeyId(draggedMarker.keyId)
+          setBackgroundKeyError(null)
+        } catch (err) {
+          setBackgroundKeyError(err instanceof Error ? err.message : 'Failed to move background key')
+          const proj = await window.indieForge.projects.open(projectId!)
+          setActiveProject(proj)
+        }
+      } else if (draggedMarker.type === 'layerRange' && draggedMarker.layerId) {
+        const layer = selectedShot.layers.find((l) => l.id === draggedMarker.layerId)
+        try {
+          if (layer) {
+            await window.indieForge.pipeline.updateLayer(projectId!, selectedShotId!, layer.id, {
+              visibleFromSec: layer.visibleFromSec ?? 0,
+              visibleToSec: layer.visibleToSec ?? selectedShot.durationSec
+            })
+          }
+          const proj = await window.indieForge.projects.open(projectId!)
+          setActiveProject(proj)
+          setLayerError(null)
+        } catch (err) {
+          setLayerError(err instanceof Error ? err.message : 'Failed to trim layer presence')
           const proj = await window.indieForge.projects.open(projectId!)
           setActiveProject(proj)
         }
@@ -2894,7 +3080,10 @@ export function StoryboardEditor() {
     }
   }
 
-  const handleUpdateLayerFields = async (layerId: string, updates: Partial<StoryboardLayer>) => {
+  const handleUpdateLayerFields = async (
+    layerId: string,
+    updates: Partial<StoryboardLayer> & { visibleFromSec?: number | null; visibleToSec?: number | null }
+  ) => {
     if (!projectId || !selectedShotId) return
     await window.indieForge.pipeline.updateLayer(projectId, selectedShotId, layerId, updates)
     const updated = await window.indieForge.projects.open(projectId)
@@ -2933,10 +3122,20 @@ export function StoryboardEditor() {
         return
       }
       if (action.type === 'setShotBackground') {
+        if (backgroundKeyPickPending) {
+          setBackgroundKeyPickPending(false)
+          await handleAddBackgroundKeyFromPick(action.visualAssetId, null)
+          return
+        }
         await handleSelectLibraryBackground(action.visualAssetId, null)
         return
       }
       if (action.type === 'setBackgroundClip') {
+        if (backgroundKeyPickPending) {
+          setBackgroundKeyPickPending(false)
+          setBackgroundKeyError('Background keys are stills. Use the Clips track for video overlays.')
+          return
+        }
         await window.indieForge.pipeline.updateShot(projectId!, selectedShotId!, {
           backgroundClipId: action.clipId
         })
@@ -3561,6 +3760,59 @@ export function StoryboardEditor() {
     } catch (err) {
       setEventCueError(err instanceof Error ? err.message : 'Failed to update event cue')
       setEventCueTimeDraft(selectedEventCue.t.toFixed(2))
+    }
+  }
+
+  const handleAddBackgroundKeyFromPick = async (
+    visualAssetId: string,
+    stateId: string | null
+  ) => {
+    if (!selectedShot) return
+    try {
+      setBackgroundKeyError(null)
+      await window.indieForge.pipeline.addShotBackgroundKey(projectId!, selectedShotId!, {
+        t: playbackTime,
+        backgroundVisualAssetId: visualAssetId,
+        backgroundAssetStateId: stateId
+      })
+      await reloadProject()
+    } catch (err) {
+      setBackgroundKeyError(err instanceof Error ? err.message : 'Failed to add background key')
+    }
+  }
+
+  const handleCommitBackgroundKeyEdits = async (patch?: {
+    t?: number
+    backgroundVisualAssetId?: string | null
+    backgroundAssetStateId?: string | null
+    backgroundImage?: string | null
+  }) => {
+    if (!selectedBackgroundKey) return
+    const t = patch?.t ?? Number(backgroundKeyTimeDraft)
+    try {
+      setBackgroundKeyError(null)
+      await window.indieForge.pipeline.updateShotBackgroundKey(projectId!, selectedBackgroundKey.id, {
+        t,
+        ...patch
+      })
+      await reloadProject()
+    } catch (err) {
+      setBackgroundKeyError(err instanceof Error ? err.message : 'Failed to update background key')
+      setBackgroundKeyTimeDraft(selectedBackgroundKey.t.toFixed(2))
+    }
+  }
+
+  const confirmDeleteBackgroundKeyNow = async () => {
+    if (!confirmDeleteBackgroundKeyId) return
+    try {
+      setBackgroundKeyError(null)
+      await window.indieForge.pipeline.deleteShotBackgroundKey(projectId!, confirmDeleteBackgroundKeyId)
+      await reloadProject()
+      if (selectedBackgroundKeyId === confirmDeleteBackgroundKeyId) setSelectedBackgroundKeyId(null)
+    } catch (err) {
+      setBackgroundKeyError(err instanceof Error ? err.message : 'Failed to delete background key')
+    } finally {
+      setConfirmDeleteBackgroundKeyId(null)
     }
   }
 
@@ -4301,6 +4553,21 @@ export function StoryboardEditor() {
                   >
                     + Event @ {playbackTime.toFixed(1)}s
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setBackgroundKeyError(null)
+                      setBackgroundKeyPickPending(true)
+                      setLibraryPicker({
+                        purpose: 'shotBackground',
+                        title: 'Background still at playhead'
+                      })
+                    }}
+                    style={{ fontSize: '0.8rem', padding: '0.25rem 0.5rem' }}
+                    title="Cut the still background at the playhead. Holds until the next background key. Clip-track background blocks still overlay stills."
+                  >
+                    + Background @ {playbackTime.toFixed(1)}s
+                  </button>
                   <label style={{ fontSize: '0.75rem', color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
                     {playbackTime.toFixed(2)}s /
                     <input
@@ -4324,7 +4591,7 @@ export function StoryboardEditor() {
               <div 
                 style={{ 
                   position: 'relative', 
-                  height: '240px', 
+                  height: `${TIMELINE_HEIGHT_PX}px`, 
                   background: 'var(--bg)', 
                   borderRadius: '4px', 
                   cursor: 'pointer',
@@ -4340,19 +4607,22 @@ export function StoryboardEditor() {
                 <div style={{ position: 'absolute', left: '0.5rem', top: '5px', fontSize: '0.7rem', fontWeight: 'bold', color: '#00AAFF', zIndex: 5, pointerEvents: 'none' }}>
                   Camera
                 </div>
-                <div style={{ position: 'absolute', left: '0.5rem', top: '45px', fontSize: '0.7rem', fontWeight: 'bold', color: '#7CFFB2', zIndex: 5, pointerEvents: 'none' }}>
+                <div style={{ position: 'absolute', left: '0.5rem', top: '45px', fontSize: '0.7rem', fontWeight: 'bold', color: '#8EC8FF', zIndex: 5, pointerEvents: 'none' }}>
+                  Background
+                </div>
+                <div style={{ position: 'absolute', left: '0.5rem', top: '85px', fontSize: '0.7rem', fontWeight: 'bold', color: '#7CFFB2', zIndex: 5, pointerEvents: 'none' }}>
                   Pose/State
                 </div>
-                <div style={{ position: 'absolute', left: '0.5rem', top: '85px', fontSize: '0.7rem', fontWeight: 'bold', color: '#FF6B6B', zIndex: 5, pointerEvents: 'none' }}>
+                <div style={{ position: 'absolute', left: '0.5rem', top: '125px', fontSize: '0.7rem', fontWeight: 'bold', color: '#FF6B6B', zIndex: 5, pointerEvents: 'none' }}>
                   Effects
                 </div>
-                <div style={{ position: 'absolute', left: '0.5rem', top: '125px', fontSize: '0.7rem', fontWeight: 'bold', color: '#C9A0FF', zIndex: 5, pointerEvents: 'none' }}>
+                <div style={{ position: 'absolute', left: '0.5rem', top: '165px', fontSize: '0.7rem', fontWeight: 'bold', color: '#C9A0FF', zIndex: 5, pointerEvents: 'none' }}>
                   Clips
                 </div>
-                <div style={{ position: 'absolute', left: '0.5rem', top: '165px', fontSize: '0.7rem', fontWeight: 'bold', color: '#FFB347', zIndex: 5, pointerEvents: 'none' }}>
+                <div style={{ position: 'absolute', left: '0.5rem', top: '205px', fontSize: '0.7rem', fontWeight: 'bold', color: '#FFB347', zIndex: 5, pointerEvents: 'none' }}>
                   Audio
                 </div>
-                <div style={{ position: 'absolute', left: '0.5rem', top: '205px', fontSize: '0.7rem', fontWeight: 'bold', color: '#F48FB1', zIndex: 5, pointerEvents: 'none' }}>
+                <div style={{ position: 'absolute', left: '0.5rem', top: '245px', fontSize: '0.7rem', fontWeight: 'bold', color: '#F48FB1', zIndex: 5, pointerEvents: 'none' }}>
                   Events
                 </div>
                 
@@ -4362,6 +4632,7 @@ export function StoryboardEditor() {
                 <div style={{ position: 'absolute', left: 0, right: 0, top: '120px', height: '1px', background: 'rgba(255,255,255,0.1)', pointerEvents: 'none' }} />
                 <div style={{ position: 'absolute', left: 0, right: 0, top: '160px', height: '1px', background: 'rgba(255,255,255,0.1)', pointerEvents: 'none' }} />
                 <div style={{ position: 'absolute', left: 0, right: 0, top: '200px', height: '1px', background: 'rgba(255,255,255,0.1)', pointerEvents: 'none' }} />
+                <div style={{ position: 'absolute', left: 0, right: 0, top: '240px', height: '1px', background: 'rgba(255,255,255,0.1)', pointerEvents: 'none' }} />
                 
                 {/* Playhead - visual indicator, clicks handled by timeline */}
                 <div
@@ -4439,6 +4710,73 @@ export function StoryboardEditor() {
                     />
                   )
                 })}
+
+                {backgroundKeys.map((key) => {
+                  const duration = selectedShot.durationSec || 1
+                  const selected = selectedBackgroundKeyId === key.id
+                  const issue = pipeline ? backgroundKeyIssues(key, pipeline, selectedShot.id) : null
+                  const label = describeBackgroundKey(key, pipeline)
+                  const tooltip = `${label} @ ${key.t.toFixed(2)}s\nHolds until the next background key (hard cut)${issue ? `\n${issue}` : ''}`
+                  return (
+                    <div
+                      key={key.id}
+                      onPointerDown={() => {
+                        setSelectedBackgroundKeyId(key.id)
+                        setSidebarTab('background')
+                        setEditingCamera(false)
+                        setSelectedCameraIndex(null)
+                        setEditingEffect(false)
+                        setSelectedEffectIndex(null)
+                        setSelectedTimedKeyId(null)
+                        setSelectedClipBlockId(null)
+                        setSelectedAudioBlockId(null)
+                        setSelectedEventCueId(null)
+                      }}
+                      style={{
+                        position: 'absolute',
+                        left: `${(key.t / duration) * 100}%`,
+                        top: '55px',
+                        width: '18px',
+                        height: '18px',
+                        background: selected ? '#FFD700' : issue ? '#C44' : '#8EC8FF',
+                        borderRadius: '3px',
+                        transform: 'translateX(-50%)',
+                        cursor: 'move',
+                        border: selected ? '3px solid #FFF' : '2px solid #fff',
+                        boxShadow: selected ? '0 0 8px rgba(255, 215, 0, 0.6)' : '0 2px 4px rgba(0,0,0,0.3)',
+                        zIndex: selected ? 11 : 5
+                      }}
+                      title={tooltip}
+                    />
+                  )
+                })}
+
+                {selectedLayer &&
+                  (() => {
+                    const duration = selectedShot.durationSec || 1
+                    const range = layerPresenceRange(selectedLayer, selectedShot.durationSec)
+                    const left = (range.from / duration) * 100
+                    const width = Math.max(0.4, ((range.to - range.from) / duration) * 100)
+                    return (
+                      <div
+                        key={`range-${selectedLayer.id}`}
+                        style={{
+                          position: 'absolute',
+                          left: `${left}%`,
+                          top: '88px',
+                          width: `${width}%`,
+                          height: '24px',
+                          background: 'rgba(124, 255, 178, 0.28)',
+                          border: '1px solid #7CFFB2',
+                          borderRadius: '3px',
+                          pointerEvents: 'none',
+                          zIndex: 4,
+                          boxSizing: 'border-box'
+                        }}
+                        title={`Presence ${range.from.toFixed(2)}s–${range.to.toFixed(2)}s (half-open). Drag ends to trim. Eye hide is separate.`}
+                      />
+                    )
+                  })()}
                 
                 {/* Pose/state timed keys (same layer, not duplicate layers) */}
                 {timedKeyRows.map((row) => {
@@ -4463,7 +4801,7 @@ export function StoryboardEditor() {
                       style={{
                         position: 'absolute',
                         left: `${(row.key.t / selectedShot.durationSec) * 100}%`,
-                        top: '50px',
+                        top: '90px',
                         width: '18px',
                         height: '18px',
                         background: selected ? '#FFD700' : issue ? '#C44' : '#7CFFB2',
@@ -4500,7 +4838,7 @@ export function StoryboardEditor() {
                       style={{
                         position: 'absolute',
                         left: `${(ef.t / selectedShot.durationSec) * 100}%`,
-                        top: '90px',
+                        top: '130px',
                         width: '20px',
                         height: '20px',
                         background: selectedEffectIndex === idx ? '#FFD700' : '#FF6B6B',
@@ -4551,7 +4889,7 @@ export function StoryboardEditor() {
                       style={{
                         position: 'absolute',
                         left: `${left}%`,
-                        top: '128px',
+                        top: '168px',
                         width: `${width}%`,
                         height: '26px',
                         background: selected ? '#E2C6FF' : block.implicit ? 'transparent' : issue ? '#C44' : '#7B4DFF',
@@ -4611,10 +4949,16 @@ export function StoryboardEditor() {
                       style={{
                         position: 'absolute',
                         left: `${left}%`,
-                        top: '168px',
+                        top: '208px',
                         width: `${width}%`,
                         height: '26px',
-                        background: selected ? '#FFD8A8' : issue ? '#C44' : block.role === 'music' ? '#E07A2F' : '#FFB347',
+                        background: selected
+                          ? '#FFD8A8'
+                          : issue
+                            ? '#C44'
+                            : block.role === 'music'
+                              ? '#E07A2F'
+                              : '#FFB347',
                         border: selected ? '3px solid #FFF' : '2px solid #fff',
                         borderRadius: '4px',
                         cursor: 'ew-resize',
@@ -4658,7 +5002,7 @@ export function StoryboardEditor() {
                       style={{
                         position: 'absolute',
                         left: `${(cue.t / duration) * 100}%`,
-                        top: '208px',
+                        top: '248px',
                         width: '18px',
                         height: '18px',
                         background: selected ? '#FFD700' : issue ? '#C44' : '#F48FB1',
@@ -5333,6 +5677,106 @@ export function StoryboardEditor() {
                   )}
                 </div>
               )}
+
+              {backgroundKeyError && !selectedBackgroundKey && (
+                <div style={{ color: '#ff8a8a', fontSize: '0.75rem', marginTop: '0.35rem' }}>{backgroundKeyError}</div>
+              )}
+
+              {selectedBackgroundKey && selectedShot && (
+                <div style={{ marginTop: '0.5rem', padding: '0.6rem', background: 'var(--bg)', borderRadius: '4px', fontSize: '0.8rem' }}>
+                  <div>
+                    <strong>Background key</strong>
+                    {' · '}
+                    {describeBackgroundKey(selectedBackgroundKey, pipeline)}
+                    {' @ '}
+                    {selectedBackgroundKey.t.toFixed(2)}s
+                  </div>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--muted)', marginTop: '0.25rem' }}>
+                    Hard cut; holds until the next background key. Static shot background is t=0 before the first key.
+                    Clip-track background blocks still draw over stills while active.
+                  </div>
+                  {pipeline && backgroundKeyIssues(selectedBackgroundKey, pipeline, selectedShot.id) && (
+                    <div style={{ color: '#ff8a8a', fontSize: '0.75rem', marginTop: '0.35rem' }}>
+                      {backgroundKeyIssues(selectedBackgroundKey, pipeline, selectedShot.id)}
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '0.45rem', alignItems: 'center' }}>
+                    <label style={{ fontSize: '0.75rem' }}>
+                      t
+                      <input
+                        type="number"
+                        step="0.05"
+                        min="0"
+                        value={backgroundKeyTimeDraft}
+                        onChange={(e) => setBackgroundKeyTimeDraft(e.target.value)}
+                        onBlur={() => void handleCommitBackgroundKeyEdits()}
+                        style={{ width: '4.5rem', marginLeft: '0.25rem' }}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setLibraryPicker({
+                          purpose: 'shotBackground',
+                          title: 'Change background still',
+                          onAction: (action) => {
+                            if (action.type === 'setShotBackground') {
+                              void handleCommitBackgroundKeyEdits({
+                                backgroundVisualAssetId: action.visualAssetId,
+                                backgroundAssetStateId: null
+                              })
+                            }
+                          }
+                        })
+                      }
+                      style={{
+                        fontSize: '0.8rem',
+                        padding: '0.25rem 0.45rem',
+                        background: 'var(--forge-gold)',
+                        color: '#000'
+                      }}
+                    >
+                      Library…
+                    </button>
+                    {(() => {
+                      const asset = visualAssets.find((a) => a.id === selectedBackgroundKey.backgroundVisualAssetId)
+                      const owned = asset ? assetStates.filter((s) => s.assetId === asset.id) : []
+                      if (!asset || owned.length === 0) return null
+                      return (
+                        <label style={{ fontSize: '0.75rem' }}>
+                          state
+                          <select
+                            value={selectedBackgroundKey.backgroundAssetStateId || ''}
+                            onChange={(e) =>
+                              void handleCommitBackgroundKeyEdits({
+                                backgroundAssetStateId: e.target.value || null
+                              })
+                            }
+                            style={{ marginLeft: '0.25rem', fontSize: '0.8rem' }}
+                          >
+                            <option value="">Default / static</option>
+                            {owned.map((state) => (
+                              <option key={state.id} value={state.id}>
+                                {state.name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      )
+                    })()}
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDeleteBackgroundKeyId(selectedBackgroundKey.id)}
+                      style={{ fontSize: '0.75rem', background: 'var(--danger)', color: 'white' }}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                  {backgroundKeyError && (
+                    <div style={{ color: '#ff8a8a', fontSize: '0.75rem', marginTop: '0.35rem' }}>{backgroundKeyError}</div>
+                  )}
+                </div>
+              )}
               
               {showAddEffect && (
                 <div style={{ marginTop: '0.5rem', padding: '0.75rem', background: 'var(--bg)', borderRadius: '4px', border: '2px solid var(--forge-gold)' }}>
@@ -5826,6 +6270,13 @@ export function StoryboardEditor() {
                     if (!selectedLayerId) return
                     void handleUpdateLayerFields(selectedLayerId, { visible })
                   }}
+                  onChangeVisibilityRange={(fromSec, toSec) => {
+                    if (!selectedLayerId) return
+                    void handleUpdateLayerFields(selectedLayerId, {
+                      visibleFromSec: fromSec,
+                      visibleToSec: toSec
+                    })
+                  }}
                   onChangeText={(text) => {
                     if (!selectedLayerId) return
                     void handleUpdateLayerFields(selectedLayerId, { text })
@@ -5973,6 +6424,16 @@ export function StoryboardEditor() {
           onCancel={() => setConfirmDeleteEventCueId(null)}
         />
       )}
+      {confirmDeleteBackgroundKeyId && (
+        <ConfirmModal
+          title="Delete background key"
+          message="Remove this still-background cut? The shot's static background and other keys stay."
+          confirmLabel="Delete"
+          danger
+          onConfirm={confirmDeleteBackgroundKeyNow}
+          onCancel={() => setConfirmDeleteBackgroundKeyId(null)}
+        />
+      )}
       {pendingExtend && (
         <ConfirmModal
           title="Extend shot?"
@@ -5990,7 +6451,10 @@ export function StoryboardEditor() {
           gameId={gameId}
           title={libraryPicker.title}
           initialTab={libraryPicker.initialTab}
-          onClose={() => setLibraryPicker(null)}
+          onClose={() => {
+            setLibraryPicker(null)
+            setBackgroundKeyPickPending(false)
+          }}
           onPick={(action) => {
             if (libraryPicker.onAction) {
               libraryPicker.onAction(action)

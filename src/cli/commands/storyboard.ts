@@ -35,7 +35,12 @@ import {
   listShotEventCues,
   getShotEventCue,
   updateShotEventCue,
-  removeShotEventCue
+  removeShotEventCue,
+  addShotBackgroundKey,
+  listShotBackgroundKeys,
+  getShotBackgroundKey,
+  updateShotBackgroundKey,
+  removeShotBackgroundKey
 } from '../../core/storage/storyboardService'
 import type {
   CameraKeyframe,
@@ -56,6 +61,8 @@ import {
   sampleAudioBlocks
 } from '../../shared/storyboard/audioBlocks'
 import { simulateEventFire } from '../../shared/storyboard/eventPreview'
+import { describeBackgroundKey } from '../../shared/storyboard/backgroundKeys'
+import { parseVisibilityBound } from '../../shared/storyboard/layerVisibilityRange'
 import { getAssetPipeline } from '../../core/storage/studioStorage'
 import { getDataDir } from '../../core/storage/dataDir'
 import { importDirectShotBackground } from '../../core/storage/shotBackgroundMedia'
@@ -245,7 +252,7 @@ export function registerStoryboardCommands(program: Command): void {
     .description('Update shot properties')
     .requiredOption('--id <shotId>', 'Shot ID')
     .option('--name <name>', 'New name')
-    .option('--duration <seconds>', 'Duration in seconds (user-entered; shrink is refused if audio/clips/keys/camera/effects/event-cues would be cut; previous length is not restored from history)')
+    .option('--duration <seconds>', 'Duration in seconds (user-entered; shrink is refused if audio/clips/keys/camera/effects/event-cues/background-keys/visibility-range would be cut; previous length is not restored from history)')
     .option('--notes <text>', 'Notes for engineer')
     .option('--background-image <path>', 'Direct-import image (copied into studio backgrounds/; not an external path)')
     .option('--background-asset <id>', 'Library visual asset id (selected Game; full image, not thumbnail)')
@@ -909,6 +916,181 @@ export function registerStoryboardCommands(program: Command): void {
       }
     })
 
+  const shotBackgroundKeyCmd = shotCmd
+    .command('background-key')
+    .description(
+      'Timed still-background keys. Step/hold from t until the next key. Static shot background is the value before the first key. Clip-track background blocks still overlay stills.'
+    )
+
+  shotBackgroundKeyCmd
+    .command('add')
+    .description('Add a still-background cut at a shot time')
+    .requiredOption('--shot <shotId>', 'Shot ID')
+    .requiredOption('--time <seconds>', 'Shot time for the cut')
+    .option('--background-asset <id>', 'Library visual asset id (selected Game; full image)')
+    .option('--background-state <id>', 'Asset state id for --background-asset (omit for default/static)')
+    .option('--background-image <path>', 'Direct-import image (copied into studio backgrounds/)')
+    .option('--json', 'Output as JSON')
+    .action(async (options, cmd) => {
+      try {
+        const mergedOpts = { ...cmd.parent!.parent!.parent!.opts(), ...options }
+        if (options.backgroundAsset && options.backgroundImage) {
+          throw new Error('Use either --background-asset or --background-image, not both')
+        }
+        let backgroundImage: string | undefined
+        if (options.backgroundImage) {
+          backgroundImage = await importDirectShotBackground(
+            options.backgroundImage,
+            getDataDir(mergedOpts.dataDir)
+          )
+        }
+        const result = await addShotBackgroundKey(
+          options.shot,
+          {
+            t: options.time,
+            backgroundVisualAssetId: options.backgroundAsset,
+            backgroundAssetStateId: options.backgroundState,
+            backgroundImage
+          },
+          getDataDir(mergedOpts.dataDir)
+        )
+        if (mergedOpts.json) {
+          console.log(JSON.stringify(result, null, 2))
+        } else {
+          console.log(
+            `✓ Background key ${result.key.id} @ ${result.key.t}s → ${describeBackgroundKey(result.key)}`
+          )
+        }
+      } catch (err) {
+        console.error('Error:', err instanceof Error ? err.message : err)
+        process.exit(1)
+      }
+    })
+
+  shotBackgroundKeyCmd
+    .command('list')
+    .description('List still-background keys on a shot')
+    .requiredOption('--shot <shotId>', 'Shot ID')
+    .option('--json', 'Output as JSON')
+    .action(async (options, cmd) => {
+      try {
+        const mergedOpts = { ...cmd.parent!.parent!.parent!.opts(), ...options }
+        const keys = await listShotBackgroundKeys(options.shot, getDataDir(mergedOpts.dataDir))
+        if (mergedOpts.json) {
+          console.log(JSON.stringify(keys, null, 2))
+        } else if (keys.length === 0) {
+          console.log('No background keys (static shot background holds for the whole shot)')
+        } else {
+          const pipeline = await getAssetPipeline(getDataDir(mergedOpts.dataDir))
+          for (const key of keys) {
+            console.log(
+              `${key.id}  t=${key.t}s  ${describeBackgroundKey(key, pipeline)}`
+            )
+          }
+        }
+      } catch (err) {
+        console.error('Error:', err instanceof Error ? err.message : err)
+        process.exit(1)
+      }
+    })
+
+  shotBackgroundKeyCmd
+    .command('show')
+    .description('Show one background key')
+    .requiredOption('--id <keyId>', 'Background key ID')
+    .option('--json', 'Output as JSON')
+    .action(async (options, cmd) => {
+      try {
+        const mergedOpts = { ...cmd.parent!.parent!.parent!.opts(), ...options }
+        const found = await getShotBackgroundKey(options.id, getDataDir(mergedOpts.dataDir))
+        if (!found) throw new Error(`Background key not found: ${options.id}`)
+        if (mergedOpts.json) {
+          console.log(JSON.stringify(found, null, 2))
+        } else {
+          const pipeline = await getAssetPipeline(getDataDir(mergedOpts.dataDir))
+          console.log(
+            `${found.key.id}  shot=${found.shotId}  t=${found.key.t}s  ${describeBackgroundKey(found.key, pipeline)}`
+          )
+        }
+      } catch (err) {
+        console.error('Error:', err instanceof Error ? err.message : err)
+        process.exit(1)
+      }
+    })
+
+  shotBackgroundKeyCmd
+    .command('update')
+    .description('Move a background key or change its still')
+    .requiredOption('--id <keyId>', 'Background key ID')
+    .option('--time <seconds>', 'New shot time')
+    .option('--background-asset <id>', 'Library visual asset id')
+    .option('--background-state <id>', 'Asset state id')
+    .option('--background-image <path>', 'Direct-import image (copied into studio backgrounds/)')
+    .option('--json', 'Output as JSON')
+    .action(async (options, cmd) => {
+      try {
+        const mergedOpts = { ...cmd.parent!.parent!.parent!.opts(), ...options }
+        if (
+          options.time === undefined &&
+          options.backgroundAsset === undefined &&
+          options.backgroundState === undefined &&
+          options.backgroundImage === undefined
+        ) {
+          throw new Error('Provide --time, --background-asset, --background-state, and/or --background-image')
+        }
+        if (options.backgroundAsset && options.backgroundImage) {
+          throw new Error('Use either --background-asset or --background-image, not both')
+        }
+        let backgroundImage: string | undefined
+        if (options.backgroundImage) {
+          backgroundImage = await importDirectShotBackground(
+            options.backgroundImage,
+            getDataDir(mergedOpts.dataDir)
+          )
+        }
+        const result = await updateShotBackgroundKey(
+          options.id,
+          {
+            t: options.time,
+            backgroundVisualAssetId: options.backgroundAsset,
+            backgroundAssetStateId: options.backgroundState,
+            backgroundImage
+          },
+          getDataDir(mergedOpts.dataDir)
+        )
+        if (mergedOpts.json) {
+          console.log(JSON.stringify(result, null, 2))
+        } else {
+          console.log(
+            `✓ Updated background key ${result.key.id} @ ${result.key.t}s → ${describeBackgroundKey(result.key)}`
+          )
+        }
+      } catch (err) {
+        console.error('Error:', err instanceof Error ? err.message : err)
+        process.exit(1)
+      }
+    })
+
+  shotBackgroundKeyCmd
+    .command('remove')
+    .description('Remove a background key (static shot background is unchanged)')
+    .requiredOption('--id <keyId>', 'Background key ID')
+    .option('--json', 'Output as JSON')
+    .action(async (options, cmd) => {
+      try {
+        const mergedOpts = { ...cmd.parent!.parent!.parent!.opts(), ...options }
+        await removeShotBackgroundKey(options.id, getDataDir(mergedOpts.dataDir))
+        if (mergedOpts.json) {
+          console.log(JSON.stringify({ deleted: true, keyId: options.id }, null, 2))
+        } else {
+          console.log(`✓ Removed background key: ${options.id}`)
+        }
+      } catch (err) {
+        console.error('Error:', err instanceof Error ? err.message : err)
+        process.exit(1)
+      }
+    })
+
   // Layer commands
   const layerCmd = program
     .command('layer')
@@ -935,6 +1117,11 @@ export function registerStoryboardCommands(program: Command): void {
           console.log(`Layers (${layers.length}):`)
           for (const layer of layers) {
             const bits = [`z${layer.zOrder}`, layer.visible === false ? 'hidden' : 'visible']
+            if (layer.visibleFromSec !== undefined || layer.visibleToSec !== undefined) {
+              bits.push(
+                `range ${layer.visibleFromSec ?? 0}–${layer.visibleToSec ?? 'end'}`
+              )
+            }
             if (layer.visualAssetId) bits.push(`asset=${layer.visualAssetId}`)
             if (layer.assetStateId) bits.push(`state=${layer.assetStateId}`)
             if (layer.characterId) bits.push(`character=${layer.characterId}`)
@@ -1048,7 +1235,12 @@ export function registerStoryboardCommands(program: Command): void {
     .option('--text <content>', 'Text content')
     .option('--font <fontRef>', 'Font id, theme slot id, or "default"')
     .option('--palette <paletteRef>', 'Palette id, theme slot id, or "default"')
-    .option('--visible <bool>', 'Visibility (true/false)')
+    .option('--visible <bool>', 'Visibility (true/false) — editor eye hide')
+    .option('--visible-from <seconds>', 'Timed presence start (half-open; omit = shot start)')
+    .option('--visible-to <seconds>', 'Timed presence end (half-open; omit = shot end)')
+    .option('--clear-visible-from', 'Clear timed presence start (layer present from 0)')
+    .option('--clear-visible-to', 'Clear timed presence end (layer present through shot end)')
+    .option('--clear-visible-range', 'Clear both timed presence bounds (whole shot)')
     .option('--x <coord>', 'X coordinate (0-1)')
     .option('--y <coord>', 'Y coordinate (0-1)')
     .option('--scale <factor>', 'Scale factor')
@@ -1079,6 +1271,18 @@ export function registerStoryboardCommands(program: Command): void {
         if (options.font !== undefined) updates.fontRef = options.font
         if (options.palette !== undefined) updates.paletteRef = options.palette
         if (options.visible !== undefined) updates.visible = options.visible !== 'false'
+        if (options.clearVisibleRange) {
+          updates.visibleFromSec = null
+          updates.visibleToSec = null
+        }
+        if (options.clearVisibleFrom) updates.visibleFromSec = null
+        else if (options.visibleFrom !== undefined) {
+          updates.visibleFromSec = parseVisibilityBound(options.visibleFrom, '--visible-from')
+        }
+        if (options.clearVisibleTo) updates.visibleToSec = null
+        else if (options.visibleTo !== undefined) {
+          updates.visibleToSec = parseVisibilityBound(options.visibleTo, '--visible-to')
+        }
         if (options.x !== undefined) updates.x = parseFloat(options.x)
         if (options.y !== undefined) updates.y = parseFloat(options.y)
         if (options.fitSource) updates.scale = 1

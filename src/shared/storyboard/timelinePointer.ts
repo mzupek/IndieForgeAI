@@ -1,14 +1,18 @@
 /**
- * Y-aware hit test for the six timeline tracks
- * (camera / pose / effects / clips / audio / events).
+ * Y-aware hit test for the seven timeline tracks
+ * (camera / background / pose / effects / clips / audio / events).
  * Click on empty track time → playhead. Click on a marker/block → select (and drag if movable).
+ * Selected-layer visibility range lives on the pose track (edge trim).
  */
 
 export const TIMELINE_NEAR_RATIO = 0.03
 export const TIMELINE_EDGE_RATIO = 0.012
-export const TIMELINE_TRACK_COUNT = 6
+export const TIMELINE_TRACK_COUNT = 7
+export const TIMELINE_TRACK_HEIGHT_PX = 40
+export const TIMELINE_HEIGHT_PX = TIMELINE_TRACK_COUNT * TIMELINE_TRACK_HEIGHT_PX
 export const TIMELINE_TRACK_ORDER = [
   'camera',
+  'background',
   'pose',
   'effects',
   'clips',
@@ -23,7 +27,14 @@ export type TimelineClipDrag = 'move' | 'trimIn' | 'trimOut'
 export type TimelineHit =
   | { kind: 'playhead'; timeSec: number; track: TimelineTrack }
   | { kind: 'camera'; index: number; timeSec: number }
+  | { kind: 'backgroundKey'; keyId: string; timeSec: number }
   | { kind: 'timedKey'; index: number; layerId: string; keyId: string; timeSec: number }
+  | {
+      kind: 'layerRange'
+      layerId: string
+      clipDrag: 'trimIn' | 'trimOut'
+      timeSec: number
+    }
   | { kind: 'effect'; index: number; timeSec: number }
   | {
       kind: 'clipBlock'
@@ -71,6 +82,8 @@ export function hitTestTimeline(input: {
   clipBlocks: Array<{ id: string; t: number; durationSec: number; implicit?: boolean }>
   audioBlocks: Array<{ id: string; t: number; durationSec: number }>
   eventCues?: Array<{ id: string; t: number }>
+  backgroundKeys?: Array<{ id: string; t: number }>
+  layerRange?: { layerId: string; fromSec: number; toSec: number }
 }): TimelineHit {
   const duration = input.durationSec > 0 ? input.durationSec : 1
   const x = Math.max(0, Math.min(1, input.xRatio))
@@ -83,6 +96,14 @@ export function hitTestTimeline(input: {
         return { kind: 'camera', index: i, timeSec: clickTime }
       }
     }
+  } else if (track === 'background') {
+    const keys = input.backgroundKeys || []
+    for (let i = keys.length - 1; i >= 0; i--) {
+      const row = keys[i]
+      if (nearMarkerTime(clickTime, row.t, duration)) {
+        return { kind: 'backgroundKey', keyId: row.id, timeSec: clickTime }
+      }
+    }
   } else if (track === 'pose') {
     for (let i = input.timedKeys.length - 1; i >= 0; i--) {
       const row = input.timedKeys[i]
@@ -93,6 +114,21 @@ export function hitTestTimeline(input: {
           layerId: row.layerId,
           keyId: row.keyId,
           timeSec: clickTime
+        }
+      }
+    }
+    if (input.layerRange) {
+      const x0 = input.layerRange.fromSec / duration
+      const x1 = input.layerRange.toSec / duration
+      if (x >= x0 && x <= x1) {
+        const edge = edgeDrag(x, x0, x1)
+        if (edge === 'trimIn' || edge === 'trimOut') {
+          return {
+            kind: 'layerRange',
+            layerId: input.layerRange.layerId,
+            clipDrag: edge,
+            timeSec: clickTime
+          }
         }
       }
     }

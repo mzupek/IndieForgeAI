@@ -9,7 +9,8 @@ import type {
   LayerTimedKeyAction,
   ShotClipBlock,
   ShotAudioBlock,
-  ShotEventCue
+  ShotEventCue,
+  ShotBackgroundKey
 } from '@shared/types/assetPipeline'
 import { getAssetPipeline, updateAssetPipeline } from './studioStorage'
 import { validateLayerReferences } from '../../shared/storyboard/layerValidation'
@@ -45,6 +46,13 @@ import {
   parseEventCueTime,
   validateEventCue
 } from '../../shared/storyboard/eventCues'
+import {
+  ensureShotBackgroundKeys,
+  findBackgroundKey,
+  parseBackgroundKeyTime,
+  validateBackgroundKey
+} from '../../shared/storyboard/backgroundKeys'
+import { validateLayerVisibilityRange } from '../../shared/storyboard/layerVisibilityRange'
 
 /**
  * Create a new storyboard
@@ -181,6 +189,7 @@ export async function createShot(
     clipTrack: [],
     audioTrack: [],
     eventCues: [],
+    backgroundKeys: [],
     notes: input.notes,
     createdAt: now,
     updatedAt: now
@@ -338,6 +347,7 @@ export async function addLayer(
   }
 
   validateLayerReferences(newLayer, pipeline, shotId)
+  validateLayerVisibilityRange(newLayer, shot.durationSec)
   for (const key of newLayer.timedKeys || []) {
     validateLayerTimedKey(key, newLayer, pipeline, shotId)
   }
@@ -356,7 +366,10 @@ export async function addLayer(
 export async function updateLayer(
   shotId: string,
   layerId: string,
-  updates: Partial<Omit<StoryboardLayer, 'id'>>,
+  updates: Partial<Omit<StoryboardLayer, 'id'>> & {
+    visibleFromSec?: number | null
+    visibleToSec?: number | null
+  },
   dataDirOverride?: string
 ): Promise<StoryboardLayer> {
   const pipeline = await getAssetPipeline(dataDirOverride)
@@ -371,12 +384,25 @@ export async function updateLayer(
     throw new Error(`Layer not found: ${layerId}`)
   }
   
+  const {
+    visibleFromSec: fromPatch,
+    visibleToSec: toPatch,
+    ...rest
+  } = updates as Partial<Omit<StoryboardLayer, 'id'>> & {
+    visibleFromSec?: number | null
+    visibleToSec?: number | null
+  }
   const merged: StoryboardLayer = {
     ...shot.layers[layerIndex],
-    ...updates
+    ...rest
   }
+  if (fromPatch === null) delete merged.visibleFromSec
+  else if (fromPatch !== undefined) merged.visibleFromSec = fromPatch
+  if (toPatch === null) delete merged.visibleToSec
+  else if (toPatch !== undefined) merged.visibleToSec = toPatch
 
   validateLayerReferences(merged, pipeline, shotId)
+  validateLayerVisibilityRange(merged, shot.durationSec)
   for (const key of merged.timedKeys || []) {
     validateLayerTimedKey(key, merged, pipeline, shotId)
   }
@@ -993,6 +1019,147 @@ export async function removeShotEventCue(
   const found = findEventCue(pipeline, cueId)
   if (!found) throw new Error(`Event cue not found: ${cueId}`)
   found.shot.eventCues = (found.shot.eventCues || []).filter((c) => c.id !== cueId)
+  found.shot.updatedAt = new Date().toISOString()
+  await updateAssetPipeline(pipeline, dataDirOverride)
+}
+
+function normalizeBackgroundKeyInput(input: {
+  t: number | string
+  backgroundVisualAssetId?: string | null
+  backgroundAssetStateId?: string | null
+  backgroundImage?: string | null
+}): Omit<ShotBackgroundKey, 'id' | 'schemaVersion'> {
+  const visual = input.backgroundVisualAssetId?.trim() || undefined
+  const image = input.backgroundImage?.trim() || undefined
+  const state =
+    input.backgroundAssetStateId === undefined
+      ? undefined
+      : input.backgroundAssetStateId
+        ? input.backgroundAssetStateId
+        : null
+  return {
+    t: typeof input.t === 'number' ? input.t : Number(input.t),
+    backgroundVisualAssetId: visual,
+    backgroundAssetStateId: visual ? (state === undefined ? null : state) : undefined,
+    backgroundImage: image
+  }
+}
+
+export async function addShotBackgroundKey(
+  shotId: string,
+  input: {
+    t: number | string
+    backgroundVisualAssetId?: string | null
+    backgroundAssetStateId?: string | null
+    backgroundImage?: string | null
+  },
+  dataDirOverride?: string
+): Promise<{ key: ShotBackgroundKey }> {
+  const pipeline = await getAssetPipeline(dataDirOverride)
+  const shot = pipeline.storyboardShots.find((s) => s.id === shotId)
+  if (!shot) throw new Error(`Shot not found: ${shotId}`)
+  const keys = ensureShotBackgroundKeys(shot)
+  const refs = normalizeBackgroundKeyInput(input)
+  const t = parseBackgroundKeyTime(refs.t, shot.durationSec)
+  const key: ShotBackgroundKey = {
+    id: randomUUID(),
+    t,
+    backgroundVisualAssetId: refs.backgroundVisualAssetId,
+    backgroundAssetStateId: refs.backgroundAssetStateId,
+    backgroundImage: refs.backgroundImage,
+    schemaVersion: 1
+  }
+  if (!key.backgroundVisualAssetId) delete key.backgroundVisualAssetId
+  if (key.backgroundAssetStateId === undefined) delete key.backgroundAssetStateId
+  if (!key.backgroundImage) delete key.backgroundImage
+  validateBackgroundKey(key, pipeline, shotId)
+  keys.push(key)
+  keys.sort((a, b) => a.t - b.t || a.id.localeCompare(b.id))
+  shot.updatedAt = new Date().toISOString()
+  await updateAssetPipeline(pipeline, dataDirOverride)
+  return { key }
+}
+
+export async function listShotBackgroundKeys(
+  shotId: string,
+  dataDirOverride?: string
+): Promise<ShotBackgroundKey[]> {
+  const shot = await getShot(shotId, dataDirOverride)
+  if (!shot) throw new Error(`Shot not found: ${shotId}`)
+  return [...(shot.backgroundKeys || [])].sort((a, b) => a.t - b.t || a.id.localeCompare(b.id))
+}
+
+export async function getShotBackgroundKey(
+  keyId: string,
+  dataDirOverride?: string
+): Promise<{ shotId: string; key: ShotBackgroundKey } | undefined> {
+  const pipeline = await getAssetPipeline(dataDirOverride)
+  const found = findBackgroundKey(pipeline, keyId)
+  if (!found) return undefined
+  return { shotId: found.shot.id, key: found.key }
+}
+
+export async function updateShotBackgroundKey(
+  keyId: string,
+  patch: {
+    t?: number | string
+    backgroundVisualAssetId?: string | null
+    backgroundAssetStateId?: string | null
+    backgroundImage?: string | null
+  },
+  dataDirOverride?: string
+): Promise<{ key: ShotBackgroundKey }> {
+  const pipeline = await getAssetPipeline(dataDirOverride)
+  const found = findBackgroundKey(pipeline, keyId)
+  if (!found) throw new Error(`Background key not found: ${keyId}`)
+  const next: ShotBackgroundKey = { ...found.key }
+  if (patch.t !== undefined) {
+    next.t = parseBackgroundKeyTime(patch.t, found.shot.durationSec)
+  }
+  if (patch.backgroundVisualAssetId !== undefined) {
+    const visual = patch.backgroundVisualAssetId?.trim() || undefined
+    if (visual) {
+      next.backgroundVisualAssetId = visual
+      delete next.backgroundImage
+      if (patch.backgroundAssetStateId !== undefined) {
+        next.backgroundAssetStateId = patch.backgroundAssetStateId || null
+      } else if (next.backgroundAssetStateId === undefined) {
+        next.backgroundAssetStateId = null
+      }
+    } else {
+      delete next.backgroundVisualAssetId
+      delete next.backgroundAssetStateId
+    }
+  }
+  if (patch.backgroundAssetStateId !== undefined && next.backgroundVisualAssetId) {
+    next.backgroundAssetStateId = patch.backgroundAssetStateId || null
+  }
+  if (patch.backgroundImage !== undefined) {
+    const image = patch.backgroundImage?.trim() || undefined
+    if (image) {
+      next.backgroundImage = image
+      delete next.backgroundVisualAssetId
+      delete next.backgroundAssetStateId
+    } else {
+      delete next.backgroundImage
+    }
+  }
+  validateBackgroundKey(next, pipeline, found.shot.id)
+  found.shot.backgroundKeys = (found.shot.backgroundKeys || []).map((k) => (k.id === keyId ? next : k))
+  found.shot.backgroundKeys.sort((a, b) => a.t - b.t || a.id.localeCompare(b.id))
+  found.shot.updatedAt = new Date().toISOString()
+  await updateAssetPipeline(pipeline, dataDirOverride)
+  return { key: next }
+}
+
+export async function removeShotBackgroundKey(
+  keyId: string,
+  dataDirOverride?: string
+): Promise<void> {
+  const pipeline = await getAssetPipeline(dataDirOverride)
+  const found = findBackgroundKey(pipeline, keyId)
+  if (!found) throw new Error(`Background key not found: ${keyId}`)
+  found.shot.backgroundKeys = (found.shot.backgroundKeys || []).filter((k) => k.id !== keyId)
   found.shot.updatedAt = new Date().toISOString()
   await updateAssetPipeline(pipeline, dataDirOverride)
 }

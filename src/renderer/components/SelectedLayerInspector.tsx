@@ -50,6 +50,7 @@ export function SelectedLayerInspector({
   onChangeScale,
   onChangeRotation,
   onChangeVisible,
+  onChangeVisibilityRange,
   onChangeText,
   onChangeFont,
   onChangePalette,
@@ -81,6 +82,7 @@ export function SelectedLayerInspector({
   onChangeScale: (value: number) => void
   onChangeRotation: (value: number) => void
   onChangeVisible: (visible: boolean) => void
+  onChangeVisibilityRange: (fromSec: number | null, toSec: number | null) => void
   onChangeText: (text: string) => void
   onChangeFont: (fontRef: string) => void
   onChangePalette: (paletteRef: string) => void
@@ -366,8 +368,65 @@ export function SelectedLayerInspector({
             checked={layer.visible !== false}
             onChange={(e) => onChangeVisible(e.target.checked)}
           />
-          Visible
+          Visible (editor eye)
         </label>
+        <div style={{ marginTop: '0.45rem', fontSize: '0.75rem' }}>
+          Presence on shot (half-open). Empty = whole shot. Eye hide is separate.
+          <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'flex-end', flexWrap: 'wrap', marginTop: '0.25rem' }}>
+            <label>
+              From
+              <input
+                type="number"
+                step="0.05"
+                min="0"
+                value={layer.visibleFromSec ?? ''}
+                placeholder="0"
+                onChange={(e) => {
+                  const raw = e.target.value
+                  onChangeVisibilityRange(
+                    raw === '' ? null : parseFloat(raw),
+                    layer.visibleToSec ?? null
+                  )
+                }}
+                style={{ width: '4.2rem', marginLeft: '0.25rem', fontSize: '0.75rem' }}
+              />
+            </label>
+            <button
+              type="button"
+              onClick={() => onChangeVisibilityRange(playbackTime, layer.visibleToSec ?? null)}
+              style={{ fontSize: '0.7rem', padding: '0.15rem 0.35rem' }}
+              title="Set From to the playhead"
+            >
+              @ playhead
+            </button>
+            <label>
+              To
+              <input
+                type="number"
+                step="0.05"
+                min="0"
+                value={layer.visibleToSec ?? ''}
+                placeholder="end"
+                onChange={(e) => {
+                  const raw = e.target.value
+                  onChangeVisibilityRange(
+                    layer.visibleFromSec ?? null,
+                    raw === '' ? null : parseFloat(raw)
+                  )
+                }}
+                style={{ width: '4.2rem', marginLeft: '0.25rem', fontSize: '0.75rem' }}
+              />
+            </label>
+            <button
+              type="button"
+              onClick={() => onChangeVisibilityRange(layer.visibleFromSec ?? null, playbackTime)}
+              style={{ fontSize: '0.7rem', padding: '0.15rem 0.35rem' }}
+              title="Set To to the playhead"
+            >
+              @ playhead
+            </button>
+          </div>
+        </div>
       </CollapsibleSection>
 
       {kind === 'text' && (

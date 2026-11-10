@@ -293,8 +293,17 @@ export interface StoryboardLayer {
   /** P2: Palette reference (Palette id, Game Definition themeSlot id, or "default") */
   paletteRef?: string
   
-  /** P2: Visibility flag */
+  /** P2: Visibility flag (editor eye). Independent of timed presence. */
   visible: boolean
+
+  /**
+   * Timed presence on the shot, half-open
+   * `[visibleFromSec ?? 0, visibleToSec ?? duration)`.
+   * Omit both = whole shot. Eye (`visible`) is editor hide; this is how long
+   * the asset is on stage during scrub/play.
+   */
+  visibleFromSec?: number
+  visibleToSec?: number
   
   /** Transform in normalized stage coordinates [0,1] */
   x: number
@@ -507,6 +516,13 @@ export interface StoryboardShot {
   backgroundVisualAssetId?: string
   /** Explicit AssetState for `backgroundVisualAssetId`. Omit/null = default or static image. */
   backgroundAssetStateId?: string | null
+
+  /**
+   * Timed still-background keys. Step/hold: last key with t <= playhead holds
+   * until the next. Before the first key, the static background fields apply.
+   * Clip-track background blocks still draw over stills while active.
+   */
+  backgroundKeys?: ShotBackgroundKey[]
   
   /** Stage treatment effects applied to background only (Phase C.1) */
   stageTreatment?: {
@@ -558,6 +574,20 @@ export interface ShotEventCue {
   /** Shot time (seconds) when Play should fire this named event */
   t: number
   eventId: string
+  schemaVersion: 1
+}
+
+/**
+ * One still-background cut on the shot. Complete still (Library asset+optional
+ * state, or direct image) — not a partial patch of the static fields.
+ * Hard cut; holds until the next key.
+ */
+export interface ShotBackgroundKey {
+  id: string
+  t: number
+  backgroundVisualAssetId?: string
+  backgroundAssetStateId?: string | null
+  backgroundImage?: string
   schemaVersion: 1
 }
 
