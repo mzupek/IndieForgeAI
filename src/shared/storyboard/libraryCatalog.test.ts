@@ -6,6 +6,7 @@
 import type { AssetPipelineProject } from '../types/assetPipeline'
 import {
   buildLibraryCatalog,
+  catalogKindsForPurpose,
   filterLibraryCatalog,
   paginateLibraryCatalog,
   resolveLibraryPick
@@ -70,7 +71,16 @@ function pipeline(): AssetPipelineProject {
         updatedAt: now
       }
     ],
-    scenePresets: [],
+    scenePresets: [
+      {
+        id: 'fx-shake',
+        type: 'shake',
+        params: { durationMs: 300, intensity: 8 },
+        tags: ['hit'],
+        createdAt: now,
+        updatedAt: now
+      }
+    ],
     scenes: [],
     storyboards: [],
     storyboardShots: [],
@@ -114,7 +124,25 @@ function pipeline(): AssetPipelineProject {
     ],
     fonts: [],
     palettes: [],
-    eventDefinitions: [],
+    eventDefinitions: [
+      {
+        id: 'ev-touch',
+        gameId: 'game-a',
+        name: 'button_touch',
+        description: 'keypad press',
+        schemaVersion: 1,
+        createdAt: now,
+        updatedAt: now
+      },
+      {
+        id: 'ev-other',
+        gameId: 'game-b',
+        name: 'other_event',
+        schemaVersion: 1,
+        createdAt: now,
+        updatedAt: now
+      }
+    ],
     eventBindings: [],
     audioAssets: [
       {
@@ -211,12 +239,38 @@ function testVisualAndCharacterRouting(): void {
   console.log('✓ visual/character/pose routing')
 }
 
+function testAudioEventEffectPurposes(): void {
+  const pipe = pipeline()
+  const audio = buildLibraryCatalog(pipe, 'game-a', catalogKindsForPurpose('audioAsset'))
+  assert(audio.length === 1 && audio[0].audioId === 'aud-1', 'game-scoped audio')
+  assert(audio.every((i) => i.kind === 'audio'), 'audio purpose is audio-only')
+  const sfx = filterLibraryCatalog(audio, 'sfx', '')
+  assert(sfx.length === 1, 'sfx tab')
+  const music = filterLibraryCatalog(audio, 'music', '')
+  assert(music.length === 0, 'no music')
+  const pickAudio = resolveLibraryPick('audioAsset', audio[0])
+  assert(pickAudio.action.type === 'chooseAudio' && pickAudio.action.audioId === 'aud-1', 'choose audio')
+
+  const events = buildLibraryCatalog(pipe, 'game-a', catalogKindsForPurpose('eventDefinition'))
+  assert(events.length === 1 && events[0].eventId === 'ev-touch', 'game-scoped events')
+  assert(!events.some((i) => i.eventId === 'ev-other'), 'other-game event excluded')
+  const pickEvent = resolveLibraryPick('eventDefinition', events[0])
+  assert(pickEvent.action.type === 'chooseEvent', 'choose event')
+
+  const fx = buildLibraryCatalog(pipe, 'game-a', catalogKindsForPurpose('effectPreset'))
+  assert(fx.length === 1 && fx[0].presetId === 'fx-shake', 'effect recipes')
+  const pickFx = resolveLibraryPick('effectPreset', fx[0])
+  assert(pickFx.action.type === 'chooseEffectPreset', 'choose effect')
+  console.log('✓ audio / event / effect picker purposes are Game-scoped')
+}
+
 function main(): void {
   testGameScopeAndKinds()
   testTabsAndSearch()
   testPagination()
   testClipRoutingFromAddLayer()
   testVisualAndCharacterRouting()
+  testAudioEventEffectPurposes()
   console.log('\nAll library catalog tests passed')
 }
 

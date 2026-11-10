@@ -18,6 +18,10 @@ echo "Unit: layer stack reorder"
 npx tsx src/shared/storyboard/layerStack.test.ts
 
 echo ""
+echo "Unit: stale background / stuck video load guards"
+npx tsx src/shared/storyboard/mediaLoadGuard.test.ts
+
+echo ""
 echo "Storage: persist z-order via updateShot (mktemp FORGE_DATA_DIR)"
 npx tsx src/core/storage/layerStack.persist.test.ts
 

@@ -109,6 +109,13 @@ import type {
   LibraryPickerPurpose,
   LibraryPickerTab
 } from '@shared/storyboard/libraryCatalog'
+import {
+  backgroundSourceKey,
+  clampVideoSeekTime,
+  shouldApplyLoadedBackground,
+  shouldSkipVideoReload,
+  videoHasDecodableFrame
+} from '@shared/storyboard/mediaLoadGuard'
 
 type EditorMode = 'layout' | 'camera'
 type DragMode = 'move' | 'scale' | 'rotate' | 'framingRect' | 'cameraMarker' | 'effectMarker' | null
@@ -126,9 +133,29 @@ interface LoadedVideo {
   element: HTMLVideoElement
   url: string
   clipId: string
+  file: string
   status: ClipVideoStatus
   message?: string
   durationSec?: number
+  loadingStartedAt?: number
+}
+
+function seekVideoElement(video: HTMLVideoElement, requested: number): void {
+  let start = 0
+  let end: number | undefined
+  try {
+    if (video.seekable && video.seekable.length > 0) {
+      start = video.seekable.start(0)
+      end = video.seekable.end(video.seekable.length - 1)
+    }
+  } catch {
+    /* seekable can throw before metadata */
+  }
+  try {
+    video.currentTime = clampVideoSeekTime(requested, start, end)
+  } catch {
+    /* seek may throw before ready */
+  }
 }
 
 function lerp(a: number, b: number, t: number): number {
@@ -501,7 +528,10 @@ export function StoryboardEditor() {
     purpose: LibraryPickerPurpose
     title: string
     initialTab?: LibraryPickerTab
+    onAction?: (action: LibraryPickAction) => void
   } | null>(null)
+  const backgroundLoadKeyRef = useRef('')
+  const [clipThumbs, setClipThumbs] = useState<Map<string, LoadedImage>>(new Map())
   const [addTextContent, setAddTextContent] = useState('New text')
   const [addTextFont, setAddTextFont] = useState(DEFAULT_FONT_REF)
   const [addTextPalette, setAddTextPalette] = useState(DEFAULT_PALETTE_REF)
@@ -563,6 +593,7 @@ export function StoryboardEditor() {
   const [eventSfxError, setEventSfxError] = useState<string | null>(null)
   const videosRef = useRef<Map<string, LoadedVideo>>(new Map())
   const [videoEpoch, setVideoEpoch] = useState(0)
+  const [videoRetryTick, setVideoRetryTick] = useState(0)
   const [previewSnapshot, setPreviewSnapshot] = useState<EventPreviewSnapshot>(EMPTY_PREVIEW_SNAPSHOT)
   const previewEngineRef = useRef(new EventPreviewEngine())
   const wasPlayingRef = useRef(false)
@@ -684,6 +715,7 @@ export function StoryboardEditor() {
   useEffect(() => {
     let cancelled = false
     if (!selectedShot) {
+      backgroundLoadKeyRef.current = ''
       setBackgroundImage(null)
       return
     }
@@ -700,30 +732,33 @@ export function StoryboardEditor() {
       setBackgroundError(null)
     }
 
-    if (!resolved.path) {
-      setBackgroundImage(null)
+    const path = resolved.path || null
+    const loadKey = backgroundSourceKey(selectedShot.id, path)
+    backgroundLoadKeyRef.current = loadKey
+    setBackgroundImage(null)
+
+    if (!path) {
       return
     }
 
-    const path = resolved.path
     const loadBg = async () => {
       try {
         const { localUrl } = await window.indieForge.files.getLocalUrl(path)
-        if (cancelled) return
+        if (cancelled || !shouldApplyLoadedBackground(backgroundLoadKeyRef.current, loadKey)) return
         const img = new Image()
         img.onload = () => {
-          if (cancelled) return
+          if (cancelled || !shouldApplyLoadedBackground(backgroundLoadKeyRef.current, loadKey)) return
           setBackgroundImage({ element: img, url: localUrl, width: img.width, height: img.height })
         }
         img.onerror = () => {
-          if (cancelled) return
+          if (cancelled || !shouldApplyLoadedBackground(backgroundLoadKeyRef.current, loadKey)) return
           console.error('Failed to load background image:', path)
           setBackgroundImage(null)
           setBackgroundError('Failed to load background image')
         }
         img.src = localUrl
       } catch (err) {
-        if (cancelled) return
+        if (cancelled || !shouldApplyLoadedBackground(backgroundLoadKeyRef.current, loadKey)) return
         console.error('Error loading background image:', err)
         setBackgroundImage(null)
         setBackgroundError(err instanceof Error ? err.message : 'Failed to load background image')
@@ -764,6 +799,8 @@ export function StoryboardEditor() {
     setShowAddEventCue(false)
     setEventCueError(null)
     setEventCueWarning(null)
+    backgroundLoadKeyRef.current = ''
+    setBackgroundImage(null)
   }, [selectedShotId])
 
   useEffect(() => {
@@ -825,17 +862,32 @@ export function StoryboardEditor() {
     if (!selectedShot) return
     let cancelled = false
     const needed = new Set(clipBlocks.map((b) => b.clipId))
+    const now = Date.now()
+    for (const [clipId, entry] of [...videosRef.current.entries()]) {
+      if (!needed.has(clipId)) {
+        entry.element.removeAttribute('src')
+        entry.element.load()
+        videosRef.current.delete(clipId)
+      }
+    }
     const loadVideos = async () => {
       for (const clipId of needed) {
         if (cancelled) return
-        const existing = videosRef.current.get(clipId)
-        if (existing && (existing.status === 'ready' || existing.status === 'loading')) continue
         const clip = clips.find((c) => c.id === clipId)
+        const file = clip?.file || ''
+        const existing = videosRef.current.get(clipId)
+        if (shouldSkipVideoReload(existing, { clipId, file }, now)) continue
+        if (existing) {
+          existing.element.removeAttribute('src')
+          existing.element.load()
+          videosRef.current.delete(clipId)
+        }
         if (!clip) {
           videosRef.current.set(clipId, {
             element: document.createElement('video'),
             url: '',
             clipId,
+            file: '',
             status: 'missing',
             message: `Clip not found: ${clipId}`
           })
@@ -846,6 +898,7 @@ export function StoryboardEditor() {
             element: document.createElement('video'),
             url: '',
             clipId,
+            file: '',
             status: 'missing',
             message: `Clip '${clip.moment}' has no media file`
           })
@@ -856,6 +909,7 @@ export function StoryboardEditor() {
             element: document.createElement('video'),
             url: '',
             clipId,
+            file: clip.file,
             status: 'unsupported',
             message: unsupportedClipMediaMessage(clip.file)
           })
@@ -869,6 +923,7 @@ export function StoryboardEditor() {
               element: document.createElement('video'),
               url: localUrl || '',
               clipId,
+              file: clip.file,
               status: 'error',
               message: 'Clip URL is not forge-file://; local-file:// is not supported'
             })
@@ -882,15 +937,26 @@ export function StoryboardEditor() {
             element: video,
             url: localUrl,
             clipId,
-            status: 'loading'
+            file: clip.file,
+            status: 'loading',
+            loadingStartedAt: Date.now()
           }
           video.addEventListener('loadedmetadata', () => {
+            if (videosRef.current.get(clipId) !== entry) return
             entry.status = 'ready'
             entry.durationSec = Number.isFinite(video.duration) ? video.duration : clip.durationSec
+            if (!videoHasDecodableFrame(video.readyState, video.videoWidth)) {
+              const start = video.seekable?.length ? video.seekable.start(0) : 0
+              seekVideoElement(video, Math.max(start, 1 / 30))
+            }
             setVideoEpoch((n) => n + 1)
           })
-          video.addEventListener('seeked', () => setVideoEpoch((n) => n + 1))
+          video.addEventListener('seeked', () => {
+            if (videosRef.current.get(clipId) !== entry) return
+            setVideoEpoch((n) => n + 1)
+          })
           video.addEventListener('error', () => {
+            if (videosRef.current.get(clipId) !== entry) return
             entry.status = 'error'
             entry.message = 'Video failed to load (missing file, codec, or host decode)'
             setVideoEpoch((n) => n + 1)
@@ -902,6 +968,7 @@ export function StoryboardEditor() {
             element: document.createElement('video'),
             url: '',
             clipId,
+            file: clip.file,
             status: 'error',
             message: err instanceof Error ? err.message : 'Failed to resolve clip URL'
           })
@@ -910,10 +977,59 @@ export function StoryboardEditor() {
       if (!cancelled) setVideoEpoch((n) => n + 1)
     }
     void loadVideos()
+    const retryTimer = window.setTimeout(() => {
+      const hasLoading = [...videosRef.current.values()].some((e) => e.status === 'loading')
+      if (hasLoading) setVideoRetryTick((n) => n + 1)
+    }, 8000)
+    return () => {
+      cancelled = true
+      window.clearTimeout(retryTimer)
+    }
+  }, [selectedShot?.id, selectedShot?.clipTrack, selectedShot?.backgroundClipId, selectedShot?.layers, clips, videoRetryTick])
+
+  const clipThumbSignature = clipBlocks
+    .map((b) => {
+      const clip = clips.find((c) => c.id === b.clipId)
+      return `${b.clipId}:${clip?.thumbnail || ''}`
+    })
+    .sort()
+    .join('|')
+
+  useEffect(() => {
+    if (!selectedShot) {
+      setClipThumbs(new Map())
+      return
+    }
+    let cancelled = false
+    const loadThumbs = async () => {
+      const next = new Map<string, LoadedImage>()
+      const seen = new Set<string>()
+      for (const block of clipBlocks) {
+        if (seen.has(block.clipId)) continue
+        seen.add(block.clipId)
+        const clip = clips.find((c) => c.id === block.clipId)
+        if (!clip?.thumbnail) continue
+        try {
+          const { localUrl } = await window.indieForge.files.getLocalUrl(clip.thumbnail)
+          if (cancelled) return
+          const loaded = await new Promise<LoadedImage | null>((resolve) => {
+            const img = new Image()
+            img.onload = () => resolve({ element: img, url: localUrl, width: img.width, height: img.height })
+            img.onerror = () => resolve(null)
+            img.src = localUrl
+          })
+          if (loaded) next.set(block.clipId, loaded)
+        } catch {
+          /* no poster */
+        }
+      }
+      if (!cancelled) setClipThumbs(next)
+    }
+    void loadThumbs()
     return () => {
       cancelled = true
     }
-  }, [selectedShot?.id, selectedShot?.clipTrack, selectedShot?.backgroundClipId, selectedShot?.layers, clips])
+  }, [selectedShot?.id, clipThumbSignature, clips])
 
   // Drive video.currentTime from the playhead (paused); supports reverse scrub.
   useEffect(() => {
@@ -926,11 +1042,7 @@ export function StoryboardEditor() {
         if (entry?.status === 'ready') {
           const v = entry.element
           if (Math.abs(v.currentTime - sample.sourceTimeSec) > 0.03) {
-            try {
-              v.currentTime = sample.sourceTimeSec
-            } catch {
-              /* seek may throw before ready */
-            }
+            seekVideoElement(v, sample.sourceTimeSec)
           }
         }
       }
@@ -940,11 +1052,7 @@ export function StoryboardEditor() {
       if (entry?.status === 'ready') {
         const v = entry.element
         if (Math.abs(v.currentTime - bg.sourceTimeSec) > 0.03) {
-          try {
-            v.currentTime = bg.sourceTimeSec
-          } catch {
-            /* ignore */
-          }
+          seekVideoElement(v, bg.sourceTimeSec)
         }
       }
     }
@@ -1493,8 +1601,26 @@ export function StoryboardEditor() {
     const bgClipSample = sampleBackgroundClip(selectedShot, clips, playbackTime)
     if (bgClipSample) {
       const entry = videosRef.current.get(bgClipSample.clipId)
-      if (entry?.status === 'ready' && entry.element.readyState >= 2 && entry.element.videoWidth) {
+      const thumb = clipThumbs.get(bgClipSample.clipId)
+      const hasFrame =
+        !!entry && videoHasDecodableFrame(entry.element.readyState, entry.element.videoWidth)
+      if (entry?.status === 'ready' && hasFrame) {
         drawCoverMedia(entry.element, entry.element.videoWidth, entry.element.videoHeight)
+      } else if (thumb) {
+        drawCoverMedia(thumb.element, thumb.width, thumb.height)
+        if (entry?.status === 'loading') {
+          ctx.fillStyle = 'rgba(0, 40, 70, 0.35)'
+          ctx.fillRect(0, 0, canvas.width, canvas.height)
+          ctx.fillStyle = '#9ad'
+          ctx.font = '14px sans-serif'
+          ctx.textAlign = 'center'
+          ctx.fillText('Loading background clip…', canvas.width / 2, canvas.height - 24)
+        } else if (entry && entry.status !== 'ready') {
+          ctx.fillStyle = '#ffb4b4'
+          ctx.font = '12px sans-serif'
+          ctx.textAlign = 'center'
+          ctx.fillText(entry.message || 'Clip unavailable', canvas.width / 2, canvas.height - 24)
+        }
       } else if (entry?.status === 'loading') {
         ctx.fillStyle = 'rgba(0, 40, 70, 0.45)'
         ctx.fillRect(0, 0, canvas.width, canvas.height)
@@ -1502,13 +1628,13 @@ export function StoryboardEditor() {
         ctx.font = '16px sans-serif'
         ctx.textAlign = 'center'
         ctx.fillText('Loading background clip…', canvas.width / 2, canvas.height / 2)
-      } else if (entry && entry.status !== 'ready') {
-        ctx.fillStyle = 'rgba(80, 16, 16, 0.55)'
+      } else {
+        ctx.fillStyle = '#2a2a2a'
         ctx.fillRect(0, 0, canvas.width, canvas.height)
-        ctx.fillStyle = '#ffb4b4'
+        ctx.fillStyle = '#c8c8c8'
         ctx.font = '14px sans-serif'
         ctx.textAlign = 'center'
-        ctx.fillText(entry.message || 'Background clip unavailable', canvas.width / 2, canvas.height / 2)
+        ctx.fillText(entry?.message || 'Clip unavailable', canvas.width / 2, canvas.height / 2)
       }
     }
 
@@ -1537,8 +1663,7 @@ export function StoryboardEditor() {
       const clipVideo = clipSample ? videosRef.current.get(clipSample.clipId) : undefined
       const videoReady =
         clipVideo?.status === 'ready' &&
-        clipVideo.element.readyState >= 2 &&
-        clipVideo.element.videoWidth > 0
+        videoHasDecodableFrame(clipVideo.element.readyState, clipVideo.element.videoWidth)
       const naturalSize = img
         ? { width: img.width, height: img.height }
         : videoReady && clipVideo
@@ -1586,24 +1711,38 @@ export function StoryboardEditor() {
           )
           return
         }
-        if (clipSample && clipVideo?.status === 'loading') {
-          ctx.fillStyle = '#1a2a3a'
+        if (clipSample) {
+          const thumb = clipThumbs.get(clipSample.clipId) || img
+          if (thumb) {
+            ctx.drawImage(thumb.element, -pixel.width / 2, -pixel.height / 2, pixel.width, pixel.height)
+            if (clipVideo?.status === 'loading') {
+              ctx.fillStyle = 'rgba(0,0,0,0.35)'
+              ctx.fillRect(-pixel.width / 2, pixel.height / 2 - 16, pixel.width, 16)
+              ctx.fillStyle = '#9ad'
+              ctx.font = '11px sans-serif'
+              ctx.textAlign = 'center'
+              ctx.textBaseline = 'middle'
+              ctx.fillText('Loading clip…', 0, pixel.height / 2 - 8)
+            }
+            return
+          }
+          if (clipVideo?.status === 'loading') {
+            ctx.fillStyle = '#1a2a3a'
+            ctx.fillRect(-pixel.width / 2, -pixel.height / 2, pixel.width, pixel.height)
+            ctx.fillStyle = '#9ad'
+            ctx.font = '11px sans-serif'
+            ctx.textAlign = 'center'
+            ctx.textBaseline = 'middle'
+            ctx.fillText('Loading clip…', 0, 0)
+            return
+          }
+          ctx.fillStyle = '#2a2a2a'
           ctx.fillRect(-pixel.width / 2, -pixel.height / 2, pixel.width, pixel.height)
-          ctx.fillStyle = '#9ad'
+          ctx.fillStyle = '#c8c8c8'
           ctx.font = '11px sans-serif'
           ctx.textAlign = 'center'
           ctx.textBaseline = 'middle'
-          ctx.fillText('Loading clip…', 0, 0)
-          return
-        }
-        if (clipSample && clipVideo && clipVideo.status !== 'ready') {
-          ctx.fillStyle = '#7a2020'
-          ctx.fillRect(-pixel.width / 2, -pixel.height / 2, pixel.width, pixel.height)
-          ctx.fillStyle = '#ffb4b4'
-          ctx.font = '11px sans-serif'
-          ctx.textAlign = 'center'
-          ctx.textBaseline = 'middle'
-          ctx.fillText((clipVideo.message || 'Clip unavailable').slice(0, 42), 0, 0)
+          ctx.fillText((clipVideo?.message || 'Clip unavailable').slice(0, 42), 0, 0)
           return
         }
         if (img) {
@@ -1757,7 +1896,7 @@ export function StoryboardEditor() {
         ctx.fillRect(rectX + rectW - 2, rectY + rectH - handleSize + 2, 4, handleSize)
       }
     }
-  }, [selectedShot, selectedLayerId, mode, playbackTime, loadedImages, dragStart, getInterpolatedCamera, pipeline, gameId, previewSnapshot, clips, videoEpoch])
+  }, [selectedShot, selectedLayerId, mode, playbackTime, loadedImages, backgroundImage, clipThumbs, dragStart, getInterpolatedCamera, getActiveEffects, pipeline, gameId, previewSnapshot, clips, videoEpoch])
 
   const capturePointer = (target: EventTarget | null, pointerId: number) => {
     if (!target || typeof (target as Element).setPointerCapture !== 'function') return
@@ -2814,6 +2953,33 @@ export function StoryboardEditor() {
         setAddClipSourceIn('0')
         setAddClipSourceOut(clip ? String(clip.durationSec) : '')
         setShowAddClip(true)
+        return
+      }
+      if (action.type === 'chooseAudio') {
+        const asset = audioAssets.find((a) => a.id === action.audioId)
+        setAddAudioId(action.audioId)
+        setAddAudioLoop(asset ? defaultLoopForAudioKind(asset.kind) : false)
+        setAddAudioSourceIn('0')
+        setAddAudioSourceOut(asset ? String(asset.durationSec) : '')
+        if (selectedShot) {
+          const remaining = remainingShotTime(selectedShot.durationSec, playbackTime)
+          setAddAudioDuration(
+            remaining > 0 ? String(Number(remaining.toFixed(3))) : asset ? String(asset.durationSec) : ''
+          )
+        }
+        setAddAudioVolume('1')
+        setAddAudioFadeIn('0')
+        setAddAudioFadeOut('0')
+        setShowAddAudio(true)
+        return
+      }
+      if (action.type === 'chooseEvent') {
+        setAddEventCueEventId(action.eventId)
+        setShowAddEventCue(true)
+        return
+      }
+      if (action.type === 'chooseEffectPreset') {
+        await handleAddEffect(action.presetId)
         return
       }
       if (action.type === 'addClipBlock') {
@@ -4106,20 +4272,18 @@ export function StoryboardEditor() {
                   <button
                     type="button"
                     onClick={() => {
-                      setShowAddAudio(true)
-                      const first = audioAssets[0]
-                      const remaining = remainingShotTime(selectedShot.durationSec, playbackTime)
-                      setAddAudioId(first?.id || '')
-                      setAddAudioLoop(first ? defaultLoopForAudioKind(first.kind) : false)
+                      setAddAudioId('')
                       setAddAudioSourceIn('0')
-                      setAddAudioSourceOut(first ? String(first.durationSec) : '')
-                      setAddAudioDuration(
-                        remaining > 0 ? String(Number(remaining.toFixed(3))) : ''
-                      )
+                      setAddAudioSourceOut('')
+                      setAddAudioDuration('')
                       setAddAudioVolume('1')
                       setAddAudioFadeIn('0')
                       setAddAudioFadeOut('0')
                       setAudioError(null)
+                      setLibraryPicker({
+                        purpose: 'audioAsset',
+                        title: 'Choose audio'
+                      })
                     }}
                     style={{ fontSize: '0.8rem', padding: '0.25rem 0.5rem' }}
                     title="Place a timed music or SFX block. Duration defaults to remaining shot time. Playback uses HTMLAudioElement.play()/pause()."
@@ -4129,9 +4293,12 @@ export function StoryboardEditor() {
                   <button
                     type="button"
                     onClick={() => {
-                      setShowAddEventCue(true)
-                      setAddEventCueEventId(eventDefinitions[0]?.id || '')
+                      setAddEventCueEventId('')
                       setEventCueError(null)
+                      setLibraryPicker({
+                        purpose: 'eventDefinition',
+                        title: 'Choose event'
+                      })
                     }}
                     style={{ fontSize: '0.8rem', padding: '0.25rem 0.5rem' }}
                     title="Place a one-shot named-event cue. Play fires it once when the playhead crosses this time going forward."
@@ -4762,28 +4929,30 @@ export function StoryboardEditor() {
                     <>
                       <label style={{ fontSize: '0.8rem', display: 'block', marginBottom: '0.35rem' }}>
                         Asset
-                        <select
-                          value={addAudioId}
-                          onChange={(e) => {
-                            setAddAudioId(e.target.value)
-                            const a = audioAssets.find((x) => x.id === e.target.value)
-                            if (a && selectedShot) {
-                              setAddAudioLoop(defaultLoopForAudioKind(a.kind))
-                              setAddAudioSourceOut(String(a.durationSec))
-                              const remaining = remainingShotTime(selectedShot.durationSec, playbackTime)
-                              setAddAudioDuration(
-                                remaining > 0 ? String(Number(remaining.toFixed(3))) : String(a.durationSec)
-                              )
-                            }
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setLibraryPicker({
+                              purpose: 'audioAsset',
+                              title: 'Choose audio'
+                            })
+                          }
+                          style={{
+                            width: '100%',
+                            marginTop: '0.2rem',
+                            fontSize: '0.85rem',
+                            padding: '0.4rem',
+                            background: 'var(--forge-gold)',
+                            color: '#000',
+                            textAlign: 'left'
                           }}
-                          style={{ width: '100%', marginTop: '0.2rem' }}
                         >
-                          {audioAssets.map((a) => (
-                            <option key={a.id} value={a.id}>
-                              {a.kind} · {a.name} ({a.durationSec.toFixed(2)}s)
-                            </option>
-                          ))}
-                        </select>
+                          {addAudioId
+                            ? `${audioAssets.find((a) => a.id === addAudioId)?.kind || ''} · ${
+                                audioAssets.find((a) => a.id === addAudioId)?.name || addAudioId
+                              }`
+                            : 'Choose audio…'}
+                        </button>
                       </label>
                       <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
                         <label style={{ fontSize: '0.75rem' }}>
@@ -5060,17 +5229,27 @@ export function StoryboardEditor() {
                   ) : (
                     <label style={{ display: 'block', fontSize: '0.75rem' }}>
                       Event
-                      <select
-                        value={addEventCueEventId}
-                        onChange={(e) => setAddEventCueEventId(e.target.value)}
-                        style={{ marginLeft: '0.35rem' }}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setLibraryPicker({
+                            purpose: 'eventDefinition',
+                            title: 'Choose event',
+                            onAction: (action) => {
+                              if (action.type === 'chooseEvent') setAddEventCueEventId(action.eventId)
+                            }
+                          })
+                        }
+                        style={{
+                          marginLeft: '0.35rem',
+                          fontSize: '0.8rem',
+                          padding: '0.3rem 0.5rem',
+                          background: 'var(--forge-gold)',
+                          color: '#000'
+                        }}
                       >
-                        {eventDefinitions.map((ev) => (
-                          <option key={ev.id} value={ev.id}>
-                            {ev.name}
-                          </option>
-                        ))}
-                      </select>
+                        {eventDefinitions.find((ev) => ev.id === addEventCueEventId)?.name || 'Choose event…'}
+                      </button>
                     </label>
                   )}
                   {eventCueError && (
@@ -5122,17 +5301,28 @@ export function StoryboardEditor() {
                     </label>
                     <label style={{ fontSize: '0.75rem' }}>
                       event
-                      <select
-                        value={selectedEventCue.eventId}
-                        onChange={(e) => void handleCommitEventCueEdits(e.target.value)}
-                        style={{ marginLeft: '0.25rem' }}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setLibraryPicker({
+                            purpose: 'eventDefinition',
+                            title: 'Choose event',
+                            onAction: (action) => {
+                              if (action.type === 'chooseEvent') void handleCommitEventCueEdits(action.eventId)
+                            }
+                          })
+                        }
+                        style={{
+                          marginLeft: '0.25rem',
+                          fontSize: '0.8rem',
+                          padding: '0.25rem 0.45rem',
+                          background: 'var(--forge-gold)',
+                          color: '#000'
+                        }}
                       >
-                        {eventDefinitions.map((ev) => (
-                          <option key={ev.id} value={ev.id}>
-                            {ev.name}
-                          </option>
-                        ))}
-                      </select>
+                        {eventDefinitions.find((ev) => ev.id === selectedEventCue.eventId)?.name ||
+                          selectedEventCue.eventId}
+                      </button>
                     </label>
                     <button
                       type="button"
@@ -5164,24 +5354,25 @@ export function StoryboardEditor() {
                     ))}
                   </div>
                   {presets.length > 0 && (
-                    <>
-                      <div style={{ fontSize: '0.85rem', marginBottom: '0.25rem' }}>Or use existing recipe:</div>
-                      <div style={{ maxHeight: '150px', overflowY: 'auto', marginBottom: '0.5rem' }}>
-                        {presets.map(preset => {
-                          const tag = preset.tags.length > 0 ? preset.tags[0] : preset.type
-                          return (
-                            <button
-                              key={preset.id}
-                              type="button"
-                              onClick={() => handleAddEffect(preset.id)}
-                              style={{ width: '100%', marginBottom: '0.25rem', fontSize: '0.8rem', textAlign: 'left', padding: '0.5rem' }}
-                            >
-                              {tag} ({preset.type})
-                            </button>
-                          )
-                        })}
-                      </div>
-                    </>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setLibraryPicker({
+                          purpose: 'effectPreset',
+                          title: 'Choose effect recipe'
+                        })
+                      }
+                      style={{
+                        width: '100%',
+                        marginBottom: '0.5rem',
+                        fontSize: '0.8rem',
+                        padding: '0.45rem',
+                        background: 'var(--forge-gold)',
+                        color: '#000'
+                      }}
+                    >
+                      Library… existing recipe
+                    </button>
                   )}
                   <button type="button" onClick={() => setShowAddEffect(false)} style={{ width: '100%', marginTop: '0.5rem', fontSize: '0.85rem' }}>
                     Cancel
@@ -5549,6 +5740,24 @@ export function StoryboardEditor() {
                     commitPreview()
                   }}
                   onResetPreview={resetEventPreview}
+                  onChooseEvent={(onPicked) =>
+                    setLibraryPicker({
+                      purpose: 'eventDefinition',
+                      title: 'Choose event',
+                      onAction: (action) => {
+                        if (action.type === 'chooseEvent') onPicked(action.eventId)
+                      }
+                    })
+                  }
+                  onChooseAudio={(onPicked) =>
+                    setLibraryPicker({
+                      purpose: 'audioAsset',
+                      title: 'Choose audio',
+                      onAction: (action) => {
+                        if (action.type === 'chooseAudio') onPicked(action.audioId)
+                      }
+                    })
+                  }
                 />
                 </CollapsibleSection>
               )}
@@ -5786,7 +5995,14 @@ export function StoryboardEditor() {
           title={libraryPicker.title}
           initialTab={libraryPicker.initialTab}
           onClose={() => setLibraryPicker(null)}
-          onPick={(action) => void applyLibraryPick(action)}
+          onPick={(action) => {
+            if (libraryPicker.onAction) {
+              libraryPicker.onAction(action)
+              setLibraryPicker(null)
+              return
+            }
+            void applyLibraryPick(action)
+          }}
         />
       )}
     </div>

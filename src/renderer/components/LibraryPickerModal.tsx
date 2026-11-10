@@ -7,12 +7,13 @@ import { useEffect, useMemo, useState } from 'react'
 import type { AssetPipelineProject } from '@shared/types/assetPipeline'
 import {
   LIBRARY_PAGE_SIZE,
-  LIBRARY_PICKER_TABS,
   buildLibraryCatalog,
+  catalogKindsForPurpose,
   defaultTabForPurpose,
   filterLibraryCatalog,
   paginateLibraryCatalog,
   resolveLibraryPick,
+  tabsForPurpose,
   type LibraryCatalogItem,
   type LibraryPickAction,
   type LibraryPickerPurpose,
@@ -37,7 +38,36 @@ function TileThumb({ item }: { item: LibraryCatalogItem }) {
   if (item.kind === 'clip') return <span style={{ fontSize: '1.6rem' }}>🎬</span>
   if (item.kind === 'character') return <span style={{ fontSize: '1.4rem' }}>👤</span>
   if (item.kind === 'pose') return <span style={{ fontSize: '1.4rem' }}>🧍</span>
+  if (item.kind === 'audio') return <span style={{ fontSize: '1.4rem' }}>🔊</span>
+  if (item.kind === 'event') return <span style={{ fontSize: '1.4rem' }}>⚡</span>
+  if (item.kind === 'effect') return <span style={{ fontSize: '1.4rem' }}>✨</span>
   return <span style={{ fontSize: '1.4rem' }}>🖼️</span>
+}
+
+function AudioPreviewButton({ file }: { file?: string }) {
+  const src = useLocalFilePreview(file)
+  return (
+    <button
+      type="button"
+      title="Preview"
+      onClick={(e) => {
+        e.stopPropagation()
+        e.preventDefault()
+        if (!src) return
+        const audio = new Audio(src)
+        audio.volume = 0.8
+        void audio.play().catch(() => undefined)
+      }}
+      style={{
+        marginTop: '0.15rem',
+        fontSize: '0.6rem',
+        padding: '0.1rem 0.3rem',
+        width: '100%'
+      }}
+    >
+      Play
+    </button>
+  )
 }
 
 export function LibraryPickerModal({
@@ -84,9 +114,10 @@ export function LibraryPickerModal({
     return () => window.removeEventListener('keydown', onKey)
   }, [open, onClose])
 
+  const tabs = tabsForPurpose(purpose)
   const catalog = useMemo(
-    () => (open ? buildLibraryCatalog(pipeline, gameId) : []),
-    [open, pipeline, gameId]
+    () => (open ? buildLibraryCatalog(pipeline, gameId, catalogKindsForPurpose(purpose)) : []),
+    [open, pipeline, gameId, purpose]
   )
   const filtered = useMemo(
     () => filterLibraryCatalog(catalog, tab, query),
@@ -167,11 +198,11 @@ export function LibraryPickerModal({
             autoFocus
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search name, tag, pose, clip…"
+            placeholder="Search name, tag, pose, clip, audio, event…"
             style={{ width: '100%', padding: '0.4rem', fontSize: '0.85rem' }}
           />
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem', marginTop: '0.45rem' }}>
-            {LIBRARY_PICKER_TABS.map((t) => (
+            {tabs.map((t) => (
               <button
                 key={t.id}
                 type="button"
@@ -211,9 +242,10 @@ export function LibraryPickerModal({
               {paged.slice.map((item) => {
                 const selected = pending?.id === item.id
                 return (
-                  <button
+                  <div
                     key={item.id}
-                    type="button"
+                    role="button"
+                    tabIndex={0}
                     onClick={() => {
                       const next = resolveLibraryPick(purpose, item)
                       const crossPurpose =
@@ -229,6 +261,12 @@ export function LibraryPickerModal({
                         return
                       }
                       onPick(next.action)
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        ;(e.currentTarget as HTMLDivElement).click()
+                      }
                     }}
                     title={`${item.name}\n${item.subtitle}`}
                     style={{
@@ -277,7 +315,8 @@ export function LibraryPickerModal({
                     >
                       {item.subtitle}
                     </div>
-                  </button>
+                    {item.kind === 'audio' ? <AudioPreviewButton file={item.audioFile} /> : null}
+                  </div>
                 )
               })}
             </div>

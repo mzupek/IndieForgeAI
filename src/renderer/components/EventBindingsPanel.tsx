@@ -46,7 +46,9 @@ export function EventBindingsPanel({
   mixerError,
   onProjectChanged,
   onFire,
-  onResetPreview
+  onResetPreview,
+  onChooseEvent,
+  onChooseAudio
 }: {
   gameId: string
   shotId: string
@@ -63,6 +65,8 @@ export function EventBindingsPanel({
   onProjectChanged: () => Promise<void>
   onFire: (eventId: string, payload?: Record<string, string | number | boolean>) => void
   onResetPreview: () => void
+  onChooseEvent: (onPicked: (eventId: string) => void) => void
+  onChooseAudio: (onPicked: (audioId: string) => void) => void
 }) {
   const [eventName, setEventName] = useState('')
   const [eventDescription, setEventDescription] = useState('')
@@ -322,12 +326,13 @@ export function EventBindingsPanel({
       <div style={{ fontSize: '0.75rem', fontWeight: 'bold', margin: '0.6rem 0 0.35rem' }}>Add binding</div>
       <label style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.35rem' }}>
         Event
-        <select value={eventId} onChange={(e) => setEventId(e.target.value)} style={selectStyle}>
-          <option value="">Select event</option>
-          {events.map((ev) => (
-            <option key={ev.id} value={ev.id}>{ev.name}</option>
-          ))}
-        </select>
+        <button
+          type="button"
+          onClick={() => onChooseEvent(setEventId)}
+          style={{ ...selectStyle, boxSizing: 'border-box', background: 'var(--forge-gold)', color: '#000', textAlign: 'left' }}
+        >
+          {events.find((ev) => ev.id === eventId)?.name || 'Choose event…'}
+        </button>
       </label>
       {actionType !== 'playSfx' && (
       <label style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.35rem' }}>
@@ -406,14 +411,15 @@ export function EventBindingsPanel({
         <>
           <label style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.35rem' }}>
             Audio (this Game library)
-            <select value={audioId} onChange={(e) => setAudioId(e.target.value)} style={selectStyle}>
-              <option value="">Select audio</option>
-              {audioAssets.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.kind} · {a.name} ({a.durationSec.toFixed(2)}s)
-                </option>
-              ))}
-            </select>
+            <button
+              type="button"
+              onClick={() => onChooseAudio(setAudioId)}
+              style={{ ...selectStyle, boxSizing: 'border-box', background: 'var(--forge-gold)', color: '#000', textAlign: 'left' }}
+            >
+              {audioAssets.find((a) => a.id === audioId)
+                ? `${audioAssets.find((a) => a.id === audioId)!.kind} · ${audioAssets.find((a) => a.id === audioId)!.name}`
+                : 'Choose audio…'}
+            </button>
           </label>
           <label style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.35rem' }}>
             Volume (0–1)

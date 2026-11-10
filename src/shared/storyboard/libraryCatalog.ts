@@ -1,21 +1,30 @@
 /**
  * Game-scoped Library catalog for the Storyboard picker.
  * Built from the pipeline for the selected Game — not an unscoped project dump.
- * Audio is intentionally omitted (A2/A3 stay on their own tracks).
+ * Visual add-layer catalogs omit audio/events/effects (those have their own purposes).
  */
 
 import type {
   AssetPipelineProject,
   AssetState,
+  AudioKind,
   Character,
   Clip,
   Pose,
+  ScenePresetType,
   VisualAsset
 } from '../types/assetPipeline'
 import { clipsForGame } from './clipBlocks'
 import { resolveLibraryPreviewPath } from './layerValidation'
 
-export type LibraryItemKind = 'character' | 'pose' | 'clip' | 'visual'
+export type LibraryItemKind =
+  | 'character'
+  | 'pose'
+  | 'clip'
+  | 'visual'
+  | 'audio'
+  | 'event'
+  | 'effect'
 
 export type LibraryPickerTab =
   | 'all'
@@ -24,12 +33,21 @@ export type LibraryPickerTab =
   | 'clips'
   | 'backgrounds'
   | 'images'
+  | 'music'
+  | 'sfx'
+  | 'events'
+  | 'effects'
 
 export type LibraryPickerPurpose =
   | 'addLayer'
   | 'shotBackground'
   | 'backgroundClip'
   | 'clipBlock'
+  | 'audioAsset'
+  | 'eventDefinition'
+  | 'effectPreset'
+
+export const VISUAL_LIBRARY_KINDS: LibraryItemKind[] = ['character', 'pose', 'clip', 'visual']
 
 export interface LibraryCatalogItem {
   id: string
@@ -45,6 +63,12 @@ export interface LibraryCatalogItem {
   visualAssetId?: string
   clipFile?: string
   stateful?: boolean
+  audioId?: string
+  audioKind?: AudioKind
+  audioFile?: string
+  eventId?: string
+  presetId?: string
+  presetType?: ScenePresetType
 }
 
 export type LibraryPickAction =
@@ -54,6 +78,9 @@ export type LibraryPickAction =
   | { type: 'setShotBackground'; visualAssetId: string }
   | { type: 'setBackgroundClip'; clipId: string }
   | { type: 'chooseClip'; clipId: string }
+  | { type: 'chooseAudio'; audioId: string }
+  | { type: 'chooseEvent'; eventId: string }
+  | { type: 'chooseEffectPreset'; presetId: string }
 
 export interface LibraryPickDecision {
   action: LibraryPickAction
@@ -70,6 +97,36 @@ export const LIBRARY_PICKER_TABS: Array<{ id: LibraryPickerTab; label: string }>
   { id: 'backgrounds', label: 'Backgrounds' },
   { id: 'images', label: 'Images / Stateful' }
 ]
+
+export const AUDIO_PICKER_TABS: Array<{ id: LibraryPickerTab; label: string }> = [
+  { id: 'all', label: 'All' },
+  { id: 'music', label: 'Music' },
+  { id: 'sfx', label: 'SFX' }
+]
+
+export const EVENT_PICKER_TABS: Array<{ id: LibraryPickerTab; label: string }> = [
+  { id: 'all', label: 'All' },
+  { id: 'events', label: 'Events' }
+]
+
+export const EFFECT_PICKER_TABS: Array<{ id: LibraryPickerTab; label: string }> = [
+  { id: 'all', label: 'All' },
+  { id: 'effects', label: 'Effects' }
+]
+
+export function tabsForPurpose(purpose: LibraryPickerPurpose): Array<{ id: LibraryPickerTab; label: string }> {
+  if (purpose === 'audioAsset') return AUDIO_PICKER_TABS
+  if (purpose === 'eventDefinition') return EVENT_PICKER_TABS
+  if (purpose === 'effectPreset') return EFFECT_PICKER_TABS
+  return LIBRARY_PICKER_TABS
+}
+
+export function catalogKindsForPurpose(purpose: LibraryPickerPurpose): LibraryItemKind[] {
+  if (purpose === 'audioAsset') return ['audio']
+  if (purpose === 'eventDefinition') return ['event']
+  if (purpose === 'effectPreset') return ['effect']
+  return VISUAL_LIBRARY_KINDS
+}
 
 export const LIBRARY_PAGE_SIZE = 48
 
@@ -94,8 +151,10 @@ export function visualAssetsForGame(
 
 export function buildLibraryCatalog(
   pipeline: AssetPipelineProject,
-  gameId: string
+  gameId: string,
+  kinds: LibraryItemKind[] = VISUAL_LIBRARY_KINDS
 ): LibraryCatalogItem[] {
+  const include = new Set(kinds)
   const items: LibraryCatalogItem[] = []
   const characters = charactersForGame(pipeline, gameId)
   const poses = posesForGame(pipeline, gameId)
@@ -103,7 +162,7 @@ export function buildLibraryCatalog(
   const visuals = visualAssetsForGame(pipeline, gameId)
   const states: AssetState[] = pipeline.assetStates || []
 
-  for (const character of characters) {
+  if (include.has('character')) for (const character of characters) {
     const firstPose = poses.find((p) => p.characterId === character.id)
     items.push({
       id: `character:${character.id}`,
@@ -117,7 +176,7 @@ export function buildLibraryCatalog(
     })
   }
 
-  for (const pose of poses) {
+  if (include.has('pose')) for (const pose of poses) {
     const character = characters.find((c) => c.id === pose.characterId)
     items.push({
       id: `pose:${pose.id}`,
@@ -132,7 +191,7 @@ export function buildLibraryCatalog(
     })
   }
 
-  for (const clip of clips) {
+  if (include.has('clip')) for (const clip of clips) {
     items.push({
       id: `clip:${clip.id}`,
       kind: 'clip',
@@ -146,7 +205,7 @@ export function buildLibraryCatalog(
     })
   }
 
-  for (const asset of visuals) {
+  if (include.has('visual')) for (const asset of visuals) {
     const owned = states.filter((s) => s.assetId === asset.id)
     const preview = resolveLibraryPreviewPath(asset, owned, { gameId })
     items.push({
@@ -164,6 +223,56 @@ export function buildLibraryCatalog(
     })
   }
 
+  if (include.has('audio')) {
+    for (const audio of pipeline.audioAssets || []) {
+      if (audio.gameId !== gameId) continue
+      items.push({
+        id: `audio:${audio.id}`,
+        kind: 'audio',
+        entityId: audio.id,
+        name: audio.name,
+        subtitle: `${audio.kind} · ${audio.durationSec.toFixed(2)}s`,
+        searchText: `${audio.name} ${audio.kind} ${(audio.tags || []).join(' ')} audio`.toLowerCase(),
+        audioId: audio.id,
+        audioKind: audio.kind,
+        audioFile: audio.file
+      })
+    }
+  }
+
+  if (include.has('event')) {
+    for (const event of pipeline.eventDefinitions || []) {
+      if (event.gameId !== gameId) continue
+      items.push({
+        id: `event:${event.id}`,
+        kind: 'event',
+        entityId: event.id,
+        name: event.name,
+        subtitle: event.description ? `Event · ${event.description}` : 'Named event',
+        searchText: `${event.name} ${event.description || ''} event`.toLowerCase(),
+        eventId: event.id
+      })
+    }
+  }
+
+  if (include.has('effect')) {
+    for (const preset of pipeline.scenePresets || []) {
+      const durationMs = typeof preset.params?.durationMs === 'number' ? preset.params.durationMs : undefined
+      const tag = (preset.tags && preset.tags[0]) || preset.type
+      items.push({
+        id: `effect:${preset.id}`,
+        kind: 'effect',
+        entityId: preset.id,
+        name: tag,
+        subtitle: durationMs ? `${preset.type} · ${durationMs}ms` : preset.type,
+        searchText: `${tag} ${preset.type} ${(preset.tags || []).join(' ')} effect`.toLowerCase(),
+        thumbnailPath: preset.thumbnail,
+        presetId: preset.id,
+        presetType: preset.type
+      })
+    }
+  }
+
   return items.sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))
 }
 
@@ -173,6 +282,10 @@ export function itemMatchesTab(item: LibraryCatalogItem, tab: LibraryPickerTab):
   if (tab === 'poses') return item.kind === 'pose'
   if (tab === 'clips') return item.kind === 'clip'
   if (tab === 'backgrounds' || tab === 'images') return item.kind === 'visual'
+  if (tab === 'music') return item.kind === 'audio' && item.audioKind === 'music'
+  if (tab === 'sfx') return item.kind === 'audio' && item.audioKind === 'sfx'
+  if (tab === 'events') return item.kind === 'event'
+  if (tab === 'effects') return item.kind === 'effect'
   return true
 }
 
@@ -207,6 +320,9 @@ export function paginateLibraryCatalog(
 export function defaultTabForPurpose(purpose: LibraryPickerPurpose): LibraryPickerTab {
   if (purpose === 'shotBackground') return 'backgrounds'
   if (purpose === 'backgroundClip' || purpose === 'clipBlock') return 'clips'
+  if (purpose === 'audioAsset') return 'all'
+  if (purpose === 'eventDefinition') return 'events'
+  if (purpose === 'effectPreset') return 'effects'
   return 'all'
 }
 
@@ -320,6 +436,33 @@ export function resolveLibraryPick(
       },
       label: 'Add layer with this pose',
       note: 'Adds the character using this pose as the authored starting pose.',
+      alternatives: []
+    }
+  }
+
+  if (item.kind === 'audio' && item.audioId) {
+    return {
+      action: { type: 'chooseAudio', audioId: item.audioId },
+      label: 'Use this audio',
+      note: 'Fills the audio-block / playSfx form. Does not change the mixer.',
+      alternatives: []
+    }
+  }
+
+  if (item.kind === 'event' && item.eventId) {
+    return {
+      action: { type: 'chooseEvent', eventId: item.eventId },
+      label: 'Use this event',
+      note: 'Named event for a timeline cue or binding. Fire/Play semantics are unchanged.',
+      alternatives: []
+    }
+  }
+
+  if (item.kind === 'effect' && item.presetId) {
+    return {
+      action: { type: 'chooseEffectPreset', presetId: item.presetId },
+      label: 'Use this recipe',
+      note: 'Places an existing effect recipe on the Effects track at the playhead.',
       alternatives: []
     }
   }
