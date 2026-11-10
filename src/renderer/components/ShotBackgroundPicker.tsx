@@ -3,7 +3,7 @@
  * (full-res image on canvas) or secondary direct Import Image.
  */
 
-import React, { useState } from 'react'
+import React from 'react'
 import type { AssetState, StoryboardShot, VisualAsset } from '@shared/types/assetPipeline'
 import { AssetThumbnail } from './AssetThumbnail'
 
@@ -17,6 +17,7 @@ interface ShotBackgroundPickerProps {
   onChangeState: (stateId: string | null) => void
   onImport: () => void
   onClear: () => void
+  onOpenLibrary: () => void
 }
 
 export function ShotBackgroundPicker({
@@ -25,12 +26,11 @@ export function ShotBackgroundPicker({
   visualAssets,
   assetStates,
   error,
-  onSelectLibrary,
   onChangeState,
   onImport,
-  onClear
+  onClear,
+  onOpenLibrary
 }: ShotBackgroundPickerProps) {
-  const [showLibrary, setShowLibrary] = useState(false)
   const selectedAsset = visualAssets.find((a) => a.id === shot.backgroundVisualAssetId)
   const ownedStates = selectedAsset
     ? assetStates.filter((s) => s.assetId === selectedAsset.id)
@@ -137,10 +137,10 @@ export function ShotBackgroundPicker({
       <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
         <button
           type="button"
-          onClick={() => setShowLibrary((v) => !v)}
+          onClick={onOpenLibrary}
           style={{ flex: 1, fontSize: '0.85rem', padding: '0.4rem', background: 'var(--forge-gold)', color: '#000' }}
         >
-          {showLibrary ? 'Hide Library' : 'Library…'}
+          Library…
         </button>
         <button type="button" onClick={onImport} style={{ flex: 1, fontSize: '0.85rem', padding: '0.4rem' }}>
           + Import Image
@@ -156,89 +156,6 @@ export function ShotBackgroundPicker({
         )}
       </div>
 
-      {showLibrary && (
-        <div
-          style={{
-            marginTop: '0.5rem',
-            padding: '0.5rem',
-            background: 'var(--bg)',
-            borderRadius: '4px',
-            border: '2px solid var(--forge-gold)',
-            maxHeight: 220,
-            overflowY: 'auto'
-          }}
-        >
-          <div style={{ fontSize: '0.8rem', fontWeight: 'bold', marginBottom: '0.35rem' }}>
-            Library images (this Game)
-          </div>
-          {visualAssets.length === 0 ? (
-            <div style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>
-              No visual assets in this Game. Import one in Library first — this picker does not copy or mutate existing assets.
-            </div>
-          ) : (
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(72px, 1fr))',
-                gap: '0.4rem'
-              }}
-            >
-              {visualAssets.map((asset) => {
-                const states = assetStates.filter((s) => s.assetId === asset.id)
-                const selected = asset.id === shot.backgroundVisualAssetId
-                return (
-                  <button
-                    key={asset.id}
-                    type="button"
-                    onClick={() => {
-                      onSelectLibrary(asset.id, null)
-                      setShowLibrary(false)
-                    }}
-                    style={{
-                      padding: '0.25rem',
-                      border: selected ? '2px solid var(--forge-gold)' : '1px solid var(--border)',
-                      borderRadius: '4px',
-                      background: selected ? 'var(--bg-secondary)' : 'var(--bg)',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    <div
-                      style={{
-                        width: '100%',
-                        aspectRatio: '1',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        overflow: 'hidden'
-                      }}
-                    >
-                      <AssetThumbnail asset={asset} states={states} gameId={gameId} />
-                    </div>
-                    <div
-                      style={{
-                        fontSize: '0.65rem',
-                        marginTop: '0.2rem',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap'
-                      }}
-                    >
-                      {asset.name}
-                    </div>
-                  </button>
-                )
-              })}
-            </div>
-          )}
-          <button
-            type="button"
-            onClick={() => setShowLibrary(false)}
-            style={{ width: '100%', marginTop: '0.5rem', fontSize: '0.8rem' }}
-          >
-            Cancel
-          </button>
-        </div>
-      )}
     </div>
   )
 }

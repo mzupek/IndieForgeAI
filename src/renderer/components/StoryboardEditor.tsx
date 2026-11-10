@@ -26,6 +26,10 @@ import type {
 } from '@shared/types/assetPipeline'
 import { ConfirmModal } from './ConfirmModal'
 import { EventBindingsPanel } from './EventBindingsPanel'
+import { LibraryPickerModal } from './LibraryPickerModal'
+import { LayersPanel } from './LayersPanel'
+import { SelectedLayerInspector } from './SelectedLayerInspector'
+import { CollapsibleSection } from './CollapsibleSection'
 import {
   EMPTY_PREVIEW_SNAPSHOT,
   EventPreviewEngine,
@@ -35,13 +39,11 @@ import {
 import {
   applyEffectiveLayer,
   flattenShotTimedKeys,
-  sampleLayerTimedKeys,
   timedKeyIssues
 } from '@shared/storyboard/timedKeys'
 import {
   getLayerKind,
   resolveLayerImagePath,
-  resolveTextStyle,
   DEFAULT_FONT_REF,
   DEFAULT_PALETTE_REF
 } from '@shared/storyboard/layerValidation'
@@ -97,6 +99,16 @@ import {
 import { hitTestTimeline } from '@shared/storyboard/timelinePointer'
 import { collectEventCueCrossings } from '@shared/storyboard/eventCuePlayback'
 import { eventCueIssues } from '@shared/storyboard/eventCues'
+import {
+  moveLayerInStack,
+  reorderLayerToIndex,
+  toggleLayerVisible
+} from '@shared/storyboard/layerStack'
+import type {
+  LibraryPickAction,
+  LibraryPickerPurpose,
+  LibraryPickerTab
+} from '@shared/storyboard/libraryCatalog'
 
 type EditorMode = 'layout' | 'camera'
 type DragMode = 'move' | 'scale' | 'rotate' | 'framingRect' | 'cameraMarker' | 'effectMarker' | null
@@ -485,6 +497,11 @@ export function StoryboardEditor() {
   const [showAddText, setShowAddText] = useState(false)
   const [addAssetId, setAddAssetId] = useState('')
   const [addAssetStateId, setAddAssetStateId] = useState('')
+  const [libraryPicker, setLibraryPicker] = useState<{
+    purpose: LibraryPickerPurpose
+    title: string
+    initialTab?: LibraryPickerTab
+  } | null>(null)
   const [addTextContent, setAddTextContent] = useState('New text')
   const [addTextFont, setAddTextFont] = useState(DEFAULT_FONT_REF)
   const [addTextPalette, setAddTextPalette] = useState(DEFAULT_PALETTE_REF)
@@ -1849,6 +1866,7 @@ export function StoryboardEditor() {
             : undefined
         if (hitTestLayer(layer, x, y, canvas.width, !!img, { naturalSize, canvasHeight: canvas.height })) {
           setSelectedLayerId(layer.id)
+          setSidebarTab('background')
           return
         }
       }
@@ -2577,21 +2595,24 @@ export function StoryboardEditor() {
     setActiveProject(updated)
   }
 
-  const handleAddCharacter = async (characterId: string) => {
+  const handleAddCharacter = async (characterId: string, poseId?: string) => {
     if (!selectedShot) return
     
     const character = characters.find(c => c.id === characterId)
     const approvedPoses = poses.filter(p => p.characterId === characterId && p.status === 'approved')
+    const chosenPose = poseId
+      ? poses.find((p) => p.id === poseId)
+      : approvedPoses[0] || poses.find((p) => p.characterId === characterId)
     
-    if (approvedPoses.length === 0) {
-      alert(`No approved poses for ${character?.name || 'character'}`)
+    if (!chosenPose) {
+      setLayerError(`No poses for ${character?.name || 'character'}`)
       return
     }
 
     const layer: Omit<StoryboardLayer, 'id'> = {
       zOrder: Math.max(...selectedShot.layers.map(l => l.zOrder), 0) + 1,
       characterId,
-      poseId: approvedPoses[0].id,
+      poseId: chosenPose.id,
       visible: true,
       x: 0.5,
       y: 0.5,
@@ -2607,6 +2628,9 @@ export function StoryboardEditor() {
       const updated = await window.indieForge.projects.open(projectId!)
       setActiveProject(updated)
       setShowAddCharacter(false)
+      const shot = updated.assetPipeline?.storyboardShots?.find((s) => s.id === selectedShotId)
+      const newest = shot?.layers.slice().sort((a, b) => b.zOrder - a.zOrder)[0]
+      if (newest) setSelectedLayerId(newest.id)
     } catch (err) {
       setLayerError(err instanceof Error ? err.message : 'Failed to add character layer')
     }
@@ -2715,8 +2739,108 @@ export function StoryboardEditor() {
       setShowAddAsset(false)
       setAddAssetId('')
       setAddAssetStateId('')
+      const shot = updated.assetPipeline?.storyboardShots?.find((s) => s.id === selectedShotId)
+      const newest = shot?.layers.slice().sort((a, b) => b.zOrder - a.zOrder)[0]
+      if (newest) setSelectedLayerId(newest.id)
     } catch (err) {
       setLayerError(err instanceof Error ? err.message : 'Failed to add asset layer')
+    }
+  }
+
+  const persistLayerStack = async (nextLayers: StoryboardLayer[]) => {
+    if (!selectedShot || !projectId || !selectedShotId) return
+    try {
+      setLayerError(null)
+      await window.indieForge.pipeline.updateShot(projectId, selectedShotId, { layers: nextLayers })
+      await reloadProject()
+    } catch (err) {
+      setLayerError(err instanceof Error ? err.message : 'Failed to reorder layers')
+      await reloadProject()
+    }
+  }
+
+  const handleUpdateLayerFields = async (layerId: string, updates: Partial<StoryboardLayer>) => {
+    if (!projectId || !selectedShotId) return
+    await window.indieForge.pipeline.updateLayer(projectId, selectedShotId, layerId, updates)
+    const updated = await window.indieForge.projects.open(projectId)
+    setActiveProject(updated)
+  }
+
+  const applyLibraryPick = async (action: LibraryPickAction) => {
+    setLibraryPicker(null)
+    if (!selectedShot || !pipeline) return
+    try {
+      setLayerError(null)
+      if (action.type === 'addCharacterLayer') {
+        await handleAddCharacter(action.characterId, action.poseId)
+        return
+      }
+      if (action.type === 'addVisualLayer') {
+        setAddAssetId(action.visualAssetId)
+        const layer: Omit<StoryboardLayer, 'id'> = {
+          zOrder: Math.max(...selectedShot.layers.map((l) => l.zOrder), 0) + 1,
+          visualAssetId: action.visualAssetId,
+          assetStateId: null,
+          visible: true,
+          x: 0.5,
+          y: 0.5,
+          scale: 1,
+          rotation: 0,
+          flipX: false,
+          opacity: 1
+        }
+        await window.indieForge.pipeline.addLayer(projectId!, selectedShotId!, layer)
+        const updated = await window.indieForge.projects.open(projectId!)
+        setActiveProject(updated)
+        const shot = updated.assetPipeline?.storyboardShots?.find((s) => s.id === selectedShotId)
+        const newest = shot?.layers.slice().sort((a, b) => b.zOrder - a.zOrder)[0]
+        if (newest) setSelectedLayerId(newest.id)
+        return
+      }
+      if (action.type === 'setShotBackground') {
+        await handleSelectLibraryBackground(action.visualAssetId, null)
+        return
+      }
+      if (action.type === 'setBackgroundClip') {
+        await window.indieForge.pipeline.updateShot(projectId!, selectedShotId!, {
+          backgroundClipId: action.clipId
+        })
+        await reloadProject()
+        return
+      }
+      if (action.type === 'chooseClip') {
+        const clip = gameClips.find((c) => c.id === action.clipId)
+        setAddClipId(action.clipId)
+        setAddClipSourceIn('0')
+        setAddClipSourceOut(clip ? String(clip.durationSec) : '')
+        setShowAddClip(true)
+        return
+      }
+      if (action.type === 'addClipBlock') {
+        const clip = gameClips.find((c) => c.id === action.clipId)
+        if (!clip) {
+          setLayerError('Clip is not in the selected Game')
+          return
+        }
+        const ok = await runClipWrite(async (extendShot) => {
+          await window.indieForge.pipeline.addShotClipBlock(projectId!, selectedShotId!, {
+            clipId: action.clipId,
+            role: action.role,
+            t: playbackTime,
+            sourceInSec: 0,
+            sourceOutSec: clip.durationSec,
+            extendShot
+          })
+        })
+        if (ok) {
+          const updated = await window.indieForge.projects.open(projectId!)
+          const shot = updated.assetPipeline?.storyboardShots?.find((s) => s.id === selectedShotId)
+          const newest = shot?.layers.slice().sort((a, b) => b.zOrder - a.zOrder)[0]
+          if (action.role === 'layer' && newest) setSelectedLayerId(newest.id)
+        }
+      }
+    } catch (err) {
+      setLayerError(err instanceof Error ? err.message : 'Failed to place Library item')
     }
   }
 
@@ -2744,6 +2868,9 @@ export function StoryboardEditor() {
       setAddTextContent('New text')
       setAddTextFont(DEFAULT_FONT_REF)
       setAddTextPalette(DEFAULT_PALETTE_REF)
+      const shot = updated.assetPipeline?.storyboardShots?.find((s) => s.id === selectedShotId)
+      const newest = shot?.layers.slice().sort((a, b) => b.zOrder - a.zOrder)[0]
+      if (newest) setSelectedLayerId(newest.id)
     } catch (err) {
       setLayerError(err instanceof Error ? err.message : 'Failed to add text layer')
     }
@@ -3961,12 +4088,15 @@ export function StoryboardEditor() {
                   <button
                     type="button"
                     onClick={() => {
-                      setShowAddClip(true)
-                      setAddClipId(gameClips[0]?.id || '')
                       setAddClipRole('layer')
                       setAddClipSourceIn('0')
-                      const first = gameClips[0]
-                      setAddClipSourceOut(first ? String(first.durationSec) : '')
+                      setAddClipSourceOut('')
+                      setAddClipId('')
+                      setLibraryPicker({
+                        purpose: 'clipBlock',
+                        title: 'Choose a clip',
+                        initialTab: 'clips'
+                      })
                     }}
                     style={{ fontSize: '0.8rem', padding: '0.25rem 0.5rem' }}
                     title="Place a timed clip block with visible duration (not an instantaneous key)"
@@ -4417,21 +4547,29 @@ export function StoryboardEditor() {
                     <>
                       <label style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.35rem' }}>
                         Clip
-                        <select
-                          value={addClipId}
-                          onChange={(e) => {
-                            setAddClipId(e.target.value)
-                            const c = gameClips.find((x) => x.id === e.target.value)
-                            if (c) setAddClipSourceOut(String(c.durationSec))
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setLibraryPicker({
+                              purpose: 'clipBlock',
+                              title: 'Choose a clip',
+                              initialTab: 'clips'
+                            })
+                          }
+                          style={{
+                            width: '100%',
+                            marginTop: '0.2rem',
+                            fontSize: '0.85rem',
+                            padding: '0.4rem',
+                            background: 'var(--forge-gold)',
+                            color: '#000',
+                            textAlign: 'left'
                           }}
-                          style={{ width: '100%', marginTop: '0.2rem', fontSize: '0.85rem' }}
                         >
-                          {gameClips.map((c) => (
-                            <option key={c.id} value={c.id}>
-                              {c.moment} ({c.durationSec}s){isSupportedClipMedia(c.file) ? '' : ' — unsupported'}
-                            </option>
-                          ))}
-                        </select>
+                          {addClipId
+                            ? `${gameClips.find((c) => c.id === addClipId)?.moment || addClipId} (${gameClips.find((c) => c.id === addClipId)?.durationSec ?? '?'}s)`
+                            : 'Choose clip…'}
+                        </button>
                       </label>
                       <label style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.35rem' }}>
                         Role
@@ -5104,7 +5242,7 @@ export function StoryboardEditor() {
 
       {/* Right sidebar with tabs */}
       {selectedShot && (
-        <div style={{ width: '280px', borderLeft: '1px solid var(--border)', display: 'flex', flexDirection: 'column', maxHeight: '100%' }}>
+        <div style={{ width: '300px', borderLeft: '1px solid var(--border)', display: 'flex', flexDirection: 'column', maxHeight: '100%', minHeight: 0, flexShrink: 0 }}>
           {/* Tab headers */}
           <div style={{ display: 'flex', borderBottom: '2px solid var(--border)', flexShrink: 0 }}>
             <button
@@ -5143,940 +5281,247 @@ export function StoryboardEditor() {
             </button>
           </div>
           
-          {/* Tab content */}
-          <div style={{ flex: 1, overflowY: 'auto', padding: '1rem' }}>
-            {sidebarTab === 'background' ? (
-              <>
-                {/* Background Section */}
-                <div style={{ marginBottom: '1.5rem', paddingBottom: '1rem', borderBottom: '1px solid var(--border)' }}>
-                  <h3 style={{ fontSize: '1rem', margin: '0 0 0.75rem 0' }}>Background</h3>
-            
-            <ShotBackgroundPicker
-              gameId={gameId}
-              shot={selectedShot}
-              visualAssets={visualAssets}
-              assetStates={assetStates}
-              error={backgroundError}
-              onSelectLibrary={handleSelectLibraryBackground}
-              onChangeState={handleChangeLibraryBackgroundState}
-              onImport={handleImportBackgroundImage}
-              onClear={handleClearBackgroundImage}
-            />
-
-            {/* Background Clip */}
-            <div>
-              <div style={{ fontSize: '0.85rem', marginBottom: '0.25rem', fontWeight: 'bold' }}>Clip:</div>
-              <select
-                value={selectedShot.backgroundClipId || ''}
-                onChange={async (e) => {
-                  const clipId = e.target.value || undefined
-                  await window.indieForge.pipeline.updateShot(projectId!, selectedShotId!, { backgroundClipId: clipId || null })
-                  const updated = await window.indieForge.projects.open(projectId!)
-                  setActiveProject(updated)
-                }}
-                style={{
-                  width: '100%',
-                  padding: '0.4rem',
-                  fontSize: '0.85rem',
-                  background: 'var(--bg)',
-                  border: '1px solid var(--border)',
-                  borderRadius: '4px',
-                  color: 'var(--text)'
-                }}
-              >
-                <option value="">None</option>
-                {gameClips.map(clip => (
-                  <option key={clip.id} value={clip.id}>
-                    {clip.moment || 'clip'} ({clip.durationSec}s){isSupportedClipMedia(clip.file) ? '' : ' — unsupported'}
-                  </option>
-                ))}
-              </select>
-              <div style={{ fontSize: '0.7rem', marginTop: '0.25rem', color: 'var(--muted)', fontStyle: 'italic' }}>
-                Dropdown sets legacy backgroundClipId (implicit play from 0, never extends the shot).
-                Timed placement lives on the Clips timeline track. An explicit background block replaces implicit playback.
-                {(selectedShot.backgroundImage || selectedShot.backgroundVisualAssetId) && selectedShot.backgroundClipId ? ' Clip draws over the static image while the block is active.' : ''}
-              </div>
-            </div>
-            
-            {/* Stage Treatment (Phase C.1) */}
-            <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
-              <h4 style={{ fontSize: '0.85rem', margin: '0 0 0.5rem 0', fontWeight: 'bold' }}>Stage Treatment</h4>
-              
-              {/* BG Dim Slider */}
-              <div style={{ marginBottom: '0.75rem' }}>
-                <label style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.25rem', color: 'var(--text-secondary)' }}>
-                  BG Dim: {Math.round((selectedShot.stageTreatment?.bgDim ?? 0) * 100)}%
-                </label>
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  value={(selectedShot.stageTreatment?.bgDim ?? 0) * 100}
-                  onChange={async (e) => {
-                    const value = parseInt(e.target.value) / 100
-                    await window.indieForge.pipeline.updateShot(projectId!, selectedShotId!, {
-                      stageTreatment: {
-                        ...selectedShot.stageTreatment,
-                        bgDim: value
-                      }
-                    })
-                    const updated = await window.indieForge.projects.open(projectId!)
-                    setActiveProject(updated)
-                  }}
-                  style={{ width: '100%' }}
-                />
-              </div>
-              
-              {/* Vignette Slider */}
-              <div style={{ marginBottom: '0.75rem' }}>
-                <label style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.25rem', color: 'var(--text-secondary)' }}>
-                  Vignette: {Math.round((selectedShot.stageTreatment?.vignette ?? 0) * 100)}%
-                </label>
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  value={(selectedShot.stageTreatment?.vignette ?? 0) * 100}
-                  onChange={async (e) => {
-                    const value = parseInt(e.target.value) / 100
-                    await window.indieForge.pipeline.updateShot(projectId!, selectedShotId!, {
-                      stageTreatment: {
-                        ...selectedShot.stageTreatment,
-                        vignette: value
-                      }
-                    })
-                    const updated = await window.indieForge.projects.open(projectId!)
-                    setActiveProject(updated)
-                  }}
-                  style={{ width: '100%' }}
-                />
-              </div>
-              
-              {/* Clear Button */}
-              {(selectedShot.stageTreatment?.bgDim || selectedShot.stageTreatment?.vignette) && (
-                <button
-                  onClick={async () => {
-                    await window.indieForge.pipeline.updateShot(projectId!, selectedShotId!, {
-                      stageTreatment: undefined
-                    })
-                    const updated = await window.indieForge.projects.open(projectId!)
-                    setActiveProject(updated)
-                  }}
-                  style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem' }}
-                >
-                  Clear Treatment
-                </button>
-              )}
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', gap: '0.35rem', flexWrap: 'wrap' }}>
-            <h3 style={{ fontSize: '1rem', margin: 0 }}>Layers</h3>
-            <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
-              <button 
-                type="button" 
-                onClick={() => { setShowAddCharacter(true); setShowAddAsset(false); setShowAddText(false) }} 
-                style={{ fontSize: '0.75rem', padding: '0.25rem 0.4rem' }}
-              >
-                + Character / Pose
-              </button>
-              <button 
-                type="button" 
-                onClick={async () => {
-                  setShowAddAsset(true); setShowAddCharacter(false); setShowAddText(false)
-                  try {
-                    const assets = await window.indieForge.visualAssets.list(gameId)
-                    setLibraryAssets(assets)
-                  } catch (err) {
-                    setLayerError(err instanceof Error ? err.message : 'Failed to list assets')
-                  }
-                }} 
-                style={{ fontSize: '0.75rem', padding: '0.25rem 0.4rem' }}
-              >
-                + Asset
-              </button>
-              <button 
-                type="button" 
-                onClick={() => { setShowAddText(true); setShowAddCharacter(false); setShowAddAsset(false) }} 
-                style={{ fontSize: '0.75rem', padding: '0.25rem 0.4rem' }}
-              >
-                + Text
-              </button>
-            </div>
-          </div>
-
-          {layerError && (
-            <div style={{ marginBottom: '0.75rem', padding: '0.5rem', background: 'var(--danger, #7a2020)', color: '#fff', borderRadius: '4px', fontSize: '0.8rem' }}>
-              {layerError}
-            </div>
-          )}
-          
-          {showAddCharacter && (
-            <div style={{ marginBottom: '1rem', padding: '0.75rem', background: 'var(--bg)', borderRadius: '4px', border: '2px solid var(--forge-gold)' }}>
-              <div style={{ fontWeight: 'bold', marginBottom: '0.5rem', fontSize: '0.9rem' }}>Add Character / Pose</div>
-              <div style={{ fontSize: '0.75rem', color: 'var(--muted)', marginBottom: '0.5rem' }}>
-                Adds the character with its first approved pose. Change the starting pose after adding.
-              </div>
-              {characters.map(char => (
-                <button
-                  key={char.id}
-                  type="button"
-                  onClick={() => handleAddCharacter(char.id)}
-                  style={{ width: '100%', marginBottom: '0.25rem', fontSize: '0.85rem', textAlign: 'left' }}
-                >
-                  {char.name}
-                </button>
-              ))}
-              <button type="button" onClick={() => setShowAddCharacter(false)} style={{ width: '100%', marginTop: '0.5rem', fontSize: '0.85rem' }}>
-                Cancel
-              </button>
-            </div>
-          )}
-
-          {showAddAsset && (
-            <div style={{ marginBottom: '1rem', padding: '0.75rem', background: 'var(--bg)', borderRadius: '4px', border: '2px solid var(--forge-gold)' }}>
-              <div style={{ fontWeight: 'bold', marginBottom: '0.5rem', fontSize: '0.9rem' }}>Add Visual Asset</div>
-              <select
-                value={addAssetId}
-                onChange={async (e) => {
-                  const id = e.target.value
-                  setAddAssetId(id)
-                  setAddAssetStateId('')
-                  if (!id) { setLibraryStates([]); return }
-                  try {
-                    const states = await window.indieForge.assetStates.list(id)
-                    setLibraryStates(states)
-                  } catch {
-                    setLibraryStates(assetStates.filter(s => s.assetId === id))
-                  }
-                }}
-                style={{ width: '100%', marginBottom: '0.5rem', fontSize: '0.85rem' }}
-              >
-                <option value="">Select asset…</option>
-                {(libraryAssets.length ? libraryAssets : visualAssets).map(asset => (
-                  <option key={asset.id} value={asset.id}>{asset.name} ({asset.category})</option>
-                ))}
-              </select>
-              <label style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.5rem' }}>
-                Starting state
-                <select
-                  value={addAssetStateId}
-                  onChange={(e) => setAddAssetStateId(e.target.value)}
-                  style={{ width: '100%', marginTop: '0.25rem', fontSize: '0.85rem' }}
-                >
-                  <option value="">Default / static image</option>
-                  {libraryStates.map(state => (
-                    <option key={state.id} value={state.id}>{state.name}</option>
-                  ))}
-                </select>
-              </label>
-              <button type="button" onClick={handleAddAssetLayer} style={{ width: '100%', fontSize: '0.85rem', background: 'var(--forge-gold)', color: '#000' }}>
-                Add to shot
-              </button>
-              <button type="button" onClick={() => setShowAddAsset(false)} style={{ width: '100%', marginTop: '0.35rem', fontSize: '0.85rem' }}>
-                Cancel
-              </button>
-            </div>
-          )}
-
-          {showAddText && (
-            <div style={{ marginBottom: '1rem', padding: '0.75rem', background: 'var(--bg)', borderRadius: '4px', border: '2px solid var(--forge-gold)' }}>
-              <div style={{ fontWeight: 'bold', marginBottom: '0.5rem', fontSize: '0.9rem' }}>Add Text</div>
-              <textarea
-                value={addTextContent}
-                onChange={(e) => setAddTextContent(e.target.value)}
-                rows={3}
-                style={{ width: '100%', marginBottom: '0.5rem', fontSize: '0.85rem' }}
-              />
-              <label style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.5rem' }}>
-                Font
-                <select
-                  value={addTextFont}
-                  onChange={(e) => setAddTextFont(e.target.value)}
-                  style={{ width: '100%', marginTop: '0.25rem', fontSize: '0.85rem' }}
-                >
-                  <option value={DEFAULT_FONT_REF}>default (system sans-serif)</option>
-                  {fonts.map(font => (
-                    <option key={font.id} value={font.id}>{font.name}</option>
-                  ))}
-                </select>
-              </label>
-              <label style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.5rem' }}>
-                Palette
-                <select
-                  value={addTextPalette}
-                  onChange={(e) => setAddTextPalette(e.target.value)}
-                  style={{ width: '100%', marginTop: '0.25rem', fontSize: '0.85rem' }}
-                >
-                  <option value={DEFAULT_PALETTE_REF}>default (#ffffff)</option>
-                  {palettes.map(pal => (
-                    <option key={pal.id} value={pal.id}>{pal.name}</option>
-                  ))}
-                </select>
-              </label>
-              <button type="button" onClick={handleAddTextLayer} style={{ width: '100%', fontSize: '0.85rem', background: 'var(--forge-gold)', color: '#000' }}>
-                Add to shot
-              </button>
-              <button type="button" onClick={() => setShowAddText(false)} style={{ width: '100%', marginTop: '0.35rem', fontSize: '0.85rem' }}>
-                Cancel
-              </button>
-            </div>
-          )}
-          
-          {selectedShot.layers
-            .sort((a, b) => b.zOrder - a.zOrder)
-            .map(layer => {
-              const character = layer.characterId ? characters.find(c => c.id === layer.characterId) : null
-              const pose = layer.poseId ? poses.find(p => p.id === layer.poseId) : null
-              const kind = getLayerKind(layer)
-              const label = pipeline ? describeLayerLabel(layer, pipeline) : kind
-              const mediaErr = pipeline && kind !== 'text' ? resolveLayerImagePath(layer, pipeline).error : undefined
-              const textErr = pipeline && kind === 'text' ? resolveTextStyle(layer, pipeline, gameId) : null
-              const refError = mediaErr || textErr?.fontError || textErr?.paletteError
-              
-              return (
-                <div
-                  key={layer.id}
-                  onClick={() => setSelectedLayerId(layer.id)}
-                  style={{
-                    padding: '0.75rem',
-                    marginBottom: '0.5rem',
-                    background: selectedLayerId === layer.id ? 'var(--forge-gold)' : 'var(--bg-secondary)',
-                    color: selectedLayerId === layer.id ? 'var(--bg)' : 'var(--text)',
-                    borderRadius: '4px',
-                    cursor: 'pointer',
-                    fontSize: '0.85rem',
-                    opacity: layer.visible === false ? 0.45 : 1
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
-                    <span style={{ fontWeight: 'bold' }}>z{layer.zOrder} {layer.visible === false ? '(hidden)' : ''}</span>
-                    <span style={{ opacity: 0.7 }}>{layer.scale.toFixed(2)}x • {layer.rotation.toFixed(0)}°</span>
-                  </div>
-                  <div style={{ fontSize: '0.9rem', fontWeight: 'bold' }}>{label}</div>
-                  {character && pose && <div style={{ fontSize: '0.8rem', opacity: 0.8 }}>Starting pose: {pose.slot}</div>}
-                  {layer.visualAssetId && (
-                    <div style={{ fontSize: '0.8rem', opacity: 0.8 }}>
-                      Starting state:{' '}
-                      {layer.assetStateId
-                        ? assetStates.find((s) => s.id === layer.assetStateId)?.name || layer.assetStateId
-                        : 'default / static'}
-                    </div>
-                  )}
-                  {selectedLayerId === layer.id && layer.visualAssetId && (
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        void handleFitSourceAspect(layer.id)
-                      }}
-                      style={{ width: '100%', marginTop: '0.35rem', fontSize: '0.75rem', padding: '0.3rem' }}
-                    >
-                      Reset to source aspect
-                    </button>
-                  )}
-                  {layer.clipId && (() => {
-                    const sample = sampleLayerClip(selectedShot, clips, layer.id, playbackTime)
-                    const video = videosRef.current.get(layer.clipId)
-                    if (!sample) {
-                      return (
-                        <div style={{ fontSize: '0.75rem', marginTop: '0.15rem', opacity: 0.8 }}>
-                          CLIP hidden (outside block)
-                        </div>
-                      )
+          {sidebarTab === 'background' ? (
+            <>
+              <div style={{ flex: 1, overflowY: 'auto', padding: '0.75rem 0.85rem', minHeight: 0 }}>
+                <CollapsibleSection title="Background">
+                  <ShotBackgroundPicker
+                    gameId={gameId}
+                    shot={selectedShot}
+                    visualAssets={visualAssets}
+                    assetStates={assetStates}
+                    error={backgroundError}
+                    onSelectLibrary={handleSelectLibraryBackground}
+                    onChangeState={handleChangeLibraryBackgroundState}
+                    onImport={handleImportBackgroundImage}
+                    onClear={handleClearBackgroundImage}
+                    onOpenLibrary={() =>
+                      setLibraryPicker({
+                        purpose: 'shotBackground',
+                        title: 'Shot background',
+                        initialTab: 'backgrounds'
+                      })
                     }
-                    return (
-                      <div style={{ fontSize: '0.75rem', marginTop: '0.15rem', opacity: 0.9 }}>
-                        CLIP src {sample.sourceTimeSec.toFixed(2)}s
-                        {sample.implicit ? ' (implicit)' : ''}
-                        {video?.status === 'loading' ? ' · loading' : ''}
-                        {video && video.status !== 'ready' && video.status !== 'loading' ? ' · unavailable' : ''}
-                      </div>
-                    )
-                  })()}
-                  {(() => {
-                    const sample = sampleLayerTimedKeys(layer, playbackTime)
-                    if (!sample) return null
-                    return (
-                      <div style={{ fontSize: '0.75rem', marginTop: '0.15rem', opacity: 0.9 }}>
-                        TIMED @ {sample.t.toFixed(2)}s
-                        {sample.poseId
-                          ? `: ${poses.find((p) => p.id === sample.poseId)?.slot || sample.poseId}`
-                          : sample.assetStateId
-                            ? `: ${assetStates.find((s) => s.id === sample.assetStateId)?.name || sample.assetStateId}`
-                            : ''}
-                      </div>
-                    )
-                  })()}
-                  {previewSnapshot.overrides[layer.id] && (
-                    <div style={{ fontSize: '0.75rem', marginTop: '0.2rem', fontWeight: 'bold' }}>
-                      PREVIEW
-                      {previewSnapshot.overrides[layer.id].poseId
-                        ? `: ${poses.find(p => p.id === previewSnapshot.overrides[layer.id].poseId)?.slot || previewSnapshot.overrides[layer.id].poseId}`
-                        : previewSnapshot.overrides[layer.id].assetStateId
-                          ? `: ${assetStates.find(s => s.id === previewSnapshot.overrides[layer.id].assetStateId)?.name || previewSnapshot.overrides[layer.id].assetStateId}`
-                          : previewSnapshot.overrides[layer.id].visible === false
-                            ? ': hidden'
-                            : previewSnapshot.overrides[layer.id].text !== undefined
-                              ? `: “${previewSnapshot.overrides[layer.id].text}”`
-                              : ''}
-                    </div>
-                  )}
-                  {refError && (
-                    <div style={{ fontSize: '0.75rem', color: selectedLayerId === layer.id ? '#5a0000' : '#ff8a8a', marginTop: '0.25rem' }}>
-                      {refError}
-                    </div>
-                  )}
-                  {selectedLayerId === layer.id && character && (
-                    <label style={{ display: 'block', marginTop: '0.5rem', fontSize: '0.75rem' }}>
-                      Starting pose
-                      <select
-                        value={layer.poseId || ''}
-                        onChange={(e) => handleChangePose(e.target.value)}
-                        onClick={(e) => e.stopPropagation()}
-                        style={{
-                          width: '100%',
-                          marginTop: '0.25rem',
-                          padding: '0.25rem',
-                          fontSize: '0.8rem',
-                          background: 'var(--bg)',
-                          border: '1px solid var(--border)',
-                          borderRadius: '4px',
-                          color: 'var(--text)'
-                        }}
-                      >
-                        {poses.filter(p => p.characterId === character.id && p.status === 'approved').map(p => (
-                          <option key={p.id} value={p.id}>{p.slot}</option>
-                        ))}
-                      </select>
-                    </label>
-                  )}
-                  {selectedLayerId === layer.id && layer.visualAssetId && (
-                    <label style={{ display: 'block', marginTop: '0.5rem', fontSize: '0.75rem' }}>
-                      Starting state
-                      <select
-                        value={layer.assetStateId || ''}
-                        onChange={async (e) => {
-                          const value = e.target.value
-                          await window.indieForge.pipeline.updateLayer(projectId!, selectedShotId!, layer.id, {
-                            assetStateId: value ? value : null
-                          })
-                          const updated = await window.indieForge.projects.open(projectId!)
-                          setActiveProject(updated)
-                        }}
-                        onClick={(e) => e.stopPropagation()}
-                        style={{
-                          width: '100%',
-                          marginTop: '0.25rem',
-                          padding: '0.25rem',
-                          fontSize: '0.8rem',
-                          background: 'var(--bg)',
-                          border: '1px solid var(--border)',
-                          borderRadius: '4px',
-                          color: 'var(--text)'
-                        }}
-                      >
-                        <option value="">Default / static image</option>
-                        {assetStates.filter(s => s.assetId === layer.visualAssetId).map(s => (
-                          <option key={s.id} value={s.id}>{s.name}</option>
-                        ))}
-                      </select>
-                    </label>
-                  )}
-                  {selectedLayerId === layer.id && (layer.characterId || layer.visualAssetId) && (
-                    <div
-                      onClick={(e) => e.stopPropagation()}
-                      style={{ marginTop: '0.6rem', paddingTop: '0.5rem', borderTop: '1px solid rgba(255,255,255,0.15)' }}
-                    >
-                      <div style={{ fontSize: '0.75rem', fontWeight: 'bold', marginBottom: '0.35rem' }}>
-                        Timed pose/state keys
-                      </div>
-                      {(layer.timedKeys || []).length === 0 && (
-                        <div style={{ fontSize: '0.7rem', opacity: 0.75, marginBottom: '0.35rem' }}>
-                          None. Add at playhead — same layer, not a duplicate.
-                        </div>
-                      )}
-                      {(layer.timedKeys || [])
-                        .slice()
-                        .sort((a, b) => a.t - b.t)
-                        .map((key) => {
-                          const selected = selectedTimedKeyId === key.id
-                          const issue = pipeline ? timedKeyIssues(key, layer, pipeline, selectedShot.id) : null
-                          return (
-                            <div
-                              key={key.id}
-                              onClick={() => setSelectedTimedKeyId(key.id)}
-                              style={{
-                                marginBottom: '0.35rem',
-                                padding: '0.35rem',
-                                borderRadius: '4px',
-                                background: selected ? 'rgba(0,0,0,0.2)' : 'transparent',
-                                border: selected ? '1px solid var(--forge-gold)' : '1px solid transparent'
-                              }}
-                            >
-                              <div style={{ display: 'flex', gap: '0.25rem', alignItems: 'center' }}>
-                                <input
-                                  type="number"
-                                  min={0}
-                                  max={selectedShot.durationSec}
-                                  step={0.01}
-                                  value={selected ? timedKeyTimeDraft : key.t.toFixed(2)}
-                                  onFocus={() => {
-                                    setSelectedTimedKeyId(key.id)
-                                    setTimedKeyTimeDraft(key.t.toFixed(2))
-                                  }}
-                                  onChange={(e) => setTimedKeyTimeDraft(e.target.value)}
-                                  onBlur={() => {
-                                    const next = Number(timedKeyTimeDraft)
-                                    if (Number.isFinite(next) && Math.abs(next - key.t) >= 0.0005) {
-                                      handleUpdateTimedKey(key.id, { t: next })
-                                    } else {
-                                      setTimedKeyTimeDraft(key.t.toFixed(2))
-                                    }
-                                  }}
-                                  style={{ width: '4.2rem', fontSize: '0.75rem' }}
-                                />
-                                <span style={{ fontSize: '0.7rem' }}>s</span>
-                                {layer.characterId ? (
-                                  <select
-                                    value={key.action.type === 'setPose' ? key.action.poseId : ''}
-                                    onChange={(e) =>
-                                      handleUpdateTimedKey(key.id, {
-                                        action: { type: 'setPose', poseId: e.target.value }
-                                      })
-                                    }
-                                    style={{ flex: 1, fontSize: '0.75rem' }}
-                                  >
-                                    {poses
-                                      .filter((p) => p.characterId === layer.characterId)
-                                      .map((p) => (
-                                        <option key={p.id} value={p.id}>{p.slot}{p.status !== 'approved' ? ` (${p.status})` : ''}</option>
-                                      ))}
-                                  </select>
-                                ) : (
-                                  <select
-                                    value={key.action.type === 'setState' ? key.action.stateId : ''}
-                                    onChange={(e) =>
-                                      handleUpdateTimedKey(key.id, {
-                                        action: { type: 'setState', stateId: e.target.value }
-                                      })
-                                    }
-                                    style={{ flex: 1, fontSize: '0.75rem' }}
-                                  >
-                                    {assetStates
-                                      .filter((s) => s.assetId === layer.visualAssetId)
-                                      .map((s) => (
-                                        <option key={s.id} value={s.id}>{s.name}</option>
-                                      ))}
-                                  </select>
-                                )}
-                                <button
-                                  type="button"
-                                  onClick={() => setConfirmDeleteTimedKeyId(key.id)}
-                                  style={{ fontSize: '0.7rem', padding: '0.15rem 0.35rem', background: 'var(--danger)', color: 'white' }}
-                                >
-                                  Delete
-                                </button>
-                              </div>
-                              {issue && (
-                                <div style={{ fontSize: '0.7rem', color: '#ff8a8a', marginTop: '0.2rem' }}>{issue}</div>
-                              )}
-                            </div>
-                          )
-                        })}
+                  />
+                  <div>
+                    <div style={{ fontSize: '0.85rem', marginBottom: '0.25rem', fontWeight: 'bold' }}>Clip:</div>
+                    <div style={{ display: 'flex', gap: '0.35rem' }}>
                       <button
                         type="button"
-                        onClick={handleAddTimedKey}
-                        style={{ width: '100%', fontSize: '0.75rem', padding: '0.25rem', marginTop: '0.15rem' }}
+                        onClick={() =>
+                          setLibraryPicker({
+                            purpose: 'backgroundClip',
+                            title: 'Background clip',
+                            initialTab: 'clips'
+                          })
+                        }
+                        style={{
+                          flex: 1,
+                          fontSize: '0.8rem',
+                          padding: '0.4rem',
+                          background: 'var(--forge-gold)',
+                          color: '#000'
+                        }}
                       >
-                        + Key @ {playbackTime.toFixed(2)}s
+                        {selectedShot.backgroundClipId
+                          ? gameClips.find((c) => c.id === selectedShot.backgroundClipId)?.moment || 'Clip set'
+                          : 'Library…'}
+                      </button>
+                      {selectedShot.backgroundClipId && (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            await window.indieForge.pipeline.updateShot(projectId!, selectedShotId!, {
+                              backgroundClipId: null
+                            })
+                            const updated = await window.indieForge.projects.open(projectId!)
+                            setActiveProject(updated)
+                          }}
+                          style={{ fontSize: '0.8rem', padding: '0.4rem' }}
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </div>
+                    <div style={{ fontSize: '0.7rem', marginTop: '0.25rem', color: 'var(--muted)', fontStyle: 'italic' }}>
+                      Library pick sets legacy backgroundClipId (implicit play from 0, never extends the shot).
+                      Timed placement lives on the Clips timeline track. An explicit background block replaces implicit playback.
+                      {(selectedShot.backgroundImage || selectedShot.backgroundVisualAssetId) && selectedShot.backgroundClipId
+                        ? ' Clip draws over the static image while the block is active.'
+                        : ''}
+                    </div>
+                  </div>
+                </CollapsibleSection>
+
+                <CollapsibleSection title="Stage Treatment" defaultOpen={false}>
+                  <div style={{ marginBottom: '0.75rem' }}>
+                    <label style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.25rem', color: 'var(--text-secondary)' }}>
+                      BG Dim: {Math.round((selectedShot.stageTreatment?.bgDim ?? 0) * 100)}%
+                    </label>
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      value={(selectedShot.stageTreatment?.bgDim ?? 0) * 100}
+                      onChange={async (e) => {
+                        const value = parseInt(e.target.value) / 100
+                        await window.indieForge.pipeline.updateShot(projectId!, selectedShotId!, {
+                          stageTreatment: {
+                            ...selectedShot.stageTreatment,
+                            bgDim: value
+                          }
+                        })
+                        const updated = await window.indieForge.projects.open(projectId!)
+                        setActiveProject(updated)
+                      }}
+                      style={{ width: '100%' }}
+                    />
+                  </div>
+                  <div style={{ marginBottom: '0.75rem' }}>
+                    <label style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.25rem', color: 'var(--text-secondary)' }}>
+                      Vignette: {Math.round((selectedShot.stageTreatment?.vignette ?? 0) * 100)}%
+                    </label>
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      value={(selectedShot.stageTreatment?.vignette ?? 0) * 100}
+                      onChange={async (e) => {
+                        const value = parseInt(e.target.value) / 100
+                        await window.indieForge.pipeline.updateShot(projectId!, selectedShotId!, {
+                          stageTreatment: {
+                            ...selectedShot.stageTreatment,
+                            vignette: value
+                          }
+                        })
+                        const updated = await window.indieForge.projects.open(projectId!)
+                        setActiveProject(updated)
+                      }}
+                      style={{ width: '100%' }}
+                    />
+                  </div>
+                  {(selectedShot.stageTreatment?.bgDim || selectedShot.stageTreatment?.vignette) && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await window.indieForge.pipeline.updateShot(projectId!, selectedShotId!, {
+                          stageTreatment: undefined
+                        })
+                        const updated = await window.indieForge.projects.open(projectId!)
+                        setActiveProject(updated)
+                      }}
+                      style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem' }}
+                    >
+                      Clear Treatment
+                    </button>
+                  )}
+                </CollapsibleSection>
+
+                <CollapsibleSection title="Layers">
+                  <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowAddText(false)
+                        setLibraryPicker({
+                          purpose: 'addLayer',
+                          title: 'Add character / pose',
+                          initialTab: 'characters'
+                        })
+                      }}
+                      style={{ fontSize: '0.75rem', padding: '0.25rem 0.4rem' }}
+                    >
+                      + Character / Pose
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowAddText(false)
+                        setLibraryPicker({
+                          purpose: 'addLayer',
+                          title: 'Add from Library',
+                          initialTab: 'images'
+                        })
+                      }}
+                      style={{ fontSize: '0.75rem', padding: '0.25rem 0.4rem' }}
+                    >
+                      + Asset
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowAddText(true)}
+                      style={{ fontSize: '0.75rem', padding: '0.25rem 0.4rem' }}
+                    >
+                      + Text
+                    </button>
+                  </div>
+                  {layerError && (
+                    <div style={{ marginBottom: '0.75rem', padding: '0.5rem', background: 'var(--danger, #7a2020)', color: '#fff', borderRadius: '4px', fontSize: '0.8rem' }}>
+                      {layerError}
+                    </div>
+                  )}
+                  {showAddText && (
+                    <div style={{ marginBottom: '1rem', padding: '0.75rem', background: 'var(--bg)', borderRadius: '4px', border: '2px solid var(--forge-gold)' }}>
+                      <div style={{ fontWeight: 'bold', marginBottom: '0.5rem', fontSize: '0.9rem' }}>Add Text</div>
+                      <textarea
+                        value={addTextContent}
+                        onChange={(e) => setAddTextContent(e.target.value)}
+                        rows={3}
+                        style={{ width: '100%', marginBottom: '0.5rem', fontSize: '0.85rem' }}
+                      />
+                      <label style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.5rem' }}>
+                        Font
+                        <select
+                          value={addTextFont}
+                          onChange={(e) => setAddTextFont(e.target.value)}
+                          style={{ width: '100%', marginTop: '0.25rem', fontSize: '0.85rem' }}
+                        >
+                          <option value={DEFAULT_FONT_REF}>default (system sans-serif)</option>
+                          {fonts.map(font => (
+                            <option key={font.id} value={font.id}>{font.name}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.5rem' }}>
+                        Palette
+                        <select
+                          value={addTextPalette}
+                          onChange={(e) => setAddTextPalette(e.target.value)}
+                          style={{ width: '100%', marginTop: '0.25rem', fontSize: '0.85rem' }}
+                        >
+                          <option value={DEFAULT_PALETTE_REF}>default (#ffffff)</option>
+                          {palettes.map(pal => (
+                            <option key={pal.id} value={pal.id}>{pal.name}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <button type="button" onClick={handleAddTextLayer} style={{ width: '100%', fontSize: '0.85rem', background: 'var(--forge-gold)', color: '#000' }}>
+                        Add to shot
+                      </button>
+                      <button type="button" onClick={() => setShowAddText(false)} style={{ width: '100%', marginTop: '0.35rem', fontSize: '0.85rem' }}>
+                        Cancel
                       </button>
                     </div>
                   )}
-                </div>
-              )
-            })}
-          
-          {selectedLayerId && selectedLayer && (
-            <div style={{ marginTop: '1rem', padding: '1rem', background: 'var(--bg-secondary)', borderRadius: '4px' }}>
-              <h4 style={{ fontSize: '0.9rem', margin: '0 0 0.75rem 0' }}>Layer Controls</h4>
-              
-              {/* Phase C.3a: Scale and Rotation numeric controls */}
-              <div style={{ marginBottom: '0.75rem', paddingBottom: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
-                <div style={{ marginBottom: '0.5rem' }}>
-                  <label style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.25rem', color: 'var(--text-secondary)' }}>
-                    Scale: {selectedLayer.scale.toFixed(2)}x
-                  </label>
-                  <div style={{ display: 'flex', gap: '0.25rem', alignItems: 'center' }}>
-                    <input
-                      type="range"
-                      min="0.1"
-                      max="5"
-                      step="0.1"
-                      value={selectedLayer.scale}
-                      onChange={async (e) => {
-                        const value = parseFloat(e.target.value)
-                        await window.indieForge.pipeline.updateLayer(projectId!, selectedShotId!, selectedLayer.id, { scale: value })
-                        const updated = await window.indieForge.projects.open(projectId!)
-                        setActiveProject(updated)
-                      }}
-                      style={{ flex: 1 }}
-                    />
-                    <input
-                      type="number"
-                      min="0.1"
-                      max="5"
-                      step="0.1"
-                      value={selectedLayer.scale}
-                      onChange={async (e) => {
-                        const value = Math.max(0.1, Math.min(5, parseFloat(e.target.value) || 1))
-                        await window.indieForge.pipeline.updateLayer(projectId!, selectedShotId!, selectedLayer.id, { scale: value })
-                        const updated = await window.indieForge.projects.open(projectId!)
-                        setActiveProject(updated)
-                      }}
-                      style={{ width: '60px', padding: '0.2rem', fontSize: '0.75rem' }}
-                    />
-                  </div>
-                </div>
-                
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.25rem', color: 'var(--text-secondary)' }}>
-                    Rotation: {selectedLayer.rotation.toFixed(0)}°
-                  </label>
-                  <div style={{ display: 'flex', gap: '0.25rem', alignItems: 'center' }}>
-                    <input
-                      type="range"
-                      min="0"
-                      max="360"
-                      step="1"
-                      value={selectedLayer.rotation}
-                      onChange={async (e) => {
-                        const value = parseFloat(e.target.value)
-                        await window.indieForge.pipeline.updateLayer(projectId!, selectedShotId!, selectedLayer.id, { rotation: value })
-                        const updated = await window.indieForge.projects.open(projectId!)
-                        setActiveProject(updated)
-                      }}
-                      style={{ flex: 1 }}
-                    />
-                    <input
-                      type="number"
-                      min="0"
-                      max="360"
-                      step="1"
-                      value={selectedLayer.rotation}
-                      onChange={async (e) => {
-                        const value = ((parseFloat(e.target.value) || 0) % 360 + 360) % 360
-                        await window.indieForge.pipeline.updateLayer(projectId!, selectedShotId!, selectedLayer.id, { rotation: value })
-                        const updated = await window.indieForge.projects.open(projectId!)
-                        setActiveProject(updated)
-                      }}
-                      style={{ width: '60px', padding: '0.2rem', fontSize: '0.75rem' }}
-                    />
-                  </div>
-                </div>
-              </div>
-              
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem', fontSize: '0.85rem' }}>
-                <input
-                  type="checkbox"
-                  checked={selectedLayer.visible !== false}
-                  onChange={async (e) => {
-                    await window.indieForge.pipeline.updateLayer(projectId!, selectedShotId!, selectedLayer.id, {
-                      visible: e.target.checked
-                    })
-                    const updated = await window.indieForge.projects.open(projectId!)
-                    setActiveProject(updated)
-                  }}
-                />
-                Visible
-              </label>
-
-              {getLayerKind(selectedLayer) === 'text' && (
-                <div style={{ marginBottom: '0.75rem', paddingBottom: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
-                  <label style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.35rem' }}>
-                    Text
-                    <textarea
-                      value={selectedLayer.text || ''}
-                      onChange={async (e) => {
-                        await window.indieForge.pipeline.updateLayer(projectId!, selectedShotId!, selectedLayer.id, {
-                          text: e.target.value
-                        })
-                        const updated = await window.indieForge.projects.open(projectId!)
-                        setActiveProject(updated)
-                      }}
-                      rows={3}
-                      style={{ width: '100%', marginTop: '0.25rem', fontSize: '0.85rem' }}
-                    />
-                  </label>
-                  <label style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.35rem' }}>
-                    Font
-                    <select
-                      value={selectedLayer.fontRef || DEFAULT_FONT_REF}
-                      onChange={async (e) => {
-                        await window.indieForge.pipeline.updateLayer(projectId!, selectedShotId!, selectedLayer.id, {
-                          fontRef: e.target.value
-                        })
-                        const updated = await window.indieForge.projects.open(projectId!)
-                        setActiveProject(updated)
-                      }}
-                      style={{ width: '100%', marginTop: '0.25rem', fontSize: '0.85rem' }}
-                    >
-                      <option value={DEFAULT_FONT_REF}>default (system sans-serif)</option>
-                      {fonts.map(font => (
-                        <option key={font.id} value={font.id}>{font.name}</option>
-                      ))}
-                    </select>
-                  </label>
-                  <label style={{ display: 'block', fontSize: '0.75rem' }}>
-                    Palette
-                    <select
-                      value={selectedLayer.paletteRef || DEFAULT_PALETTE_REF}
-                      onChange={async (e) => {
-                        await window.indieForge.pipeline.updateLayer(projectId!, selectedShotId!, selectedLayer.id, {
-                          paletteRef: e.target.value
-                        })
-                        const updated = await window.indieForge.projects.open(projectId!)
-                        setActiveProject(updated)
-                      }}
-                      style={{ width: '100%', marginTop: '0.25rem', fontSize: '0.85rem' }}
-                    >
-                      <option value={DEFAULT_PALETTE_REF}>default (#ffffff)</option>
-                      {palettes.map(pal => (
-                        <option key={pal.id} value={pal.id}>{pal.name}</option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-              )}
-
-              <button type="button" onClick={handleFlipLayer} style={{ width: '100%', marginBottom: '0.5rem', fontSize: '0.85rem' }}>
-                {selectedLayer.flipX ? 'Unflip' : 'Flip'} Horizontal
-              </button>
-              <button 
-                type="button" 
-                onClick={handleDeleteLayer} 
-                style={{ width: '100%', marginBottom: '0.75rem', fontSize: '0.85rem', background: 'var(--error)', color: '#fff' }}
-              >
-                Delete Layer
-              </button>
-              
-              {/* Layer Effects (Phase C.2) */}
-              <div style={{ paddingTop: '0.75rem', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
-                <h4 style={{ fontSize: '0.85rem', margin: '0 0 0.5rem 0', fontWeight: 'bold' }}>Effects</h4>
-                
-                {/* Drop Shadow */}
-                <div style={{ marginBottom: '0.75rem' }}>
-                  <div style={{ fontSize: '0.75rem', fontWeight: 'bold', marginBottom: '0.25rem' }}>Drop Shadow</div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.25rem', fontSize: '0.7rem' }}>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '0.65rem', marginBottom: '0.1rem' }}>Offset X</label>
-                      <input
-                        type="number"
-                        value={selectedLayer.fx?.dropShadow?.offsetX ?? 0}
-                        onChange={async (e) => {
-                          const value = parseFloat(e.target.value) || 0
-                          await window.indieForge.pipeline.updateLayer(projectId!, selectedShotId!, selectedLayer.id, {
-                            fx: {
-                              ...selectedLayer.fx,
-                              dropShadow: {
-                                offsetX: value,
-                                offsetY: selectedLayer.fx?.dropShadow?.offsetY ?? 6,
-                                blur: selectedLayer.fx?.dropShadow?.blur ?? 10,
-                                color: selectedLayer.fx?.dropShadow?.color ?? '#000000',
-                                alpha: selectedLayer.fx?.dropShadow?.alpha ?? 0.5
-                              }
-                            }
-                          })
-                          const updated = await window.indieForge.projects.open(projectId!)
-                          setActiveProject(updated)
-                        }}
-                        style={{ width: '100%', padding: '0.2rem', fontSize: '0.7rem' }}
-                      />
-                    </div>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '0.65rem', marginBottom: '0.1rem' }}>Offset Y</label>
-                      <input
-                        type="number"
-                        value={selectedLayer.fx?.dropShadow?.offsetY ?? 0}
-                        onChange={async (e) => {
-                          const value = parseFloat(e.target.value) || 0
-                          await window.indieForge.pipeline.updateLayer(projectId!, selectedShotId!, selectedLayer.id, {
-                            fx: {
-                              ...selectedLayer.fx,
-                              dropShadow: {
-                                offsetX: selectedLayer.fx?.dropShadow?.offsetX ?? 4,
-                                offsetY: value,
-                                blur: selectedLayer.fx?.dropShadow?.blur ?? 10,
-                                color: selectedLayer.fx?.dropShadow?.color ?? '#000000',
-                                alpha: selectedLayer.fx?.dropShadow?.alpha ?? 0.5
-                              }
-                            }
-                          })
-                          const updated = await window.indieForge.projects.open(projectId!)
-                          setActiveProject(updated)
-                        }}
-                        style={{ width: '100%', padding: '0.2rem', fontSize: '0.7rem' }}
-                      />
-                    </div>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '0.65rem', marginBottom: '0.1rem' }}>Blur</label>
-                      <input
-                        type="number"
-                        value={selectedLayer.fx?.dropShadow?.blur ?? 0}
-                        onChange={async (e) => {
-                          const value = parseFloat(e.target.value) || 0
-                          await window.indieForge.pipeline.updateLayer(projectId!, selectedShotId!, selectedLayer.id, {
-                            fx: {
-                              ...selectedLayer.fx,
-                              dropShadow: {
-                                offsetX: selectedLayer.fx?.dropShadow?.offsetX ?? 4,
-                                offsetY: selectedLayer.fx?.dropShadow?.offsetY ?? 6,
-                                blur: value,
-                                color: selectedLayer.fx?.dropShadow?.color ?? '#000000',
-                                alpha: selectedLayer.fx?.dropShadow?.alpha ?? 0.5
-                              }
-                            }
-                          })
-                          const updated = await window.indieForge.projects.open(projectId!)
-                          setActiveProject(updated)
-                        }}
-                        style={{ width: '100%', padding: '0.2rem', fontSize: '0.7rem' }}
-                      />
-                    </div>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '0.65rem', marginBottom: '0.1rem' }}>Alpha {Math.round((selectedLayer.fx?.dropShadow?.alpha ?? 0) * 100)}%</label>
-                      <input
-                        type="range"
-                        min="0"
-                        max="100"
-                        value={(selectedLayer.fx?.dropShadow?.alpha ?? 0) * 100}
-                        onChange={async (e) => {
-                          const value = parseInt(e.target.value) / 100
-                          await window.indieForge.pipeline.updateLayer(projectId!, selectedShotId!, selectedLayer.id, {
-                            fx: {
-                              ...selectedLayer.fx,
-                              dropShadow: {
-                                offsetX: selectedLayer.fx?.dropShadow?.offsetX ?? 4,
-                                offsetY: selectedLayer.fx?.dropShadow?.offsetY ?? 6,
-                                blur: selectedLayer.fx?.dropShadow?.blur ?? 10,
-                                color: selectedLayer.fx?.dropShadow?.color ?? '#000000',
-                                alpha: value
-                              }
-                            }
-                          })
-                          const updated = await window.indieForge.projects.open(projectId!)
-                          setActiveProject(updated)
-                        }}
-                        style={{ width: '100%' }}
-                      />
-                    </div>
-                  </div>
-                </div>
-                
-                {/* Outer Glow */}
-                <div style={{ marginBottom: '0.75rem' }}>
-                  <div style={{ fontSize: '0.75rem', fontWeight: 'bold', marginBottom: '0.25rem' }}>Outer Glow</div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.25rem', fontSize: '0.7rem' }}>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '0.65rem', marginBottom: '0.1rem' }}>Blur</label>
-                      <input
-                        type="number"
-                        value={selectedLayer.fx?.outerGlow?.blur ?? 0}
-                        onChange={async (e) => {
-                          const value = parseFloat(e.target.value) || 0
-                          await window.indieForge.pipeline.updateLayer(projectId!, selectedShotId!, selectedLayer.id, {
-                            fx: {
-                              ...selectedLayer.fx,
-                              outerGlow: {
-                                blur: value,
-                                color: selectedLayer.fx?.outerGlow?.color ?? '#00ffff',
-                                alpha: selectedLayer.fx?.outerGlow?.alpha ?? 0.8,
-                                strength: selectedLayer.fx?.outerGlow?.strength ?? 1
-                              }
-                            }
-                          })
-                          const updated = await window.indieForge.projects.open(projectId!)
-                          setActiveProject(updated)
-                        }}
-                        style={{ width: '100%', padding: '0.2rem', fontSize: '0.7rem' }}
-                      />
-                    </div>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '0.65rem', marginBottom: '0.1rem' }}>Alpha {Math.round((selectedLayer.fx?.outerGlow?.alpha ?? 0) * 100)}%</label>
-                      <input
-                        type="range"
-                        min="0"
-                        max="100"
-                        value={(selectedLayer.fx?.outerGlow?.alpha ?? 0) * 100}
-                        onChange={async (e) => {
-                          const value = parseInt(e.target.value) / 100
-                          await window.indieForge.pipeline.updateLayer(projectId!, selectedShotId!, selectedLayer.id, {
-                            fx: {
-                              ...selectedLayer.fx,
-                              outerGlow: {
-                                blur: selectedLayer.fx?.outerGlow?.blur ?? 12,
-                                color: selectedLayer.fx?.outerGlow?.color ?? '#00ffff',
-                                alpha: value,
-                                strength: selectedLayer.fx?.outerGlow?.strength ?? 1
-                              }
-                            }
-                          })
-                          const updated = await window.indieForge.projects.open(projectId!)
-                          setActiveProject(updated)
-                        }}
-                        style={{ width: '100%' }}
-                      />
-                    </div>
-                    <div style={{ gridColumn: '1 / -1' }}>
-                      <label style={{ display: 'block', fontSize: '0.65rem', marginBottom: '0.1rem' }}>Color</label>
-                      <select
-                        value={selectedLayer.fx?.outerGlow?.color ?? '#00ffff'}
-                        onChange={async (e) => {
-                          await window.indieForge.pipeline.updateLayer(projectId!, selectedShotId!, selectedLayer.id, {
-                            fx: {
-                              ...selectedLayer.fx,
-                              outerGlow: {
-                                blur: selectedLayer.fx?.outerGlow?.blur ?? 12,
-                                color: e.target.value,
-                                alpha: selectedLayer.fx?.outerGlow?.alpha ?? 0.8,
-                                strength: selectedLayer.fx?.outerGlow?.strength ?? 1
-                              }
-                            }
-                          })
-                          const updated = await window.indieForge.projects.open(projectId!)
-                          setActiveProject(updated)
-                        }}
-                        style={{ width: '100%', padding: '0.2rem', fontSize: '0.7rem' }}
-                      >
-                        <option value="#00ffff">Cyan</option>
-                        <option value="#ff00ff">Magenta</option>
-                        <option value="#ffff00">Yellow</option>
-                        <option value="#ffffff">White</option>
-                        <option value="#ff0000">Red</option>
-                        <option value="#00ff00">Green</option>
-                        <option value="#0000ff">Blue</option>
-                      </select>
-                    </div>
-                  </div>
-                </div>
-                
-                {/* Clear Effects */}
-                {(selectedLayer.fx?.dropShadow || selectedLayer.fx?.outerGlow) && (
-                  <button
-                    onClick={async () => {
-                      await window.indieForge.pipeline.updateLayer(projectId!, selectedShotId!, selectedLayer.id, { fx: undefined })
-                      const updated = await window.indieForge.projects.open(projectId!)
-                      setActiveProject(updated)
+                  <LayersPanel
+                    layers={selectedShot.layers}
+                    pipeline={pipeline}
+                    selectedLayerId={selectedLayerId}
+                    onSelect={(id) => setSelectedLayerId(id)}
+                    onToggleVisible={(id, visible) => {
+                      void persistLayerStack(toggleLayerVisible(selectedShot.layers, id, visible))
                     }}
-                    style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem', width: '100%' }}
-                  >
-                    Clear Effects
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
+                    onMove={(id, direction) => {
+                      void persistLayerStack(moveLayerInStack(selectedShot.layers, id, direction))
+                    }}
+                    onReorder={(id, toFrontIndex) => {
+                      void persistLayerStack(reorderLayerToIndex(selectedShot.layers, id, toFrontIndex))
+                    }}
+                  />
+                </CollapsibleSection>
+
               {pipeline && selectedShotId && (
+                <CollapsibleSection title="Events" defaultOpen={false}>
                 <EventBindingsPanel
                   gameId={gameId}
                   shotId={selectedShotId}
@@ -6105,13 +5550,101 @@ export function StoryboardEditor() {
                   }}
                   onResetPreview={resetEventPreview}
                 />
+                </CollapsibleSection>
               )}
-              </>
-            ) : (
-              <>
-                {/* Camera & Effects Tab Content */}
-                <div>
-                  {(editingCamera || editingEffect) ? (
+              </div>
+              <div
+                style={{
+                  flexShrink: 0,
+                  maxHeight: '42%',
+                  overflowY: 'auto',
+                  borderTop: '2px solid var(--forge-gold)',
+                  background: 'var(--bg-secondary)'
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: '0.7rem',
+                    fontWeight: 'bold',
+                    padding: '0.4rem 0.65rem 0',
+                    letterSpacing: '0.04em',
+                    textTransform: 'uppercase',
+                    color: 'var(--muted)'
+                  }}
+                >
+                  Selected Layer
+                </div>
+                <SelectedLayerInspector
+                  layer={selectedLayer}
+                  shot={selectedShot}
+                  pipeline={pipeline}
+                  gameId={gameId}
+                  poses={poses}
+                  assetStates={assetStates}
+                  fonts={fonts}
+                  palettes={palettes}
+                  playbackTime={playbackTime}
+                  previewSnapshot={previewSnapshot}
+                  selectedTimedKeyId={selectedTimedKeyId}
+                  timedKeyTimeDraft={timedKeyTimeDraft}
+                  clipStatus={
+                    selectedLayer?.clipId
+                      ? videosRef.current.get(selectedLayer.clipId)?.status === 'loading'
+                        ? 'loading'
+                        : videosRef.current.get(selectedLayer.clipId) &&
+                            videosRef.current.get(selectedLayer.clipId)?.status !== 'ready' &&
+                            videosRef.current.get(selectedLayer.clipId)?.status !== 'loading'
+                          ? 'unavailable'
+                          : undefined
+                      : undefined
+                  }
+                  onFitSourceAspect={(id) => void handleFitSourceAspect(id)}
+                  onChangePose={handleChangePose}
+                  onChangeAssetState={(stateId) => {
+                    if (!selectedLayerId) return
+                    void handleUpdateLayerFields(selectedLayerId, { assetStateId: stateId })
+                  }}
+                  onSelectTimedKey={setSelectedTimedKeyId}
+                  onTimedKeyTimeDraft={setTimedKeyTimeDraft}
+                  onUpdateTimedKey={handleUpdateTimedKey}
+                  onDeleteTimedKey={(keyId) => setConfirmDeleteTimedKeyId(keyId)}
+                  onAddTimedKey={handleAddTimedKey}
+                  onChangeScale={(value) => {
+                    if (!selectedLayerId) return
+                    void handleUpdateLayerFields(selectedLayerId, { scale: value })
+                  }}
+                  onChangeRotation={(value) => {
+                    if (!selectedLayerId) return
+                    void handleUpdateLayerFields(selectedLayerId, { rotation: value })
+                  }}
+                  onChangeVisible={(visible) => {
+                    if (!selectedLayerId) return
+                    void handleUpdateLayerFields(selectedLayerId, { visible })
+                  }}
+                  onChangeText={(text) => {
+                    if (!selectedLayerId) return
+                    void handleUpdateLayerFields(selectedLayerId, { text })
+                  }}
+                  onChangeFont={(fontRef) => {
+                    if (!selectedLayerId) return
+                    void handleUpdateLayerFields(selectedLayerId, { fontRef })
+                  }}
+                  onChangePalette={(paletteRef) => {
+                    if (!selectedLayerId) return
+                    void handleUpdateLayerFields(selectedLayerId, { paletteRef })
+                  }}
+                  onFlip={handleFlipLayer}
+                  onDeleteLayer={handleDeleteLayer}
+                  onChangeFx={(fx) => {
+                    if (!selectedLayerId) return
+                    void handleUpdateLayerFields(selectedLayerId, { fx })
+                  }}
+                />
+              </div>
+            </>
+          ) : (
+            <div style={{ flex: 1, overflowY: 'auto', padding: '1rem', minHeight: 0 }}>
+              {(editingCamera || editingEffect) ? (
                     <div style={{ 
                       padding: '1rem', 
                       background: 'var(--bg)', 
@@ -6181,13 +5714,11 @@ export function StoryboardEditor() {
                       Select a camera or effect marker on the timeline to edit
                     </div>
                   )}
-                </div>
-              </>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       )}
-      {confirmDeleteLayer && (
+            {confirmDeleteLayer && (
         <ConfirmModal
           title="Delete layer"
           message="Delete this layer from the shot? This does not delete the Library asset, character, or pose."
@@ -6244,6 +5775,18 @@ export function StoryboardEditor() {
           confirmLabel="Extend shot"
           onConfirm={confirmExtendShotNow}
           onCancel={() => setPendingExtend(null)}
+        />
+      )}
+      {libraryPicker && pipeline && gameId && (
+        <LibraryPickerModal
+          open
+          purpose={libraryPicker.purpose}
+          pipeline={pipeline}
+          gameId={gameId}
+          title={libraryPicker.title}
+          initialTab={libraryPicker.initialTab}
+          onClose={() => setLibraryPicker(null)}
+          onPick={(action) => void applyLibraryPick(action)}
         />
       )}
     </div>
