@@ -10,9 +10,123 @@ import type {
   Clip,
   CameraKeyframe,
   EffectMarker,
+  ShotClipBlock,
+  ShotAudioBlock,
+  AudioAsset,
   ScenePreset,
-  ScenePresetType
+  ScenePresetType,
+  VisualAsset,
+  AssetState,
+  Font,
+  Palette,
+  AssetPipelineProject,
+  EventDefinition,
+  EventBinding,
+  LayerTimedKey
 } from '@shared/types/assetPipeline'
+import { ConfirmModal } from './ConfirmModal'
+import { EventBindingsPanel } from './EventBindingsPanel'
+import { LibraryPickerModal } from './LibraryPickerModal'
+import { LayersPanel } from './LayersPanel'
+import { SelectedLayerInspector } from './SelectedLayerInspector'
+import { CollapsibleSection } from './CollapsibleSection'
+import {
+  EMPTY_PREVIEW_SNAPSHOT,
+  EventPreviewEngine,
+  type EventPreviewSnapshot,
+  type PrimitivePayload
+} from '@shared/storyboard/eventPreview'
+import {
+  applyEffectiveLayer,
+  flattenShotTimedKeys,
+  timedKeyIssues
+} from '@shared/storyboard/timedKeys'
+import {
+  getLayerKind,
+  resolveLayerImagePath,
+  DEFAULT_FONT_REF,
+  DEFAULT_PALETTE_REF
+} from '@shared/storyboard/layerValidation'
+import {
+  collectShotBackgroundStillPaths,
+  describeBackgroundKey,
+  resolveShotBackgroundAtTime,
+  backgroundKeyIssues
+} from '@shared/storyboard/backgroundKeys'
+import {
+  clampVisibilityRange,
+  isLayerPresentAtTime,
+  layerPresenceRange
+} from '@shared/storyboard/layerVisibilityRange'
+import { ShotBackgroundPicker } from './ShotBackgroundPicker'
+import {
+  describeLayerLabel,
+  getLayerPixelSize,
+  hitTestLayer,
+  planLayerDraw,
+  resolveLayerSourceSize,
+  SOURCE_FIT_SCALE,
+  TEXT_BASE_PX
+} from '@shared/storyboard/layerRender'
+import {
+  clipBlockEnd,
+  clipBlockIssues,
+  clipsForGame,
+  defaultSourceWindow,
+  isSupportedClipMedia,
+  resolveEffectiveClipBlocks,
+  sampleBackgroundClip,
+  sampleLayerClip,
+  unsupportedClipMediaMessage
+} from '@shared/storyboard/clipBlocks'
+import {
+  audioBlockEnd,
+  audioBlockIssues,
+  defaultLoopForAudioKind,
+  remainingShotTime
+} from '@shared/storyboard/audioBlocks'
+import { isSupportedAudioMedia, unsupportedAudioMediaMessage } from '@shared/storyboard/audioValidation'
+import {
+  applyAudioPlayback,
+  disposeAudioVoices,
+  evaluateAudioPlayback,
+  silenceAudioVoices,
+  type AudioVoice
+} from '@shared/storyboard/audioPlayback'
+import {
+  applyEventSfxPlayback,
+  cancelEventSfxVoices,
+  disposeEventSfxVoices,
+  markEventSfxEnded,
+  type EventSfxVoice
+} from '@shared/storyboard/eventSfxPlayback'
+import {
+  endPointerCaptureNow,
+  isDragPastThreshold,
+  releasePointerCaptureIfHeld,
+  type PointerSessionEvent
+} from '@shared/storyboard/pointerCapture'
+import { hitTestTimeline, TIMELINE_HEIGHT_PX } from '@shared/storyboard/timelinePointer'
+import { collectEventCueCrossings } from '@shared/storyboard/eventCuePlayback'
+import { eventCueIssues } from '@shared/storyboard/eventCues'
+import {
+  moveLayerInStack,
+  reorderLayerToIndex,
+  toggleLayerVisible
+} from '@shared/storyboard/layerStack'
+import type {
+  LibraryPickAction,
+  LibraryPickerPurpose,
+  LibraryPickerTab
+} from '@shared/storyboard/libraryCatalog'
+import {
+  backgroundSourceKey,
+  clampVideoSeekTime,
+  shouldApplyLoadedBackground,
+  shouldClearBackgroundForKeyChange,
+  shouldSkipVideoReload,
+  videoHasDecodableFrame
+} from '@shared/storyboard/mediaLoadGuard'
 
 type EditorMode = 'layout' | 'camera'
 type DragMode = 'move' | 'scale' | 'rotate' | 'framingRect' | 'cameraMarker' | 'effectMarker' | null
@@ -24,12 +138,368 @@ interface LoadedImage {
   height: number
 }
 
+type ClipVideoStatus = 'loading' | 'ready' | 'error' | 'unsupported' | 'missing'
+
+interface LoadedVideo {
+  element: HTMLVideoElement
+  url: string
+  clipId: string
+  file: string
+  status: ClipVideoStatus
+  message?: string
+  durationSec?: number
+  loadingStartedAt?: number
+}
+
+function seekVideoElement(video: HTMLVideoElement, requested: number): void {
+  let start = 0
+  let end: number | undefined
+  try {
+    if (video.seekable && video.seekable.length > 0) {
+      start = video.seekable.start(0)
+      end = video.seekable.end(video.seekable.length - 1)
+    }
+  } catch {
+    /* seekable can throw before metadata */
+  }
+  try {
+    video.currentTime = clampVideoSeekTime(requested, start, end)
+  } catch {
+    /* seek may throw before ready */
+  }
+}
+
 function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t
 }
 
 function easeInOutCubic(t: number): number {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
+}
+
+function CameraInspector({
+  keyframe,
+  layers,
+  onSave,
+  onClose,
+  onDelete
+}: {
+  keyframe: CameraKeyframe
+  layers: StoryboardLayer[]
+  onSave: (updated: CameraKeyframe) => void
+  onClose: () => void
+  onDelete: () => void
+}) {
+  const [zoom, setZoom] = useState(keyframe.zoom)
+  const [targetType, setTargetType] = useState<'layer' | 'point'>(
+    typeof keyframe.target === 'string' ? 'layer' : 'point'
+  )
+  const [targetLayer, setTargetLayer] = useState(
+    typeof keyframe.target === 'string' ? keyframe.target : ''
+  )
+  const [targetX, setTargetX] = useState(
+    typeof keyframe.target === 'object' ? keyframe.target.x : 0.5
+  )
+  const [targetY, setTargetY] = useState(
+    typeof keyframe.target === 'object' ? keyframe.target.y : 0.5
+  )
+
+  // Live preview - update immediately on change (Matt's fix)
+  const updateLive = (newZoom?: number, newType?: 'layer' | 'point', newLayer?: string, newX?: number, newY?: number) => {
+    const updated: CameraKeyframe = {
+      t: keyframe.t,
+      zoom: newZoom ?? zoom,
+      target: (newType ?? targetType) === 'layer' 
+        ? (newLayer ?? targetLayer) || { x: 0.5, y: 0.5 }
+        : { x: newX ?? targetX, y: newY ?? targetY },
+      framingRect: keyframe.framingRect
+    }
+    onSave(updated)
+  }
+
+  const handleZoomChange = (newZoom: number) => {
+    setZoom(newZoom)
+    updateLive(newZoom)
+  }
+
+  const handleTargetTypeChange = (newType: 'layer' | 'point') => {
+    setTargetType(newType)
+    updateLive(undefined, newType)
+  }
+
+  const handleTargetLayerChange = (newLayer: string) => {
+    setTargetLayer(newLayer)
+    updateLive(undefined, undefined, newLayer)
+  }
+
+  const handleTargetXChange = (newX: number) => {
+    setTargetX(newX)
+    updateLive(undefined, undefined, undefined, newX)
+  }
+
+  const handleTargetYChange = (newY: number) => {
+    setTargetY(newY)
+    updateLive(undefined, undefined, undefined, undefined, newY)
+  }
+
+  return (
+    <div style={{ marginTop: '0.5rem', padding: '0.75rem', background: 'var(--bg)', borderRadius: '4px', border: '2px solid #00AAFF' }}>
+      <div style={{ fontWeight: 'bold', marginBottom: '0.5rem', fontSize: '0.9rem' }}>
+        Edit Camera @ {keyframe.t.toFixed(1)}s
+      </div>
+      
+      <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.85rem' }}>
+        Zoom:
+        <input
+          type="number"
+          step="0.1"
+          min="0.5"
+          max="5"
+          value={zoom}
+          onChange={(e) => handleZoomChange(Number(e.target.value))}
+          style={{ width: '100%', marginTop: '0.25rem' }}
+        />
+      </label>
+      
+      <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.85rem' }}>
+        Target Type:
+        <select
+          value={targetType}
+          onChange={(e) => handleTargetTypeChange(e.target.value as 'layer' | 'point')}
+          style={{ width: '100%', marginTop: '0.25rem' }}
+        >
+          <option value="layer">Layer</option>
+          <option value="point">Point</option>
+        </select>
+      </label>
+      
+      {targetType === 'layer' ? (
+        <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.85rem' }}>
+          Target Layer:
+          <select
+            value={targetLayer}
+            onChange={(e) => handleTargetLayerChange(e.target.value)}
+            style={{ width: '100%', marginTop: '0.25rem' }}
+          >
+            <option value="">Center (no layer)</option>
+            {layers.map(layer => (
+              <option key={layer.id} value={layer.id}>
+                z{layer.zOrder} - {layer.visualAssetId ? 'Asset' : layer.text != null && layer.text !== '' ? 'Text' : layer.characterId ? 'Character' : layer.clipId ? 'Clip' : 'Image'}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : (
+        <>
+          <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.85rem' }}>
+            Target X:
+            <input
+              type="number"
+              step="0.05"
+              min="0"
+              max="1"
+              value={targetX}
+              onChange={(e) => handleTargetXChange(Number(e.target.value))}
+              style={{ width: '100%', marginTop: '0.25rem' }}
+            />
+          </label>
+          <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.85rem' }}>
+            Target Y:
+            <input
+              type="number"
+              step="0.05"
+              min="0"
+              max="1"
+              value={targetY}
+              onChange={(e) => handleTargetYChange(Number(e.target.value))}
+              style={{ width: '100%', marginTop: '0.25rem' }}
+            />
+          </label>
+        </>
+      )}
+      
+      {keyframe.framingRect && (
+        <div style={{ fontSize: '0.75rem', color: 'var(--muted)', marginBottom: '0.5rem' }}>
+          Framing: {keyframe.framingRect.width.toFixed(2)} × {keyframe.framingRect.height.toFixed(2)}
+        </div>
+      )}
+      
+      <div style={{ fontSize: '0.7rem', color: 'var(--muted)', marginTop: '0.5rem', fontStyle: 'italic' }}>
+        💡 Changes apply instantly as you edit
+      </div>
+      
+      <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem' }}>
+        <button type="button" onClick={onClose} style={{ flex: 1 }}>
+          Close
+        </button>
+        <button 
+          type="button" 
+          onClick={onDelete} 
+          style={{ flex: 1, background: 'var(--danger)', color: 'white' }}
+        >
+          🗑️ Delete
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function EffectInspector({
+  effect,
+  presets,
+  onSave,
+  onClose,
+  onDelete
+}: {
+  effect: EffectMarker
+  presets: ScenePreset[]
+  onSave: (params: Record<string, unknown>) => void
+  onClose: () => void
+  onDelete: () => void
+}) {
+  const preset = effect.presetId ? presets.find(p => p.id === effect.presetId) : null
+  if (!preset) {
+    return (
+      <div style={{ marginTop: '0.5rem', padding: '0.75rem', background: 'var(--bg)', borderRadius: '4px', border: '2px solid var(--forge-gold)' }}>
+        <p style={{ color: 'var(--error)' }}>Effect preset not found</p>
+        <button type="button" onClick={onClose} style={{ width: '100%', marginTop: '0.5rem' }}>Close</button>
+      </div>
+    )
+  }
+
+  const [params, setParams] = useState(preset.params)
+
+  // Live preview - update immediately on change (Matt's fix)
+  const updateParam = (key: string, value: unknown) => {
+    const newParams = { ...params, [key]: value }
+    setParams(newParams)
+    onSave(newParams)
+  }
+
+  return (
+    <div style={{ marginTop: '0.5rem', padding: '0.75rem', background: 'var(--bg)', borderRadius: '4px', border: '2px solid var(--forge-gold)' }}>
+      <div style={{ fontWeight: 'bold', marginBottom: '0.5rem', fontSize: '0.9rem' }}>
+        Edit Effect: {preset.type} @ {effect.t.toFixed(1)}s
+      </div>
+      
+      {preset.type === 'shake' && (
+        <>
+          <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.85rem' }}>
+            Intensity:
+            <input
+              type="number"
+              value={params.intensity as number || 10}
+              onChange={(e) => updateParam('intensity', Number(e.target.value))}
+              style={{ width: '100%', marginTop: '0.25rem' }}
+            />
+          </label>
+          <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.85rem' }}>
+            Duration (ms):
+            <input
+              type="number"
+              value={params.durationMs as number || 300}
+              onChange={(e) => updateParam('durationMs', Number(e.target.value))}
+              style={{ width: '100%', marginTop: '0.25rem' }}
+            />
+          </label>
+        </>
+      )}
+      
+      {preset.type === 'flash' && (
+        <>
+          <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.85rem' }}>
+            Color:
+            <input
+              type="text"
+              value={params.color as string || 'white'}
+              onChange={(e) => updateParam('color', e.target.value)}
+              style={{ width: '100%', marginTop: '0.25rem' }}
+            />
+          </label>
+          <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.85rem' }}>
+            Duration (ms):
+            <input
+              type="number"
+              value={params.durationMs as number || 200}
+              onChange={(e) => updateParam('durationMs', Number(e.target.value))}
+              style={{ width: '100%', marginTop: '0.25rem' }}
+            />
+          </label>
+        </>
+      )}
+      
+      {preset.type === 'freeze' && (
+        <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.85rem' }}>
+          Duration (ms):
+          <input
+            type="number"
+            value={params.durationMs as number || 500}
+            onChange={(e) => updateParam('durationMs', Number(e.target.value))}
+            style={{ width: '100%', marginTop: '0.25rem' }}
+          />
+        </label>
+      )}
+      
+      {preset.type === 'zoom_punch' && (
+        <>
+          <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.85rem' }}>
+            Scale:
+            <input
+              type="number"
+              step="0.05"
+              value={params.scale as number || 1.15}
+              onChange={(e) => updateParam('scale', Number(e.target.value))}
+              style={{ width: '100%', marginTop: '0.25rem' }}
+            />
+          </label>
+          <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.85rem' }}>
+            Duration (ms):
+            <input
+              type="number"
+              value={params.durationMs as number || 300}
+              onChange={(e) => updateParam('durationMs', Number(e.target.value))}
+              style={{ width: '100%', marginTop: '0.25rem' }}
+            />
+          </label>
+        </>
+      )}
+      
+      {preset.type === 'versus' && (
+        <>
+          <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.85rem' }}>
+            Zoom:
+            <input
+              type="number"
+              step="0.1"
+              value={params.zoom as number || 1.0}
+              onChange={(e) => updateParam('zoom', Number(e.target.value))}
+              style={{ width: '100%', marginTop: '0.25rem' }}
+            />
+          </label>
+          <p style={{ fontSize: '0.75rem', color: 'var(--muted)', margin: '0.5rem 0' }}>
+            Note: Character setup not editable in inspector
+          </p>
+        </>
+      )}
+      
+      <div style={{ fontSize: '0.7rem', color: 'var(--muted)', marginTop: '0.5rem', fontStyle: 'italic' }}>
+        💡 Changes apply instantly as you edit
+      </div>
+      
+      <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem' }}>
+        <button type="button" onClick={onClose} style={{ flex: 1 }}>
+          Close
+        </button>
+        <button 
+          type="button" 
+          onClick={onDelete} 
+          style={{ flex: 1, background: 'var(--danger)', color: 'white' }}
+        >
+          🗑️ Delete
+        </button>
+      </div>
+    </div>
+  )
 }
 
 export function StoryboardEditor() {
@@ -42,13 +512,111 @@ export function StoryboardEditor() {
   const [mode, setMode] = useState<EditorMode>('layout')
   const [playbackState, setPlaybackState] = useState<'stopped' | 'playing' | 'paused'>('stopped')
   const [playbackTime, setPlaybackTime] = useState(0)
+  const [loopPlayback, setLoopPlayback] = useState(false)
+  const [sidebarTab, setSidebarTab] = useState<'background' | 'camera'>('background')
   
   const [dragMode, setDragMode] = useState<DragMode>(null)
   const [dragStart, setDragStart] = useState<any>(null)
-  const [draggedMarker, setDraggedMarker] = useState<{ type: 'camera' | 'effect'; index: number } | null>(null)
+  const [draggedMarker, setDraggedMarker] = useState<{
+    type: 'camera' | 'effect' | 'timedKey' | 'clipBlock' | 'audioBlock' | 'eventCue' | 'backgroundKey' | 'layerRange'
+    index: number
+    layerId?: string
+    keyId?: string
+    blockId?: string
+    cueId?: string
+    clipDrag?: 'move' | 'trimIn' | 'trimOut'
+    grabOffsetSec?: number
+  } | null>(null)
   
   const [loadedImages, setLoadedImages] = useState<Map<string, LoadedImage>>(new Map())
+  const [backgroundStills, setBackgroundStills] = useState<Map<string, LoadedImage>>(new Map())
   const [showAddCharacter, setShowAddCharacter] = useState(false)
+  const [showAddAsset, setShowAddAsset] = useState(false)
+  const [showAddText, setShowAddText] = useState(false)
+  const [addAssetId, setAddAssetId] = useState('')
+  const [addAssetStateId, setAddAssetStateId] = useState('')
+  const [libraryPicker, setLibraryPicker] = useState<{
+    purpose: LibraryPickerPurpose
+    title: string
+    initialTab?: LibraryPickerTab
+    onAction?: (action: LibraryPickAction) => void
+  } | null>(null)
+  const backgroundLoadKeyRef = useRef('')
+  const backgroundShotIdRef = useRef<string | null>(null)
+  const [clipThumbs, setClipThumbs] = useState<Map<string, LoadedImage>>(new Map())
+  const [addTextContent, setAddTextContent] = useState('New text')
+  const [addTextFont, setAddTextFont] = useState(DEFAULT_FONT_REF)
+  const [addTextPalette, setAddTextPalette] = useState(DEFAULT_PALETTE_REF)
+  const [layerError, setLayerError] = useState<string | null>(null)
+  const [backgroundError, setBackgroundError] = useState<string | null>(null)
+  const [confirmDeleteLayer, setConfirmDeleteLayer] = useState(false)
+  const [selectedTimedKeyId, setSelectedTimedKeyId] = useState<string | null>(null)
+  const [confirmDeleteTimedKeyId, setConfirmDeleteTimedKeyId] = useState<string | null>(null)
+  const [timedKeyTimeDraft, setTimedKeyTimeDraft] = useState('')
+  const [selectedClipBlockId, setSelectedClipBlockId] = useState<string | null>(null)
+  const [showAddClip, setShowAddClip] = useState(false)
+  const [addClipId, setAddClipId] = useState('')
+  const [addClipRole, setAddClipRole] = useState<'layer' | 'background'>('layer')
+  const [addClipSourceIn, setAddClipSourceIn] = useState('0')
+  const [addClipSourceOut, setAddClipSourceOut] = useState('')
+  const [confirmDeleteClipBlockId, setConfirmDeleteClipBlockId] = useState<string | null>(null)
+  const [pendingExtend, setPendingExtend] = useState<{
+    message: string
+    run: () => Promise<void>
+  } | null>(null)
+  const [clipTimeDraft, setClipTimeDraft] = useState('')
+  const [clipInDraft, setClipInDraft] = useState('')
+  const [clipOutDraft, setClipOutDraft] = useState('')
+  const [selectedAudioBlockId, setSelectedAudioBlockId] = useState<string | null>(null)
+  const [showAddAudio, setShowAddAudio] = useState(false)
+  const [addAudioId, setAddAudioId] = useState('')
+  const [addAudioLoop, setAddAudioLoop] = useState(false)
+  const [addAudioSourceIn, setAddAudioSourceIn] = useState('0')
+  const [addAudioSourceOut, setAddAudioSourceOut] = useState('')
+  const [addAudioDuration, setAddAudioDuration] = useState('')
+  const [addAudioVolume, setAddAudioVolume] = useState('1')
+  const [addAudioFadeIn, setAddAudioFadeIn] = useState('0')
+  const [addAudioFadeOut, setAddAudioFadeOut] = useState('0')
+  const [confirmDeleteAudioBlockId, setConfirmDeleteAudioBlockId] = useState<string | null>(null)
+  const [audioTimeDraft, setAudioTimeDraft] = useState('')
+  const [audioInDraft, setAudioInDraft] = useState('')
+  const [audioOutDraft, setAudioOutDraft] = useState('')
+  const [audioDurationDraft, setAudioDurationDraft] = useState('')
+  const [audioVolumeDraft, setAudioVolumeDraft] = useState('1')
+  const [audioFadeInDraft, setAudioFadeInDraft] = useState('0')
+  const [audioFadeOutDraft, setAudioFadeOutDraft] = useState('0')
+  const [audioLoopDraft, setAudioLoopDraft] = useState(false)
+  const [audioError, setAudioError] = useState<string | null>(null)
+  const [selectedEventCueId, setSelectedEventCueId] = useState<string | null>(null)
+  const [showAddEventCue, setShowAddEventCue] = useState(false)
+  const [addEventCueEventId, setAddEventCueEventId] = useState('')
+  const [confirmDeleteEventCueId, setConfirmDeleteEventCueId] = useState<string | null>(null)
+  const [eventCueTimeDraft, setEventCueTimeDraft] = useState('')
+  const [eventCueError, setEventCueError] = useState<string | null>(null)
+  const [eventCueWarning, setEventCueWarning] = useState<string | null>(null)
+  const [selectedBackgroundKeyId, setSelectedBackgroundKeyId] = useState<string | null>(null)
+  const [confirmDeleteBackgroundKeyId, setConfirmDeleteBackgroundKeyId] = useState<string | null>(null)
+  const [backgroundKeyTimeDraft, setBackgroundKeyTimeDraft] = useState('')
+  const [backgroundKeyError, setBackgroundKeyError] = useState<string | null>(null)
+  const [backgroundKeyPickPending, setBackgroundKeyPickPending] = useState(false)
+  const [shotDurationDraft, setShotDurationDraft] = useState('')
+  const [shotDurationError, setShotDurationError] = useState<string | null>(null)
+  const audioVoicesRef = useRef<Map<string, AudioVoice>>(new Map())
+  const eventSfxVoicesRef = useRef<Map<string, EventSfxVoice>>(new Map())
+  const capturedPointerRef = useRef<{ target: Element; pointerId: number } | null>(null)
+  const lastPlaybackTimeRef = useRef(0)
+  const [audioEpoch, setAudioEpoch] = useState(0)
+  const [eventSfxEpoch, setEventSfxEpoch] = useState(0)
+  const [eventSfxError, setEventSfxError] = useState<string | null>(null)
+  const videosRef = useRef<Map<string, LoadedVideo>>(new Map())
+  const [videoEpoch, setVideoEpoch] = useState(0)
+  const [videoRetryTick, setVideoRetryTick] = useState(0)
+  const [previewSnapshot, setPreviewSnapshot] = useState<EventPreviewSnapshot>(EMPTY_PREVIEW_SNAPSHOT)
+  const previewEngineRef = useRef(new EventPreviewEngine())
+  const wasPlayingRef = useRef(false)
+  const previewTickRafRef = useRef<number | null>(null)
+  const [libraryAssets, setLibraryAssets] = useState<VisualAsset[]>([])
+  const [libraryStates, setLibraryStates] = useState<AssetState[]>([])
   const [showAddEffect, setShowAddEffect] = useState(false)
   const [editingNotes, setEditingNotes] = useState(false)
   const [notesText, setNotesText] = useState('')
@@ -56,9 +624,19 @@ export function StoryboardEditor() {
   const [newStoryboardName, setNewStoryboardName] = useState('')
   const [creatingShot, setCreatingShot] = useState(false)
   const [newShotName, setNewShotName] = useState('')
+  const [linkingScene, setLinkingScene] = useState<string | null>(null)
+  const [selectedEffectIndex, setSelectedEffectIndex] = useState<number | null>(null)
+  const [editingEffect, setEditingEffect] = useState(false)
+  const [selectedCameraIndex, setSelectedCameraIndex] = useState<number | null>(null)
+  const [editingCamera, setEditingCamera] = useState(false)
+  const [cameraManuallySelected, setCameraManuallySelected] = useState(false)
   
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const animationFrameRef = useRef<number | null>(null)
+  const selectedShotIdRef = useRef(selectedShotId)
+  const gameIdRef = useRef(gameId)
+  selectedShotIdRef.current = selectedShotId
+  gameIdRef.current = gameId
 
   const storyboards = activeProject?.assetPipeline?.storyboards?.filter(sb => sb.gameId === gameId) ?? []
   const selectedStoryboard = storyboards.find(sb => sb.id === selectedStoryboardId)
@@ -72,12 +650,95 @@ export function StoryboardEditor() {
   const poses = activeProject?.assetPipeline?.poses ?? []
   const clips = activeProject?.assetPipeline?.clips ?? []
   const presets = activeProject?.assetPipeline?.scenePresets ?? []
+  const scenes = activeProject?.assetPipeline?.scenes ?? []
+  const visualAssets = activeProject?.assetPipeline?.visualAssets?.filter(a => a.gameId === gameId) ?? []
+  const assetStates = activeProject?.assetPipeline?.assetStates ?? []
+  const fonts = (activeProject?.assetPipeline?.fonts ?? []).filter((f: Font) => f.gameId === gameId)
+  const palettes = (activeProject?.assetPipeline?.palettes ?? []).filter((p: Palette) => p.gameId === gameId)
+  const pipeline = activeProject?.assetPipeline as AssetPipelineProject | undefined
+  const gameClips = pipeline ? clipsForGame(pipeline, gameId) : clips
+  const audioAssets: AudioAsset[] =
+    pipeline?.audioAssets?.filter((a) => a.gameId === gameId) ?? []
+  const eventDefinitions: EventDefinition[] =
+    pipeline?.eventDefinitions?.filter((e) => e.gameId === gameId) ?? []
+  const eventBindings: EventBinding[] =
+    pipeline?.eventBindings?.filter((b) => b.shotId === selectedShotId) ?? []
+
+  const previewLayer = (layer: StoryboardLayer): StoryboardLayer =>
+    applyEffectiveLayer(layer, playbackTime, previewSnapshot.overrides[layer.id])
+
+  const layerMediaSignature = (selectedShot?.layers || [])
+    .map((raw) => {
+      const layer = applyEffectiveLayer(raw, playbackTime, previewSnapshot.overrides[raw.id])
+      return `${layer.id}:${layer.poseId ?? ''}:${layer.assetStateId ?? ''}:${layer.visible !== false}`
+    })
+    .join('|')
+
+  const timedKeyRows = selectedShot ? flattenShotTimedKeys(selectedShot) : []
+  const selectedTimedKeyRow = timedKeyRows.find((row) => row.key.id === selectedTimedKeyId)
+  const clipBlocks = selectedShot ? resolveEffectiveClipBlocks(selectedShot, clips) : []
+  const selectedClipBlock = clipBlocks.find((b) => b.id === selectedClipBlockId)
+  const audioBlocks = selectedShot?.audioTrack || []
+  const selectedAudioBlock = audioBlocks.find((b) => b.id === selectedAudioBlockId)
+  const eventCues = selectedShot?.eventCues || []
+  const selectedEventCue = eventCues.find((c) => c.id === selectedEventCueId)
+  const backgroundKeys = selectedShot?.backgroundKeys || []
+  const selectedBackgroundKey = backgroundKeys.find((k) => k.id === selectedBackgroundKeyId)
+  const backgroundStillPaths =
+    selectedShot && pipeline
+      ? collectShotBackgroundStillPaths(selectedShot, pipeline)
+      : selectedShot?.backgroundImage
+        ? [selectedShot.backgroundImage]
+        : []
+  const backgroundStillPathList = backgroundStillPaths.join('\n')
+  const sampledBackground =
+    selectedShot && pipeline
+      ? resolveShotBackgroundAtTime(selectedShot, pipeline, playbackTime)
+      : selectedShot?.backgroundImage
+        ? { path: selectedShot.backgroundImage }
+        : {}
+  const backgroundImage = sampledBackground.path
+    ? backgroundStills.get(sampledBackground.path) ?? null
+    : null
+
+  const timedKeyActionLabel = (key: LayerTimedKey): string => {
+    if (key.action.type === 'setPose') {
+      const poseId = key.action.poseId
+      const pose = poses.find((p) => p.id === poseId)
+      return pose ? `pose ${pose.slot}` : `missing pose ${poseId}`
+    }
+    const stateId = key.action.stateId
+    const state = assetStates.find((s) => s.id === stateId)
+    return state ? `state ${state.name}` : `missing state ${stateId}`
+  }
+
+  const commitPreview = () => {
+    setPreviewSnapshot(previewEngineRef.current.snapshot())
+  }
+
+  const resetEventPreview = () => {
+    previewEngineRef.current.reset()
+    cancelEventSfxVoices(eventSfxVoicesRef.current)
+    commitPreview()
+    setEventSfxEpoch((n) => n + 1)
+  }
+  
+  // Phase C: Find scene attached to this storyboard
+  const attachedScene = selectedStoryboard?.sceneId 
+    ? scenes.find(s => s.id === selectedStoryboard.sceneId)
+    : null
 
   useEffect(() => {
-    if (storyboards.length > 0 && !selectedStoryboardId) {
+    // Check for ?storyboardId= query param first
+    const urlParams = new URLSearchParams(window.location.search)
+    const queryStoryboardId = urlParams.get('storyboardId')
+    
+    if (queryStoryboardId && storyboards.find(sb => sb.id === queryStoryboardId)) {
+      setSelectedStoryboardId(queryStoryboardId)
+    } else if (storyboards.length > 0 && !selectedStoryboardId) {
       setSelectedStoryboardId(storyboards[0].id)
     }
-  }, [storyboards, selectedStoryboardId])
+  }, [storyboards.length])
 
   useEffect(() => {
     if (selectedShot && editingNotes) {
@@ -85,7 +746,704 @@ export function StoryboardEditor() {
     }
   }, [selectedShot, editingNotes])
 
-  // Load images
+  useEffect(() => {
+    setBackgroundError(sampledBackground.error || null)
+  }, [sampledBackground.error])
+
+  // Preload static + key stills. Keyed by shot id so a previous shot cannot stick;
+  // matching shot+path onloads are accepted. Path-list string (not pipeline object)
+  // is the dep so project identity churn cannot blank a matching load.
+  useEffect(() => {
+    let cancelled = false
+    const shotId = selectedShot?.id ?? null
+    const paths = backgroundStillPathList ? backgroundStillPathList.split('\n').filter(Boolean) : []
+    const previousShot = backgroundShotIdRef.current
+    const previousKey = backgroundLoadKeyRef.current
+    const shotToken = backgroundSourceKey(shotId, paths[0] || null)
+    backgroundShotIdRef.current = shotId
+    backgroundLoadKeyRef.current = shotToken
+
+    if (!shotId) {
+      if (shouldClearBackgroundForKeyChange(previousKey, shotToken)) {
+        setBackgroundStills(new Map())
+      }
+      return
+    }
+
+    if (previousShot !== shotId) {
+      setBackgroundStills(new Map())
+    } else {
+      setBackgroundStills((prev) => {
+        const next = new Map(prev)
+        for (const stored of next.keys()) {
+          if (!paths.includes(stored)) next.delete(stored)
+        }
+        return next
+      })
+    }
+
+    const loadOne = async (path: string) => {
+      const loadKey = backgroundSourceKey(shotId, path)
+      try {
+        const { localUrl } = await window.indieForge.files.getLocalUrl(path)
+        if (cancelled || backgroundShotIdRef.current !== shotId) return
+        if (!shouldApplyLoadedBackground(backgroundSourceKey(backgroundShotIdRef.current, path), loadKey)) {
+          return
+        }
+        const img = new Image()
+        img.onload = () => {
+          if (cancelled || backgroundShotIdRef.current !== shotId) return
+          if (!shouldApplyLoadedBackground(backgroundSourceKey(backgroundShotIdRef.current, path), loadKey)) {
+            return
+          }
+          setBackgroundStills((prev) => {
+            if (backgroundShotIdRef.current !== shotId) return prev
+            const next = new Map(prev)
+            next.set(path, { element: img, url: localUrl, width: img.width, height: img.height })
+            return next
+          })
+        }
+        img.onerror = () => {
+          if (cancelled || backgroundShotIdRef.current !== shotId) return
+          console.error('Failed to load background image:', path)
+          setBackgroundError('Failed to load background image')
+        }
+        img.src = localUrl
+      } catch (err) {
+        if (cancelled || backgroundShotIdRef.current !== shotId) return
+        console.error('Error loading background image:', err)
+        setBackgroundError(err instanceof Error ? err.message : 'Failed to load background image')
+      }
+    }
+    for (const path of paths) void loadOne(path)
+    return () => {
+      cancelled = true
+    }
+  }, [selectedShot?.id, backgroundStillPathList])
+
+  // Keep preview engine catalog in sync; never persist preview holds
+  useEffect(() => {
+    const engine = previewEngineRef.current
+    engine.setCatalog(pipeline?.eventDefinitions || [], pipeline?.eventBindings || [])
+  }, [pipeline?.eventDefinitions, pipeline?.eventBindings])
+
+  useEffect(() => {
+    const engine = previewEngineRef.current
+    engine.setShot(selectedShotId ?? null)
+    commitPreview()
+    setPlaybackTime(0)
+    setSelectedTimedKeyId(null)
+    setConfirmDeleteTimedKeyId(null)
+    setSelectedClipBlockId(null)
+    setConfirmDeleteClipBlockId(null)
+    setShowAddClip(false)
+    setPendingExtend(null)
+    setSelectedEventCueId(null)
+    setConfirmDeleteEventCueId(null)
+    setShowAddEventCue(false)
+    setEventCueError(null)
+    setEventCueWarning(null)
+    setSelectedBackgroundKeyId(null)
+    setConfirmDeleteBackgroundKeyId(null)
+    setBackgroundKeyError(null)
+    setBackgroundKeyPickPending(false)
+  }, [selectedShotId])
+
+  useEffect(() => {
+    if (selectedTimedKeyRow) setTimedKeyTimeDraft(selectedTimedKeyRow.key.t.toFixed(2))
+  }, [selectedTimedKeyId, selectedTimedKeyRow?.key.t])
+
+  useEffect(() => {
+    if (!selectedClipBlock) return
+    setClipTimeDraft(selectedClipBlock.t.toFixed(2))
+    setClipInDraft(selectedClipBlock.sourceInSec.toFixed(2))
+    setClipOutDraft(selectedClipBlock.sourceOutSec.toFixed(2))
+  }, [
+    selectedClipBlockId,
+    selectedClipBlock?.t,
+    selectedClipBlock?.sourceInSec,
+    selectedClipBlock?.sourceOutSec
+  ])
+
+  useEffect(() => {
+    if (!selectedAudioBlock) return
+    setAudioTimeDraft(selectedAudioBlock.t.toFixed(2))
+    setAudioInDraft(selectedAudioBlock.sourceInSec.toFixed(2))
+    setAudioOutDraft(selectedAudioBlock.sourceOutSec.toFixed(2))
+    setAudioDurationDraft(selectedAudioBlock.durationSec.toFixed(2))
+    setAudioVolumeDraft(String(selectedAudioBlock.volume))
+    setAudioFadeInDraft(String(selectedAudioBlock.fadeInSec))
+    setAudioFadeOutDraft(String(selectedAudioBlock.fadeOutSec))
+    setAudioLoopDraft(!!selectedAudioBlock.loop)
+  }, [
+    selectedAudioBlockId,
+    selectedAudioBlock?.t,
+    selectedAudioBlock?.sourceInSec,
+    selectedAudioBlock?.sourceOutSec,
+    selectedAudioBlock?.durationSec,
+    selectedAudioBlock?.volume,
+    selectedAudioBlock?.fadeInSec,
+    selectedAudioBlock?.fadeOutSec,
+    selectedAudioBlock?.loop
+  ])
+
+  useEffect(() => {
+    if (!selectedEventCue) return
+    setEventCueTimeDraft(selectedEventCue.t.toFixed(2))
+    setEventCueWarning(
+      pipeline && selectedShot
+        ? eventCueIssues(selectedEventCue, pipeline, selectedShot.id)
+        : null
+    )
+  }, [selectedEventCueId, selectedEventCue?.t, selectedEventCue?.eventId, pipeline, selectedShot?.id])
+
+  useEffect(() => {
+    if (!selectedBackgroundKey) return
+    setBackgroundKeyTimeDraft(selectedBackgroundKey.t.toFixed(2))
+  }, [
+    selectedBackgroundKeyId,
+    selectedBackgroundKey?.t,
+    selectedBackgroundKey?.backgroundVisualAssetId,
+    selectedBackgroundKey?.backgroundAssetStateId,
+    selectedBackgroundKey?.backgroundImage
+  ])
+
+  useEffect(() => {
+    if (!selectedShot) return
+    setShotDurationDraft(String(selectedShot.durationSec))
+    setShotDurationError(null)
+  }, [selectedShotId, selectedShot?.durationSec])
+
+  // Load clip videos via forge-file:// (never base64, never local-file://)
+  useEffect(() => {
+    if (!selectedShot) return
+    let cancelled = false
+    const needed = new Set(clipBlocks.map((b) => b.clipId))
+    const now = Date.now()
+    for (const [clipId, entry] of [...videosRef.current.entries()]) {
+      if (!needed.has(clipId)) {
+        entry.element.removeAttribute('src')
+        entry.element.load()
+        videosRef.current.delete(clipId)
+      }
+    }
+    const loadVideos = async () => {
+      for (const clipId of needed) {
+        if (cancelled) return
+        const clip = clips.find((c) => c.id === clipId)
+        const file = clip?.file || ''
+        const existing = videosRef.current.get(clipId)
+        if (shouldSkipVideoReload(existing, { clipId, file }, now)) continue
+        if (existing) {
+          existing.element.removeAttribute('src')
+          existing.element.load()
+          videosRef.current.delete(clipId)
+        }
+        if (!clip) {
+          videosRef.current.set(clipId, {
+            element: document.createElement('video'),
+            url: '',
+            clipId,
+            file: '',
+            status: 'missing',
+            message: `Clip not found: ${clipId}`
+          })
+          continue
+        }
+        if (!clip.file) {
+          videosRef.current.set(clipId, {
+            element: document.createElement('video'),
+            url: '',
+            clipId,
+            file: '',
+            status: 'missing',
+            message: `Clip '${clip.moment}' has no media file`
+          })
+          continue
+        }
+        if (!isSupportedClipMedia(clip.file)) {
+          videosRef.current.set(clipId, {
+            element: document.createElement('video'),
+            url: '',
+            clipId,
+            file: clip.file,
+            status: 'unsupported',
+            message: unsupportedClipMediaMessage(clip.file)
+          })
+          continue
+        }
+        try {
+          const { localUrl } = await window.indieForge.files.getLocalUrl(clip.file)
+          if (cancelled) return
+          if (!localUrl || localUrl.startsWith('local-file:')) {
+            videosRef.current.set(clipId, {
+              element: document.createElement('video'),
+              url: localUrl || '',
+              clipId,
+              file: clip.file,
+              status: 'error',
+              message: 'Clip URL is not forge-file://; local-file:// is not supported'
+            })
+            continue
+          }
+          const video = document.createElement('video')
+          video.muted = true
+          video.preload = 'auto'
+          video.playsInline = true
+          const entry: LoadedVideo = {
+            element: video,
+            url: localUrl,
+            clipId,
+            file: clip.file,
+            status: 'loading',
+            loadingStartedAt: Date.now()
+          }
+          video.addEventListener('loadedmetadata', () => {
+            if (videosRef.current.get(clipId) !== entry) return
+            entry.status = 'ready'
+            entry.durationSec = Number.isFinite(video.duration) ? video.duration : clip.durationSec
+            if (!videoHasDecodableFrame(video.readyState, video.videoWidth)) {
+              const start = video.seekable?.length ? video.seekable.start(0) : 0
+              seekVideoElement(video, Math.max(start, 1 / 30))
+            }
+            setVideoEpoch((n) => n + 1)
+          })
+          video.addEventListener('seeked', () => {
+            if (videosRef.current.get(clipId) !== entry) return
+            setVideoEpoch((n) => n + 1)
+          })
+          video.addEventListener('error', () => {
+            if (videosRef.current.get(clipId) !== entry) return
+            entry.status = 'error'
+            entry.message = 'Video failed to load (missing file, codec, or host decode)'
+            setVideoEpoch((n) => n + 1)
+          })
+          videosRef.current.set(clipId, entry)
+          video.src = localUrl
+        } catch (err) {
+          videosRef.current.set(clipId, {
+            element: document.createElement('video'),
+            url: '',
+            clipId,
+            file: clip.file,
+            status: 'error',
+            message: err instanceof Error ? err.message : 'Failed to resolve clip URL'
+          })
+        }
+      }
+      if (!cancelled) setVideoEpoch((n) => n + 1)
+    }
+    void loadVideos()
+    const retryTimer = window.setTimeout(() => {
+      const hasLoading = [...videosRef.current.values()].some((e) => e.status === 'loading')
+      if (hasLoading) setVideoRetryTick((n) => n + 1)
+    }, 8000)
+    return () => {
+      cancelled = true
+      window.clearTimeout(retryTimer)
+    }
+  }, [selectedShot?.id, selectedShot?.clipTrack, selectedShot?.backgroundClipId, selectedShot?.layers, clips, videoRetryTick])
+
+  const clipThumbSignature = clipBlocks
+    .map((b) => {
+      const clip = clips.find((c) => c.id === b.clipId)
+      return `${b.clipId}:${clip?.thumbnail || ''}`
+    })
+    .sort()
+    .join('|')
+
+  useEffect(() => {
+    if (!selectedShot) {
+      setClipThumbs(new Map())
+      return
+    }
+    let cancelled = false
+    const loadThumbs = async () => {
+      const next = new Map<string, LoadedImage>()
+      const seen = new Set<string>()
+      for (const block of clipBlocks) {
+        if (seen.has(block.clipId)) continue
+        seen.add(block.clipId)
+        const clip = clips.find((c) => c.id === block.clipId)
+        if (!clip?.thumbnail) continue
+        try {
+          const { localUrl } = await window.indieForge.files.getLocalUrl(clip.thumbnail)
+          if (cancelled) return
+          const loaded = await new Promise<LoadedImage | null>((resolve) => {
+            const img = new Image()
+            img.onload = () => resolve({ element: img, url: localUrl, width: img.width, height: img.height })
+            img.onerror = () => resolve(null)
+            img.src = localUrl
+          })
+          if (loaded) next.set(block.clipId, loaded)
+        } catch {
+          /* no poster */
+        }
+      }
+      if (!cancelled) setClipThumbs(next)
+    }
+    void loadThumbs()
+    return () => {
+      cancelled = true
+    }
+  }, [selectedShot?.id, clipThumbSignature, clips])
+
+  // Drive video.currentTime from the playhead (paused); supports reverse scrub.
+  useEffect(() => {
+    if (!selectedShot) return
+      const bg = sampleBackgroundClip(selectedShot, clips, playbackTime)
+      for (const layer of selectedShot.layers) {
+      const sample = sampleLayerClip(selectedShot, clips, layer.id, playbackTime)
+      if (sample) {
+        const entry = videosRef.current.get(sample.clipId)
+        if (entry?.status === 'ready') {
+          const v = entry.element
+          if (Math.abs(v.currentTime - sample.sourceTimeSec) > 0.03) {
+            seekVideoElement(v, sample.sourceTimeSec)
+          }
+        }
+      }
+    }
+    if (bg) {
+      const entry = videosRef.current.get(bg.clipId)
+      if (entry?.status === 'ready') {
+        const v = entry.element
+        if (Math.abs(v.currentTime - bg.sourceTimeSec) > 0.03) {
+          seekVideoElement(v, bg.sourceTimeSec)
+        }
+      }
+    }
+  }, [playbackTime, selectedShot, clips, videoEpoch])
+
+  // A2: HTMLAudioElement.play()/pause() synced to master transport (not paused seeks).
+  useEffect(() => {
+    if (!selectedShot) {
+      silenceAudioVoices(audioVoicesRef.current)
+      return
+    }
+    const needed = new Set(audioBlocks.map((b) => b.id))
+    for (const [id, voice] of audioVoicesRef.current) {
+      if (!needed.has(id)) {
+        voice.playGeneration += 1
+        voice.element.volume = 0
+        if (!voice.element.paused) voice.element.pause()
+        try {
+          voice.element.src = ''
+        } catch {
+          /* ignore */
+        }
+        audioVoicesRef.current.delete(id)
+      }
+    }
+    let cancelled = false
+    const load = async () => {
+      for (const block of audioBlocks) {
+        if (cancelled) return
+        const existing = audioVoicesRef.current.get(block.id)
+        if (existing && (existing.status === 'ready' || existing.status === 'loading') && existing.audioId === block.audioId) {
+          continue
+        }
+        const asset = (pipeline?.audioAssets || []).find((a) => a.id === block.audioId)
+        if (!asset) {
+          audioVoicesRef.current.set(block.id, {
+            blockId: block.id,
+            audioId: block.audioId,
+            element: document.createElement('audio'),
+            url: '',
+            status: 'missing',
+            message: `Audio not found: ${block.audioId}`,
+            playGeneration: 0
+          })
+          continue
+        }
+        if (!asset.file) {
+          audioVoicesRef.current.set(block.id, {
+            blockId: block.id,
+            audioId: block.audioId,
+            element: document.createElement('audio'),
+            url: '',
+            status: 'missing',
+            message: `Audio '${asset.name}' has no media file`,
+            playGeneration: 0
+          })
+          continue
+        }
+        if (!isSupportedAudioMedia(asset.file)) {
+          audioVoicesRef.current.set(block.id, {
+            blockId: block.id,
+            audioId: block.audioId,
+            element: document.createElement('audio'),
+            url: '',
+            status: 'unsupported',
+            message: unsupportedAudioMediaMessage(asset.file),
+            playGeneration: 0
+          })
+          continue
+        }
+        try {
+          const { localUrl } = await window.indieForge.files.getLocalUrl(asset.file)
+          if (cancelled) return
+          if (!localUrl || localUrl.startsWith('local-file:')) {
+            audioVoicesRef.current.set(block.id, {
+              blockId: block.id,
+              audioId: block.audioId,
+              element: document.createElement('audio'),
+              url: localUrl || '',
+              status: 'error',
+              message: 'Audio URL is not forge-file://; local-file:// is not supported',
+              playGeneration: 0
+            })
+            continue
+          }
+          const el = document.createElement('audio')
+          el.preload = 'auto'
+          const entry: AudioVoice = {
+            blockId: block.id,
+            audioId: block.audioId,
+            element: el,
+            url: localUrl,
+            status: 'loading',
+            playGeneration: 0
+          }
+          el.addEventListener('loadedmetadata', () => {
+            entry.status = 'ready'
+            setAudioEpoch((n) => n + 1)
+          })
+          el.addEventListener('error', () => {
+            entry.status = 'error'
+            entry.message = 'Audio failed to load (missing file, codec, or host decode)'
+            setAudioEpoch((n) => n + 1)
+          })
+          audioVoicesRef.current.set(block.id, entry)
+          el.src = localUrl
+        } catch (err) {
+          audioVoicesRef.current.set(block.id, {
+            blockId: block.id,
+            audioId: block.audioId,
+            element: document.createElement('audio'),
+            url: '',
+            status: 'error',
+            message: err instanceof Error ? err.message : 'Failed to resolve audio URL',
+            playGeneration: 0
+          })
+        }
+      }
+      if (!cancelled) setAudioEpoch((n) => n + 1)
+    }
+    void load()
+    return () => {
+      cancelled = true
+    }
+  }, [selectedShot?.id, selectedShot?.audioTrack, pipeline?.audioAssets])
+
+  useEffect(() => {
+    if (!selectedShot) return
+    const commands = evaluateAudioPlayback(selectedShot, playbackTime, {
+      transport: playbackState,
+      previousTimeSec: lastPlaybackTimeRef.current,
+      scrubbing: dragMode === ('playhead' as any)
+    })
+    applyAudioPlayback(commands, audioVoicesRef.current, {
+      onPlayRejected: (_blockId, err) => {
+        setAudioError(err instanceof Error ? err.message : 'Audio play() was rejected')
+        setAudioEpoch((n) => n + 1)
+      }
+    })
+    const crossed = collectEventCueCrossings(
+      selectedShot.eventCues || [],
+      lastPlaybackTimeRef.current,
+      playbackTime,
+      {
+        transport: playbackState,
+        scrubbing: dragMode === ('playhead' as any),
+        shotDurationSec: selectedShot.durationSec
+      }
+    )
+    if (crossed.length > 0) {
+      setEventSfxError(null)
+      for (const cue of crossed) {
+        previewEngineRef.current.fire(cue.eventId, performance.now())
+      }
+      commitPreview()
+    }
+    lastPlaybackTimeRef.current = playbackTime
+  }, [playbackTime, playbackState, selectedShot, audioEpoch, dragMode])
+
+  const playSfxBindings = eventBindings.filter((b) => b.action.type === 'playSfx')
+
+  useEffect(() => {
+    const needed = new Set(playSfxBindings.map((b) => b.id))
+    for (const [id, voice] of eventSfxVoicesRef.current) {
+      if (!needed.has(id)) {
+        voice.playGeneration += 1
+        if (!voice.element.paused) voice.element.pause()
+        try {
+          voice.element.src = ''
+        } catch {
+          /* ignore */
+        }
+        eventSfxVoicesRef.current.delete(id)
+      }
+    }
+    let cancelled = false
+    const load = async () => {
+      for (const binding of playSfxBindings) {
+        if (cancelled) return
+        if (binding.action.type !== 'playSfx') continue
+        const existing = eventSfxVoicesRef.current.get(binding.id)
+        if (
+          existing &&
+          (existing.status === 'ready' || existing.status === 'loading') &&
+          existing.audioId === binding.action.audioId
+        ) {
+          continue
+        }
+        if (existing) {
+          existing.playGeneration += 1
+          if (!existing.element.paused) existing.element.pause()
+          try {
+            existing.element.src = ''
+          } catch {
+            /* ignore */
+          }
+        }
+        const asset = (pipeline?.audioAssets || []).find((a) => a.id === binding.action.audioId)
+        const makeStub = (status: EventSfxVoice['status'], message: string): EventSfxVoice => ({
+          bindingId: binding.id,
+          audioId: binding.action.type === 'playSfx' ? binding.action.audioId : '',
+          element: document.createElement('audio'),
+          url: '',
+          status,
+          message,
+          playGeneration: 0,
+          appliedGeneration: 0,
+          completedGeneration: -1
+        })
+        if (!asset) {
+          eventSfxVoicesRef.current.set(binding.id, makeStub('missing', `Audio not found: ${binding.action.audioId}`))
+          continue
+        }
+        if (!asset.file) {
+          eventSfxVoicesRef.current.set(binding.id, makeStub('missing', `Audio '${asset.name}' has no media file`))
+          continue
+        }
+        if (!isSupportedAudioMedia(asset.file)) {
+          eventSfxVoicesRef.current.set(
+            binding.id,
+            makeStub('unsupported', unsupportedAudioMediaMessage(asset.file))
+          )
+          continue
+        }
+        try {
+          const { localUrl } = await window.indieForge.files.getLocalUrl(asset.file)
+          if (cancelled) return
+          if (!localUrl || localUrl.startsWith('local-file:')) {
+            eventSfxVoicesRef.current.set(
+              binding.id,
+              makeStub('error', 'Audio URL is not forge-file://; local-file:// is not supported')
+            )
+            continue
+          }
+          const el = document.createElement('audio')
+          el.preload = 'auto'
+          el.loop = false
+          const entry: EventSfxVoice = {
+            bindingId: binding.id,
+            audioId: binding.action.audioId,
+            element: el,
+            url: localUrl,
+            status: 'loading',
+            playGeneration: 0,
+            appliedGeneration: 0,
+            completedGeneration: -1
+          }
+          el.addEventListener('loadedmetadata', () => {
+            entry.status = 'ready'
+            setEventSfxEpoch((n) => n + 1)
+          })
+          el.addEventListener('error', () => {
+            entry.status = 'error'
+            entry.message = 'Audio failed to load (missing file, codec, or host decode)'
+            setEventSfxEpoch((n) => n + 1)
+          })
+          el.addEventListener('ended', () => {
+            markEventSfxEnded(entry)
+            setEventSfxEpoch((n) => n + 1)
+          })
+          eventSfxVoicesRef.current.set(binding.id, entry)
+          el.src = localUrl
+        } catch (err) {
+          eventSfxVoicesRef.current.set(
+            binding.id,
+            makeStub('error', err instanceof Error ? err.message : 'Failed to resolve audio URL')
+          )
+        }
+      }
+      if (!cancelled) setEventSfxEpoch((n) => n + 1)
+    }
+    void load()
+    return () => {
+      cancelled = true
+    }
+  }, [selectedShotId, pipeline?.audioAssets, pipeline?.eventBindings])
+
+  useEffect(() => {
+    applyEventSfxPlayback(previewSnapshot, eventSfxVoicesRef.current, {
+      onPlayRejected: (_id, err) => {
+        setEventSfxError(err instanceof Error ? err.message : 'Event SFX play() was rejected')
+        setEventSfxEpoch((n) => n + 1)
+      }
+    })
+  }, [previewSnapshot.generation, previewSnapshot.sfx, eventSfxEpoch])
+
+  useEffect(() => {
+    silenceAudioVoices(audioVoicesRef.current)
+    cancelEventSfxVoices(eventSfxVoicesRef.current)
+    lastPlaybackTimeRef.current = 0
+    setEventSfxEpoch((n) => n + 1)
+  }, [selectedShotId])
+
+  useEffect(() => {
+    return () => {
+      disposeAudioVoices(audioVoicesRef.current)
+      disposeEventSfxVoices(eventSfxVoicesRef.current)
+      const held = capturedPointerRef.current
+      capturedPointerRef.current = null
+      if (held) releasePointerCaptureIfHeld(held.target, held.pointerId)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (playbackState === 'stopped' && wasPlayingRef.current) {
+      resetEventPreview()
+    }
+    wasPlayingRef.current = playbackState === 'playing'
+  }, [playbackState])
+
+  useEffect(() => {
+    const engine = previewEngineRef.current
+    if (!engine.hasPendingTimers()) return
+    const tick = (now: number) => {
+      if (engine.tick(now)) {
+        commitPreview()
+      }
+      if (engine.hasPendingTimers()) {
+        previewTickRafRef.current = requestAnimationFrame(tick)
+      } else {
+        previewTickRafRef.current = null
+      }
+    }
+    previewTickRafRef.current = requestAnimationFrame(tick)
+    return () => {
+      if (previewTickRafRef.current !== null) {
+        cancelAnimationFrame(previewTickRafRef.current)
+        previewTickRafRef.current = null
+      }
+    }
+  }, [previewSnapshot.generation, previewSnapshot.holds.length, previewSnapshot.sfx.length])
+
+  // Load images from effective pose/state (event hold → timed sample → authored).
+  // Depend on media signature, not raw playbackTime, so scrubbing a hold does not reload every frame.
   useEffect(() => {
     if (!selectedShot) return
 
@@ -105,20 +1463,24 @@ export function StoryboardEditor() {
 
     const loadAllImages = async () => {
       const newImages = new Map<string, LoadedImage>()
+      const pipe = activeProject?.assetPipeline
       
-      for (const layer of selectedShot.layers) {
-        if (layer.poseId) {
-          const pose = poses.find(p => p.id === layer.poseId)
-          if (pose?.file) {
-            const loaded = await loadImage(pose.file)
-            if (loaded) newImages.set(layer.id, loaded)
-          }
+      for (const raw of selectedShot.layers) {
+        const layer = previewLayer(raw)
+        if (layer.visible === false) continue
+        if (!isLayerPresentAtTime(layer, playbackTime, selectedShot.durationSec)) continue
+        let path: string | undefined
+        if (pipe && (layer.visualAssetId || layer.poseId || layer.clipId || layer.imagePath)) {
+          const resolved = resolveLayerImagePath(layer, pipe)
+          path = resolved.path
+        } else if (layer.poseId) {
+          path = poses.find(p => p.id === layer.poseId)?.file
         } else if (layer.clipId) {
-          const clip = clips.find(c => c.id === layer.clipId)
-          if (clip?.thumbnail) {
-            const loaded = await loadImage(clip.thumbnail)
-            if (loaded) newImages.set(layer.id, loaded)
-          }
+          path = clips.find(c => c.id === layer.clipId)?.thumbnail
+        }
+        if (path) {
+          const loaded = await loadImage(path)
+          if (loaded) newImages.set(layer.id, loaded)
         }
       }
       
@@ -126,7 +1488,7 @@ export function StoryboardEditor() {
     }
 
     loadAllImages()
-  }, [selectedShot, poses, clips])
+  }, [selectedShot, poses, clips, activeProject?.assetPipeline, previewSnapshot, layerMediaSignature])
 
   // Get interpolated camera state
   const getInterpolatedCamera = useCallback((time: number): { target: {x: number, y: number}, zoom: number, framingRect?: any } | null => {
@@ -169,8 +1531,30 @@ export function StoryboardEditor() {
       framingRect: before.framingRect || after.framingRect
     }
   }, [selectedShot])
+  
+  // Get active effects at current time (Matt's fix - evaluate effects)
+  const getActiveEffects = useCallback((time: number) => {
+    if (!selectedShot) return []
+    
+    return selectedShot.effectsTrack.filter(ef => {
+      const preset = ef.presetId ? presets.find(p => p.id === ef.presetId) : null
+      const params = preset?.params || ef.inlineParams || {}
+      const durationMs = (params.durationMs as number) || 300
+      const durationSec = durationMs / 1000
+      
+      return time >= ef.t && time <= ef.t + durationSec
+    }).map(ef => {
+      const preset = ef.presetId ? presets.find(p => p.id === ef.presetId) : null
+      const type = preset?.type || ef.inlineType
+      const params = preset?.params || ef.inlineParams || {}
+      const durationMs = (params.durationMs as number) || 300
+      const progress = Math.min(1, (time - ef.t) / (durationMs / 1000))
+      
+      return { type, params, progress, t: ef.t }
+    })
+  }, [selectedShot, presets])
 
-  // Render canvas
+  // Render canvas - runs whenever playbackTime, layers, camera, or effects change
   useEffect(() => {
     if (!canvasRef.current || !selectedShot) return
 
@@ -178,8 +1562,139 @@ export function StoryboardEditor() {
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
+    // Clear canvas completely
+    ctx.save()
+    ctx.setTransform(1, 0, 0, 1, 0, 0)
     ctx.fillStyle = '#1a1a1a'
     ctx.fillRect(0, 0, canvas.width, canvas.height)
+    ctx.restore()
+
+    // Apply shake effect BEFORE drawing (affects entire canvas)
+    ctx.save()
+    const activeEffects = getActiveEffects(playbackTime)
+    const shakeEffect = activeEffects.find(e => e.type === 'shake')
+    if (shakeEffect) {
+      const intensity = (shakeEffect.params.intensity as number) || 10
+      // Use progress for fade-out: shake strongest at start, fades as progress → 1
+      const shakeAmount = intensity * (1 - shakeEffect.progress)
+      const shakeX = (Math.random() - 0.5) * shakeAmount
+      const shakeY = (Math.random() - 0.5) * shakeAmount
+      ctx.translate(shakeX, shakeY)
+    }
+
+    const drawCoverMedia = (
+      media: CanvasImageSource,
+      mediaW: number,
+      mediaH: number
+    ) => {
+      if (!mediaW || !mediaH) return
+      const mediaAspect = mediaW / mediaH
+      const canvasAspect = canvas.width / canvas.height
+      let drawWidth, drawHeight, drawX, drawY
+      if (mediaAspect > canvasAspect) {
+        drawHeight = canvas.height
+        drawWidth = drawHeight * mediaAspect
+        drawX = (canvas.width - drawWidth) / 2
+        drawY = 0
+      } else {
+        drawWidth = canvas.width
+        drawHeight = drawWidth / mediaAspect
+        drawX = 0
+        drawY = (canvas.height - drawHeight) / 2
+      }
+      ctx.drawImage(media, drawX, drawY, drawWidth, drawHeight)
+      return { drawX, drawY, drawWidth, drawHeight }
+    }
+
+    // Draw background image if present (before camera transform)
+    if (backgroundImage) {
+      const bgAspect = backgroundImage.width / backgroundImage.height
+      const canvasAspect = canvas.width / canvas.height
+      
+      let drawWidth, drawHeight, drawX, drawY
+      
+      if (bgAspect > canvasAspect) {
+        // Background is wider - fit height
+        drawHeight = canvas.height
+        drawWidth = drawHeight * bgAspect
+        drawX = (canvas.width - drawWidth) / 2
+        drawY = 0
+      } else {
+        // Background is taller - fit width
+        drawWidth = canvas.width
+        drawHeight = drawWidth / bgAspect
+        drawX = 0
+        drawY = (canvas.height - drawHeight) / 2
+      }
+      
+      ctx.drawImage(backgroundImage.element, drawX, drawY, drawWidth, drawHeight)
+
+      // Apply stage treatment effects to background only (Phase C.1)
+      if (selectedShot.stageTreatment) {
+        const { bgDim, vignette } = selectedShot.stageTreatment
+        
+        // bgDim: darken background with black overlay
+        if (bgDim && bgDim > 0) {
+          ctx.fillStyle = `rgba(0, 0, 0, ${bgDim})`
+          ctx.fillRect(drawX, drawY, drawWidth, drawHeight)
+        }
+        
+        // Vignette: radial gradient darkening toward edges
+        if (vignette && vignette > 0) {
+          const centerX = canvas.width / 2
+          const centerY = canvas.height / 2
+          const radius = Math.max(canvas.width, canvas.height) * 0.7
+          
+          const gradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, radius)
+          gradient.addColorStop(0, 'rgba(0, 0, 0, 0)')
+          gradient.addColorStop(1, `rgba(0, 0, 0, ${vignette})`)
+          
+          ctx.fillStyle = gradient
+          ctx.fillRect(0, 0, canvas.width, canvas.height)
+        }
+      }
+    }
+
+    // Background clip overlay: only while the block is active (half-open). Not freeze-last-frame.
+    const bgClipSample = sampleBackgroundClip(selectedShot, clips, playbackTime)
+    if (bgClipSample) {
+      const entry = videosRef.current.get(bgClipSample.clipId)
+      const thumb = clipThumbs.get(bgClipSample.clipId)
+      const hasFrame =
+        !!entry && videoHasDecodableFrame(entry.element.readyState, entry.element.videoWidth)
+      if (entry?.status === 'ready' && hasFrame) {
+        drawCoverMedia(entry.element, entry.element.videoWidth, entry.element.videoHeight)
+      } else if (thumb) {
+        drawCoverMedia(thumb.element, thumb.width, thumb.height)
+        if (entry?.status === 'loading') {
+          ctx.fillStyle = 'rgba(0, 40, 70, 0.35)'
+          ctx.fillRect(0, 0, canvas.width, canvas.height)
+          ctx.fillStyle = '#9ad'
+          ctx.font = '14px sans-serif'
+          ctx.textAlign = 'center'
+          ctx.fillText('Loading background clip…', canvas.width / 2, canvas.height - 24)
+        } else if (entry && entry.status !== 'ready') {
+          ctx.fillStyle = '#ffb4b4'
+          ctx.font = '12px sans-serif'
+          ctx.textAlign = 'center'
+          ctx.fillText(entry.message || 'Clip unavailable', canvas.width / 2, canvas.height - 24)
+        }
+      } else if (entry?.status === 'loading') {
+        ctx.fillStyle = 'rgba(0, 40, 70, 0.45)'
+        ctx.fillRect(0, 0, canvas.width, canvas.height)
+        ctx.fillStyle = '#9ad'
+        ctx.font = '16px sans-serif'
+        ctx.textAlign = 'center'
+        ctx.fillText('Loading background clip…', canvas.width / 2, canvas.height / 2)
+      } else {
+        ctx.fillStyle = '#2a2a2a'
+        ctx.fillRect(0, 0, canvas.width, canvas.height)
+        ctx.fillStyle = '#c8c8c8'
+        ctx.font = '14px sans-serif'
+        ctx.textAlign = 'center'
+        ctx.fillText(entry?.message || 'Clip unavailable', canvas.width / 2, canvas.height / 2)
+      }
+    }
 
     // Apply camera transform
     ctx.save()
@@ -195,10 +1710,29 @@ export function StoryboardEditor() {
       }
     }
 
-    // Draw layers
-    const sortedLayers = [...selectedShot.layers].sort((a, b) => a.zOrder - b.zOrder)
+    // Draw layers (preview overlays pose/state/visibility/text; authored defaults unchanged)
+    const sortedLayers = [...selectedShot.layers].map(previewLayer).sort((a, b) => a.zOrder - b.zOrder)
     
     for (const layer of sortedLayers) {
+      if (layer.visible === false) continue
+      if (!isLayerPresentAtTime(layer, playbackTime, selectedShot.durationSec)) continue
+
+      const img = loadedImages.get(layer.id)
+      const clipSample = sampleLayerClip(selectedShot, clips, layer.id, playbackTime)
+      const clipVideo = clipSample ? videosRef.current.get(clipSample.clipId) : undefined
+      const videoReady =
+        clipVideo?.status === 'ready' &&
+        videoHasDecodableFrame(clipVideo.element.readyState, clipVideo.element.videoWidth)
+      const naturalSize = img
+        ? { width: img.width, height: img.height }
+        : videoReady && clipVideo
+          ? { width: clipVideo.element.videoWidth, height: clipVideo.element.videoHeight }
+          : pipeline
+            ? resolveLayerSourceSize(layer, pipeline)
+            : undefined
+      const plan = pipeline
+        ? planLayerDraw(layer, pipeline, gameId, { naturalSize })
+        : null
       ctx.save()
       
       const stageX = layer.x * canvas.width
@@ -207,69 +1741,242 @@ export function StoryboardEditor() {
       ctx.translate(stageX, stageY)
       ctx.rotate((layer.rotation * Math.PI) / 180)
       ctx.scale(layer.flipX ? -1 : 1, 1)
-      ctx.globalAlpha = layer.opacity
+      
+      const pixel = plan?.pixelSize ?? getLayerPixelSize(layer, !!(img || videoReady), naturalSize)
+      const hideClipLayer = !!layer.clipId && !clipSample
+      
+      const drawContent = () => {
+        if (hideClipLayer) return
+        if (plan?.kind === 'text') {
+          const fontSize = TEXT_BASE_PX * layer.scale
+          ctx.font = `${fontSize}px ${plan.fontFamily || 'sans-serif'}, ${plan.fontFallback || 'sans-serif'}`
+          ctx.textAlign = 'center'
+          ctx.textBaseline = 'middle'
+          ctx.fillStyle = plan.error ? '#ff4d4d' : (plan.color || '#ffffff')
+          ctx.fillText(plan.text || '', 0, 0)
+          if (plan.error) {
+            ctx.font = '12px sans-serif'
+            ctx.fillText(plan.error.slice(0, 48), 0, fontSize)
+          }
+          return
+        }
+        if (clipSample && videoReady && clipVideo) {
+          ctx.drawImage(
+            clipVideo.element,
+            -pixel.width / 2,
+            -pixel.height / 2,
+            pixel.width,
+            pixel.height
+          )
+          return
+        }
+        if (clipSample) {
+          const thumb = clipThumbs.get(clipSample.clipId) || img
+          if (thumb) {
+            ctx.drawImage(thumb.element, -pixel.width / 2, -pixel.height / 2, pixel.width, pixel.height)
+            if (clipVideo?.status === 'loading') {
+              ctx.fillStyle = 'rgba(0,0,0,0.35)'
+              ctx.fillRect(-pixel.width / 2, pixel.height / 2 - 16, pixel.width, 16)
+              ctx.fillStyle = '#9ad'
+              ctx.font = '11px sans-serif'
+              ctx.textAlign = 'center'
+              ctx.textBaseline = 'middle'
+              ctx.fillText('Loading clip…', 0, pixel.height / 2 - 8)
+            }
+            return
+          }
+          if (clipVideo?.status === 'loading') {
+            ctx.fillStyle = '#1a2a3a'
+            ctx.fillRect(-pixel.width / 2, -pixel.height / 2, pixel.width, pixel.height)
+            ctx.fillStyle = '#9ad'
+            ctx.font = '11px sans-serif'
+            ctx.textAlign = 'center'
+            ctx.textBaseline = 'middle'
+            ctx.fillText('Loading clip…', 0, 0)
+            return
+          }
+          ctx.fillStyle = '#2a2a2a'
+          ctx.fillRect(-pixel.width / 2, -pixel.height / 2, pixel.width, pixel.height)
+          ctx.fillStyle = '#c8c8c8'
+          ctx.font = '11px sans-serif'
+          ctx.textAlign = 'center'
+          ctx.textBaseline = 'middle'
+          ctx.fillText((clipVideo?.message || 'Clip unavailable').slice(0, 42), 0, 0)
+          return
+        }
+        if (img) {
+          ctx.drawImage(img.element, -pixel.width / 2, -pixel.height / 2, pixel.width, pixel.height)
+          return
+        }
+        ctx.fillStyle = plan?.error ? '#7a2020' : (layer.id === selectedLayerId ? '#FFC800' : '#4a4a4a')
+        ctx.fillRect(-pixel.width / 2, -pixel.height / 2, pixel.width, pixel.height)
+        if (plan?.error) {
+          ctx.fillStyle = '#ffb4b4'
+          ctx.font = '11px sans-serif'
+          ctx.textAlign = 'center'
+          ctx.textBaseline = 'middle'
+          ctx.fillText('Missing media', 0, 0)
+        }
+      }
 
-      const img = loadedImages.get(layer.id)
-      if (img) {
-        const size = 200 * layer.scale
-        ctx.drawImage(img.element, -size / 2, -size / 2, size, size)
-      } else {
-        const size = 100 * layer.scale
-        ctx.fillStyle = layer.id === selectedLayerId ? '#FFC800' : '#4a4a4a'
-        ctx.fillRect(-size / 2, -size / 2, size, size)
+      // Phase C.3a: Dual-pass rendering for outerGlow + dropShadow
+      if (layer.fx?.outerGlow) {
+        const glow = layer.fx.outerGlow
+        ctx.shadowBlur = glow.blur
+        ctx.shadowColor = glow.color
+        ctx.shadowOffsetX = 0
+        ctx.shadowOffsetY = 0
+        ctx.globalAlpha = layer.opacity * glow.alpha
+        drawContent()
+        if (img && glow.strength && glow.strength > 1) {
+          for (let i = 1; i < glow.strength; i++) {
+            ctx.drawImage(img.element, -pixel.width / 2, -pixel.height / 2, pixel.width, pixel.height)
+          }
+        }
+        ctx.shadowBlur = 0
+        ctx.shadowOffsetX = 0
+        ctx.shadowOffsetY = 0
+        ctx.shadowColor = 'transparent'
+      }
+      
+      if (layer.fx?.dropShadow) {
+        const shadow = layer.fx.dropShadow
+        ctx.shadowOffsetX = shadow.offsetX
+        ctx.shadowOffsetY = shadow.offsetY
+        ctx.shadowBlur = shadow.blur
+        ctx.shadowColor = shadow.color
+        ctx.globalAlpha = layer.opacity * shadow.alpha
+        drawContent()
+        ctx.shadowBlur = 0
+        ctx.shadowOffsetX = 0
+        ctx.shadowOffsetY = 0
+        ctx.shadowColor = 'transparent'
+      }
+      
+      if (!layer.fx?.outerGlow && !layer.fx?.dropShadow) {
+        ctx.globalAlpha = layer.opacity
+        drawContent()
       }
       
       ctx.restore()
 
-      // Selection handles (in screen space, after camera transform)
       if (layer.id === selectedLayerId && mode === 'layout' && playbackState === 'stopped') {
-        const size = (img ? 200 : 100) * layer.scale
-        const x = stageX
-        const y = stageY
-        
+        const cx = stageX
+        const cy = stageY
+        const rotRad = (layer.rotation * Math.PI) / 180
+        const handleSize = 10 / (getInterpolatedCamera(playbackTime)?.zoom || 1)
         ctx.strokeStyle = '#FFC800'
         ctx.lineWidth = 2 / (getInterpolatedCamera(playbackTime)?.zoom || 1)
-        ctx.strokeRect(x - size / 2, y - size / 2, size, size)
-        
-        const handleSize = 10 / (getInterpolatedCamera(playbackTime)?.zoom || 1)
         ctx.fillStyle = '#FFC800'
         
-        // Corner handles (scale)
-        ctx.fillRect(x - size / 2 - handleSize / 2, y - size / 2 - handleSize / 2, handleSize, handleSize)
-        ctx.fillRect(x + size / 2 - handleSize / 2, y - size / 2 - handleSize / 2, handleSize, handleSize)
-        ctx.fillRect(x - size / 2 - handleSize / 2, y + size / 2 - handleSize / 2, handleSize, handleSize)
-        ctx.fillRect(x + size / 2 - handleSize / 2, y + size / 2 - handleSize / 2, handleSize, handleSize)
-        
-        // Rotation handle
+        ctx.save()
+        ctx.translate(cx, cy)
+        ctx.rotate(rotRad)
+        ctx.strokeRect(-pixel.width / 2, -pixel.height / 2, pixel.width, pixel.height)
+        ctx.fillRect(-pixel.width / 2 - handleSize / 2, -pixel.height / 2 - handleSize / 2, handleSize, handleSize)
+        ctx.fillRect(pixel.width / 2 - handleSize / 2, -pixel.height / 2 - handleSize / 2, handleSize, handleSize)
+        ctx.fillRect(-pixel.width / 2 - handleSize / 2, pixel.height / 2 - handleSize / 2, handleSize, handleSize)
+        ctx.fillRect(pixel.width / 2 - handleSize / 2, pixel.height / 2 - handleSize / 2, handleSize, handleSize)
         ctx.beginPath()
-        ctx.arc(x, y - size / 2 - 20, 6 / (getInterpolatedCamera(playbackTime)?.zoom || 1), 0, Math.PI * 2)
+        ctx.arc(0, -pixel.height / 2 - 20, 6 / (getInterpolatedCamera(playbackTime)?.zoom || 1), 0, Math.PI * 2)
         ctx.fill()
+        ctx.restore()
       }
     }
 
-    ctx.restore()
-
-    // Draw framing rect overlay in camera mode
-    if (mode === 'camera' && playbackState === 'stopped') {
-      const cam = getInterpolatedCamera(playbackTime)
-      if (cam?.framingRect) {
-        ctx.strokeStyle = '#00AAFF'
+    ctx.restore()  // Restore camera transform
+    ctx.restore()  // Restore shake transform (applied before drawing)
+    
+    // Apply overlay effects (flash, freeze, zoom_punch - drawn on top)
+    for (const effect of activeEffects) {
+      if (effect.type === 'flash') {
+        const color = (effect.params.color as string) || 'white'
+        const opacity = ((effect.params.opacity as number) || 0.8) * (1 - effect.progress)
+        ctx.fillStyle = color
+        ctx.globalAlpha = opacity
+        ctx.fillRect(0, 0, canvas.width, canvas.height)
+        ctx.globalAlpha = 1
+      } else if (effect.type === 'freeze') {
+        // Visual indicator that time is frozen
+        ctx.strokeStyle = '#00FFFF'
         ctx.lineWidth = 3
-        ctx.setLineDash([5, 5])
-        ctx.strokeRect(
-          cam.framingRect.x * canvas.width,
-          cam.framingRect.y * canvas.height,
-          cam.framingRect.width * canvas.width,
-          cam.framingRect.height * canvas.height
-        )
-        ctx.setLineDash([])
+        ctx.strokeRect(5, 5, canvas.width - 10, canvas.height - 10)
+      } else if (effect.type === 'zoom_punch') {
+        // Already handled by camera zoom interpolation, but add flash
+        const opacity = 0.3 * (1 - effect.progress)
+        ctx.fillStyle = 'rgba(255, 255, 255, ' + opacity + ')'
+        ctx.fillRect(0, 0, canvas.width, canvas.height)
       }
     }
-  }, [selectedShot, selectedLayerId, mode, playbackTime, loadedImages, dragStart, getInterpolatedCamera])
+
+    // Draw framing rect overlay in camera mode (persistent - Matt's fix v2)
+    if (mode === 'camera') {
+      const cam = getInterpolatedCamera(playbackTime)
+      if (cam) {
+        // Use explicit framingRect if present, otherwise calculate from zoom
+        let rect = cam.framingRect
+        if (!rect) {
+          // Calculate viewport from zoom: higher zoom = smaller viewport
+          const viewWidth = 1 / cam.zoom
+          const viewHeight = 1 / cam.zoom
+          rect = {
+            x: cam.target.x - viewWidth / 2,
+            y: cam.target.y - viewHeight / 2,
+            width: viewWidth,
+            height: viewHeight
+          }
+        }
+        
+        // Draw the framing rect
+        ctx.strokeStyle = '#00AAFF'
+        ctx.lineWidth = 4
+        ctx.setLineDash([8, 4])
+        const rectX = rect.x * canvas.width
+        const rectY = rect.y * canvas.height
+        const rectW = rect.width * canvas.width
+        const rectH = rect.height * canvas.height
+        ctx.strokeRect(rectX, rectY, rectW, rectH)
+        ctx.setLineDash([])
+        
+        // Draw corner handles for visibility (especially when zoom ≈ 1)
+        const handleSize = 20
+        ctx.fillStyle = '#00AAFF'
+        // Top-left
+        ctx.fillRect(rectX - 2, rectY - 2, handleSize, 4)
+        ctx.fillRect(rectX - 2, rectY - 2, 4, handleSize)
+        // Top-right
+        ctx.fillRect(rectX + rectW - handleSize + 2, rectY - 2, handleSize, 4)
+        ctx.fillRect(rectX + rectW - 2, rectY - 2, 4, handleSize)
+        // Bottom-left
+        ctx.fillRect(rectX - 2, rectY + rectH - 2, handleSize, 4)
+        ctx.fillRect(rectX - 2, rectY + rectH - handleSize + 2, 4, handleSize)
+        // Bottom-right
+        ctx.fillRect(rectX + rectW - handleSize + 2, rectY + rectH - 2, handleSize, 4)
+        ctx.fillRect(rectX + rectW - 2, rectY + rectH - handleSize + 2, 4, handleSize)
+      }
+    }
+  }, [selectedShot, selectedLayerId, mode, playbackTime, loadedImages, backgroundImage, clipThumbs, dragStart, getInterpolatedCamera, getActiveEffects, pipeline, gameId, previewSnapshot, clips, videoEpoch])
+
+  const capturePointer = (target: EventTarget | null, pointerId: number) => {
+    if (!target || typeof (target as Element).setPointerCapture !== 'function') return
+    try {
+      ;(target as Element).setPointerCapture(pointerId)
+      capturedPointerRef.current = { target: target as Element, pointerId }
+    } catch {
+      /* element may not accept capture */
+    }
+  }
+
+  const releaseHeldPointer = (e?: PointerSessionEvent) => {
+    if (e) endPointerCaptureNow(e)
+    const held = capturedPointerRef.current
+    capturedPointerRef.current = null
+    if (held) releasePointerCaptureIfHeld(held.target, held.pointerId)
+  }
 
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (!canvasRef.current || !selectedShot) return
-    e.currentTarget.setPointerCapture(e.pointerId)
+    capturePointer(e.currentTarget, e.pointerId)
 
     const canvas = canvasRef.current
     const rect = canvas.getBoundingClientRect()
@@ -278,52 +1985,87 @@ export function StoryboardEditor() {
 
     if (mode === 'layout' && selectedLayer) {
       const img = loadedImages.get(selectedLayerId!)
-      const size = ((img ? 200 : 100) * selectedLayer.scale) / canvas.width
+      const naturalSize = img
+        ? { width: img.width, height: img.height }
+        : pipeline
+          ? resolveLayerSourceSize(selectedLayer, pipeline)
+          : undefined
+      const pixel = getLayerPixelSize(selectedLayer, !!img, naturalSize)
+      const halfW = pixel.width / 2 / canvas.width
+      const halfH = pixel.height / 2 / canvas.height
       const handleSize = 20 / canvas.width
       
       const lx = selectedLayer.x
       const ly = selectedLayer.y
+      const rotRad = (selectedLayer.rotation * Math.PI) / 180
       
-      // Check rotation handle
-      const rotHandleY = ly - size / 2 - 20 / canvas.width
-      if (Math.hypot(x - lx, y - rotHandleY) < handleSize / 2) {
+      // Helper: rotate point around layer center
+      const rotatePoint = (px: number, py: number) => {
+        const dx = px - lx
+        const dy = py - ly
+        return {
+          x: lx + dx * Math.cos(rotRad) - dy * Math.sin(rotRad),
+          y: ly + dx * Math.sin(rotRad) + dy * Math.cos(rotRad)
+        }
+      }
+      
+      // Helper: inverse rotate point (world to local)
+      const invRotatePoint = (px: number, py: number) => {
+        const dx = px - lx
+        const dy = py - ly
+        return {
+          x: lx + dx * Math.cos(-rotRad) - dy * Math.sin(-rotRad),
+          y: ly + dx * Math.sin(-rotRad) + dy * Math.cos(-rotRad)
+        }
+      }
+      
+      // Check rotation handle (rotated position above top edge)
+      const rotHandle = rotatePoint(lx, ly - halfH - 20 / canvas.height)
+      if (Math.hypot(x - rotHandle.x, y - rotHandle.y) < handleSize / 2) {
         setDragMode('rotate')
-        setDragStart({ x, y, layerX: lx, layerY: ly, layerRotation: selectedLayer.rotation })
+        setDragStart({ x, y, clientX: e.clientX, clientY: e.clientY, layerX: lx, layerY: ly, layerRotation: selectedLayer.rotation })
         return
       }
       
-      // Check corner handles (scale)
+      // Check corner handles (rotated corners)
       const corners = [
-        { x: lx - size / 2, y: ly - size / 2 },
-        { x: lx + size / 2, y: ly - size / 2 },
-        { x: lx - size / 2, y: ly + size / 2 },
-        { x: lx + size / 2, y: ly + size / 2 }
+        rotatePoint(lx - halfW, ly - halfH),
+        rotatePoint(lx + halfW, ly - halfH),
+        rotatePoint(lx - halfW, ly + halfH),
+        rotatePoint(lx + halfW, ly + halfH)
       ]
       
       for (const corner of corners) {
-        if (Math.abs(x - corner.x) < handleSize / 2 && Math.abs(y - corner.y) < handleSize / 2) {
+        if (Math.hypot(x - corner.x, y - corner.y) < handleSize / 2) {
           setDragMode('scale')
-          setDragStart({ x, y, layerX: lx, layerY: ly, layerScale: selectedLayer.scale })
+          setDragStart({ x, y, clientX: e.clientX, clientY: e.clientY, layerX: lx, layerY: ly, layerScale: selectedLayer.scale })
           return
         }
       }
       
-      // Check body (move)
-      if (Math.abs(x - lx) <= size / 2 && Math.abs(y - ly) <= size / 2) {
+      // Check body (move) - use inverse rotation to check if click is inside unrotated rect
+      const localPoint = invRotatePoint(x, y)
+      if (Math.abs(localPoint.x - lx) <= halfW && Math.abs(localPoint.y - ly) <= halfH) {
         setDragMode('move')
-        setDragStart({ x, y, layerX: lx, layerY: ly })
+        setDragStart({ x, y, clientX: e.clientX, clientY: e.clientY, layerX: lx, layerY: ly })
         return
       }
     }
     
     if (mode === 'layout') {
       // Select layer
-      const sortedLayers = [...selectedShot.layers].sort((a, b) => b.zOrder - a.zOrder)
+      const sortedLayers = [...selectedShot.layers].map(previewLayer).sort((a, b) => b.zOrder - a.zOrder)
       for (const layer of sortedLayers) {
+        if (!isLayerPresentAtTime(layer, playbackTime, selectedShot.durationSec)) continue
         const img = loadedImages.get(layer.id)
-        const size = ((img ? 200 : 100) * layer.scale) / canvas.width
-        if (Math.abs(x - layer.x) <= size / 2 && Math.abs(y - layer.y) <= size / 2) {
+        const naturalSize = img
+          ? { width: img.width, height: img.height }
+          : pipeline
+            ? resolveLayerSourceSize(layer, pipeline)
+            : undefined
+        if (hitTestLayer(layer, x, y, canvas.width, !!img, { naturalSize, canvasHeight: canvas.height })) {
           setSelectedLayerId(layer.id)
+          setSidebarTab('background')
           return
         }
       }
@@ -331,7 +2073,7 @@ export function StoryboardEditor() {
     } else if (mode === 'camera') {
       // Start drawing framing rect
       setDragMode('framingRect')
-      setDragStart({ x, y })
+      setDragStart({ x, y, clientX: e.clientX, clientY: e.clientY })
     }
   }
 
@@ -344,8 +2086,16 @@ export function StoryboardEditor() {
     const y = (e.clientY - rect.top) / rect.height
 
     if (dragMode === 'move' && selectedLayer) {
-      const dx = x - dragStart.x
-      const dy = y - dragStart.y
+      // Calculate delta in pixel space first, then convert to normalized coordinates
+      // This gives precise 1:1 pixel-to-visual movement feel
+      const pixelDx = e.clientX - dragStart.clientX
+      const pixelDy = e.clientY - dragStart.clientY
+      
+      // Apply drag threshold to prevent accidental nudges on clicks
+      if (!isDragPastThreshold(pixelDx, pixelDy)) return
+      
+      const dx = pixelDx / rect.width
+      const dy = pixelDy / rect.height
       
       const updates = {
         x: Math.max(0, Math.min(1, dragStart.layerX + dx)),
@@ -355,11 +2105,12 @@ export function StoryboardEditor() {
       await window.indieForge.pipeline.updateLayer(projectId!, selectedShotId!, selectedLayerId!, updates)
       const updated = await window.indieForge.projects.open(projectId!)
       setActiveProject(updated)
-      setDragStart({ ...dragStart, layerX: updates.x, layerY: updates.y })
+      setDragStart({ ...dragStart, clientX: e.clientX, clientY: e.clientY, layerX: updates.x, layerY: updates.y })
     } else if (dragMode === 'scale' && selectedLayer) {
-      const dist = Math.hypot(x - dragStart.layerX, y - dragStart.layerY)
-      const startDist = Math.hypot(dragStart.x - dragStart.layerX, dragStart.y - dragStart.layerY)
-      const scaleFactor = startDist > 0 ? dist / startDist : 1
+      // Phase C.3a: Use pixel distance for accurate scaling
+      const pixelDist = Math.hypot(e.clientX - dragStart.layerX * rect.width, e.clientY - dragStart.layerY * rect.height)
+      const startPixelDist = Math.hypot(dragStart.clientX - dragStart.layerX * rect.width, dragStart.clientY - dragStart.layerY * rect.height)
+      const scaleFactor = startPixelDist > 0 ? pixelDist / startPixelDist : 1
       
       const newScale = Math.max(0.1, Math.min(5, dragStart.layerScale * scaleFactor))
       
@@ -367,9 +2118,10 @@ export function StoryboardEditor() {
       const updated = await window.indieForge.projects.open(projectId!)
       setActiveProject(updated)
     } else if (dragMode === 'rotate' && selectedLayer) {
+      // Phase C.3a: Calculate rotation angle from pointer movement
       const angle = Math.atan2(y - dragStart.layerY, x - dragStart.layerX) * (180 / Math.PI)
       const startAngle = Math.atan2(dragStart.y - dragStart.layerY, dragStart.x - dragStart.layerX) * (180 / Math.PI)
-      const rotation = (dragStart.layerRotation + (angle - startAngle)) % 360
+      const rotation = ((dragStart.layerRotation + (angle - startAngle)) % 360 + 360) % 360
       
       await window.indieForge.pipeline.updateLayer(projectId!, selectedShotId!, selectedLayerId!, { rotation })
       const updated = await window.indieForge.projects.open(projectId!)
@@ -378,124 +2130,775 @@ export function StoryboardEditor() {
   }
 
   const handlePointerUp = async (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (dragMode === 'framingRect' && dragStart) {
-      const canvas = canvasRef.current!
-      const rect = canvas.getBoundingClientRect()
-      const x = (e.clientX - rect.left) / rect.width
-      const y = (e.clientY - rect.top) / rect.height
-      
-      const width = Math.abs(x - dragStart.x)
-      const height = Math.abs(y - dragStart.y)
-      const rectX = Math.min(x, dragStart.x)
-      const rectY = Math.min(y, dragStart.y)
-      
-      if (width > 0.05 && height > 0.05) {
-        const keyframe: CameraKeyframe = {
-          t: playbackTime,
-          target: { x: rectX + width / 2, y: rectY + height / 2 },
-          zoom: 1.0 / Math.max(width, height),
-          framingRect: { x: rectX, y: rectY, width, height }
-        }
-        
-        await window.indieForge.pipeline.addCameraKeyframe(projectId!, selectedShotId!, keyframe)
-        const updated = await window.indieForge.projects.open(projectId!)
-        setActiveProject(updated)
-      }
-    }
+    // Release before any await — React nulls currentTarget after the first await.
+    releaseHeldPointer(e)
+    try {
+      if (dragMode === 'framingRect' && dragStart && selectedShot) {
+        const canvas = canvasRef.current!
+        const rect = canvas.getBoundingClientRect()
+        const x = (e.clientX - rect.left) / rect.width
+        const y = (e.clientY - rect.top) / rect.height
 
+        const width = Math.abs(x - dragStart.x)
+        const height = Math.abs(y - dragStart.y)
+        const rectX = Math.min(x, dragStart.x)
+        const rectY = Math.min(y, dragStart.y)
+
+        if (width > 0.05 && height > 0.05) {
+          const keyframe: CameraKeyframe = {
+            t: selectedCameraIndex !== null && selectedShot.cameraTrack[selectedCameraIndex]
+              ? selectedShot.cameraTrack[selectedCameraIndex].t
+              : playbackTime,
+            target: { x: rectX + width / 2, y: rectY + height / 2 },
+            zoom: 1.0 / Math.max(width, height),
+            framingRect: { x: rectX, y: rectY, width, height }
+          }
+
+          if (selectedCameraIndex !== null &&
+              Math.abs(selectedShot.cameraTrack[selectedCameraIndex].t - keyframe.t) < 0.01) {
+            await handleUpdateCameraKeyframe(selectedCameraIndex, keyframe)
+          } else {
+            await window.indieForge.pipeline.addCameraKeyframe(projectId!, selectedShotId!, keyframe)
+            const updated = await window.indieForge.projects.open(projectId!)
+            setActiveProject(updated)
+          }
+        }
+      }
+    } finally {
+      setDragMode(null)
+      setDragStart(null)
+    }
+  }
+
+  const handlePointerCancel = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    releaseHeldPointer(e)
     setDragMode(null)
     setDragStart(null)
-    e.currentTarget.releasePointerCapture(e.pointerId)
   }
 
   const handleTimelinePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!selectedShot) return
     
+    // Prevent text selection and native drag
+    e.preventDefault()
+    
     const rect = e.currentTarget.getBoundingClientRect()
     const x = (e.clientX - rect.left) / rect.width
-    const clickTime = x * selectedShot.durationSec
-    
-    // Check camera markers
-    for (let i = 0; i < selectedShot.cameraTrack.length; i++) {
-      const kf = selectedShot.cameraTrack[i]
-      const markerX = kf.t / selectedShot.durationSec
-      if (Math.abs(x - markerX) < 0.02) {
-        setDraggedMarker({ type: 'camera', index: i })
-        e.currentTarget.setPointerCapture(e.pointerId)
+    const yRatio = (e.clientY - rect.top) / rect.height
+    const hit = hitTestTimeline({
+      durationSec: selectedShot.durationSec,
+      xRatio: x,
+      yRatio,
+      cameraTimes: selectedShot.cameraTrack.map((k) => k.t),
+      timedKeys: flattenShotTimedKeys(selectedShot).map((row) => ({
+        layerId: row.layerId,
+        keyId: row.key.id,
+        t: row.key.t
+      })),
+      effectTimes: selectedShot.effectsTrack.map((ef) => ef.t),
+      clipBlocks: clipBlocks.map((b) => ({
+        id: b.id,
+        t: b.t,
+        durationSec: b.durationSec,
+        implicit: b.implicit
+      })),
+      audioBlocks: audioBlocks.map((b) => ({
+        id: b.id,
+        t: b.t,
+        durationSec: b.durationSec
+      })),
+      eventCues: eventCues.map((c) => ({ id: c.id, t: c.t })),
+      backgroundKeys: backgroundKeys.map((k) => ({ id: k.id, t: k.t })),
+      layerRange: selectedLayer
+        ? {
+            layerId: selectedLayer.id,
+            ...layerPresenceRange(selectedLayer, selectedShot.durationSec)
+          }
+        : undefined
+    })
+
+    if (hit.kind === 'camera') {
+      setSelectedEventCueId(null)
+      setSelectedBackgroundKeyId(null)
+      setDraggedMarker({ type: 'camera', index: hit.index })
+      setDragMode('marker' as any)
+      capturePointer(e.currentTarget, e.pointerId)
+      return
+    }
+    if (hit.kind === 'backgroundKey') {
+      setSelectedBackgroundKeyId(hit.keyId)
+      setSelectedEventCueId(null)
+      setSelectedTimedKeyId(null)
+      setSelectedClipBlockId(null)
+      setSelectedAudioBlockId(null)
+      setEditingCamera(false)
+      setSelectedCameraIndex(null)
+      setEditingEffect(false)
+      setSelectedEffectIndex(null)
+      setDraggedMarker({
+        type: 'backgroundKey',
+        index: backgroundKeys.findIndex((k) => k.id === hit.keyId),
+        keyId: hit.keyId
+      })
+      setDragMode('marker' as any)
+      capturePointer(e.currentTarget, e.pointerId)
+      return
+    }
+    if (hit.kind === 'timedKey') {
+      setSelectedEventCueId(null)
+      setSelectedBackgroundKeyId(null)
+      setDraggedMarker({
+        type: 'timedKey',
+        index: hit.index,
+        layerId: hit.layerId,
+        keyId: hit.keyId
+      })
+      setDragMode('marker' as any)
+      capturePointer(e.currentTarget, e.pointerId)
+      return
+    }
+    if (hit.kind === 'effect') {
+      setSelectedEventCueId(null)
+      setDraggedMarker({ type: 'effect', index: hit.index })
+      setDragMode('marker' as any)
+      capturePointer(e.currentTarget, e.pointerId)
+      return
+    }
+    if (hit.kind === 'clipBlock') {
+      setSelectedClipBlockId(hit.blockId)
+      setSelectedTimedKeyId(null)
+      setSelectedAudioBlockId(null)
+      setSelectedEventCueId(null)
+      setEditingCamera(false)
+      setSelectedCameraIndex(null)
+      setEditingEffect(false)
+      setSelectedEffectIndex(null)
+      if (hit.implicit) {
+        capturePointer(e.currentTarget, e.pointerId)
         return
       }
+      setDraggedMarker({
+        type: 'clipBlock',
+        index: clipBlocks.findIndex((b) => b.id === hit.blockId),
+        blockId: hit.blockId,
+        clipDrag: hit.clipDrag,
+        grabOffsetSec: hit.grabOffsetSec
+      })
+      setDragMode('marker' as any)
+      capturePointer(e.currentTarget, e.pointerId)
+      return
     }
-    
-    // Check effect markers
-    for (let i = 0; i < selectedShot.effectsTrack.length; i++) {
-      const ef = selectedShot.effectsTrack[i]
-      const markerX = ef.t / selectedShot.durationSec
-      if (Math.abs(x - markerX) < 0.02) {
-        setDraggedMarker({ type: 'effect', index: i })
-        e.currentTarget.setPointerCapture(e.pointerId)
-        return
-      }
+    if (hit.kind === 'audioBlock') {
+      setSelectedAudioBlockId(hit.blockId)
+      setSelectedClipBlockId(null)
+      setSelectedTimedKeyId(null)
+      setSelectedEventCueId(null)
+      setEditingCamera(false)
+      setSelectedCameraIndex(null)
+      setEditingEffect(false)
+      setSelectedEffectIndex(null)
+      setDraggedMarker({
+        type: 'audioBlock',
+        index: audioBlocks.findIndex((b) => b.id === hit.blockId),
+        blockId: hit.blockId,
+        clipDrag: hit.clipDrag,
+        grabOffsetSec: hit.grabOffsetSec
+      })
+      setDragMode('marker' as any)
+      capturePointer(e.currentTarget, e.pointerId)
+      return
     }
-    
-    // Seek playhead
-    setPlaybackTime(clickTime)
+    if (hit.kind === 'eventCue') {
+      setSelectedEventCueId(hit.cueId)
+      setSelectedBackgroundKeyId(null)
+      setSelectedAudioBlockId(null)
+      setSelectedClipBlockId(null)
+      setSelectedTimedKeyId(null)
+      setEditingCamera(false)
+      setSelectedCameraIndex(null)
+      setEditingEffect(false)
+      setSelectedEffectIndex(null)
+      setDraggedMarker({
+        type: 'eventCue',
+        index: eventCues.findIndex((c) => c.id === hit.cueId),
+        cueId: hit.cueId
+      })
+      setDragMode('marker' as any)
+      capturePointer(e.currentTarget, e.pointerId)
+      return
+    }
+    if (hit.kind === 'layerRange') {
+      setSelectedLayerId(hit.layerId)
+      setSelectedBackgroundKeyId(null)
+      setSelectedEventCueId(null)
+      setDraggedMarker({
+        type: 'layerRange',
+        index: 0,
+        layerId: hit.layerId,
+        clipDrag: hit.clipDrag
+      })
+      setDragMode('marker' as any)
+      capturePointer(e.currentTarget, e.pointerId)
+      return
+    }
+
+    setDragMode('playhead' as any)
+    setPlaybackTime(hit.timeSec)
+    capturePointer(e.currentTarget, e.pointerId)
   }
 
-  const handleTimelinePointerMove = async (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!draggedMarker || !selectedShot) return
+  const handleTimelinePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!selectedShot || !dragMode) return
+    
+    // Prevent text selection during drag
+    e.preventDefault()
     
     const rect = e.currentTarget.getBoundingClientRect()
     const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
     const newTime = x * selectedShot.durationSec
     
-    if (draggedMarker.type === 'camera') {
-      const updated = [...selectedShot.cameraTrack]
-      updated[draggedMarker.index] = { ...updated[draggedMarker.index], t: newTime }
-      
-      await window.indieForge.pipeline.updateShot(projectId!, selectedShotId!, { cameraTrack: updated })
-      const proj = await window.indieForge.projects.open(projectId!)
-      setActiveProject(proj)
-    } else {
-      const updated = [...selectedShot.effectsTrack]
-      updated[draggedMarker.index] = { ...updated[draggedMarker.index], t: newTime }
-      
-      await window.indieForge.pipeline.updateShot(projectId!, selectedShotId!, { effectsTrack: updated })
-      const proj = await window.indieForge.projects.open(projectId!)
-      setActiveProject(proj)
+    // Handle playhead scrubbing
+    if (dragMode === 'playhead' as any) {
+      setPlaybackTime(newTime)
+      return
+    }
+    
+    // Handle marker dragging - update local state immediately for smooth preview
+    if (dragMode === 'marker' as any && draggedMarker) {
+      if (draggedMarker.type === 'camera') {
+        const updated = [...selectedShot.cameraTrack]
+        updated[draggedMarker.index] = { ...updated[draggedMarker.index], t: newTime }
+        
+        // Update local state immediately - setActiveProject takes object, not function!
+        if (activeProject && activeProject.assetPipeline) {
+          const updatedProject = {
+            ...activeProject,
+            assetPipeline: {
+              ...activeProject.assetPipeline,
+              storyboardShots: activeProject.assetPipeline.storyboardShots?.map(s => 
+                s.id === selectedShotId ? { ...s, cameraTrack: updated } : s
+              )
+            }
+          }
+          setActiveProject(updatedProject)
+        }
+      } else if (draggedMarker.type === 'timedKey' && draggedMarker.layerId && draggedMarker.keyId) {
+        const layers = selectedShot.layers.map((layer) => {
+          if (layer.id !== draggedMarker.layerId) return layer
+          return {
+            ...layer,
+            timedKeys: (layer.timedKeys || []).map((key) =>
+              key.id === draggedMarker.keyId ? { ...key, t: newTime } : key
+            )
+          }
+        })
+        if (activeProject && activeProject.assetPipeline) {
+          const updatedProject = {
+            ...activeProject,
+            assetPipeline: {
+              ...activeProject.assetPipeline,
+              storyboardShots: activeProject.assetPipeline.storyboardShots?.map((s) =>
+                s.id === selectedShotId ? { ...s, layers } : s
+              )
+            }
+          }
+          setActiveProject(updatedProject)
+        }
+      } else if (draggedMarker.type === 'clipBlock' && draggedMarker.blockId) {
+        const orig = (selectedShot.clipTrack || []).find((b) => b.id === draggedMarker.blockId)
+        if (!orig) return
+        const clip = clips.find((c) => c.id === orig.clipId)
+        const clipDur = clip?.durationSec ?? orig.sourceOutSec
+        let next: ShotClipBlock = orig
+        if (draggedMarker.clipDrag === 'trimIn') {
+          const end = clipBlockEnd(orig)
+          const newT = Math.max(0, Math.min(end - 0.05, newTime))
+          const durationSec = end - newT
+          const sourceOutSec = orig.sourceOutSec
+          const sourceInSec = Math.max(0, sourceOutSec - durationSec)
+          next = {
+            ...orig,
+            t: newT,
+            durationSec: sourceOutSec - sourceInSec,
+            sourceInSec,
+            sourceOutSec
+          }
+        } else if (draggedMarker.clipDrag === 'trimOut') {
+          const maxEnd = selectedShot.durationSec
+          const newEnd = Math.max(orig.t + 0.05, Math.min(maxEnd, newTime))
+          const durationSec = newEnd - orig.t
+          const sourceOutSec = Math.min(clipDur, orig.sourceInSec + durationSec)
+          next = {
+            ...orig,
+            durationSec: sourceOutSec - orig.sourceInSec,
+            sourceOutSec
+          }
+        } else {
+          const maxT = Math.max(0, selectedShot.durationSec - orig.durationSec)
+          const rawT = newTime - (draggedMarker.grabOffsetSec || 0)
+          const newT = Math.max(0, Math.min(maxT, rawT))
+          next = { ...orig, t: newT }
+        }
+        if (activeProject && activeProject.assetPipeline) {
+          const updatedProject = {
+            ...activeProject,
+            assetPipeline: {
+              ...activeProject.assetPipeline,
+              storyboardShots: activeProject.assetPipeline.storyboardShots?.map((s) =>
+                s.id === selectedShotId
+                  ? { ...s, clipTrack: (s.clipTrack || []).map((b) => (b.id === next.id ? next : b)) }
+                  : s
+              )
+            }
+          }
+          setActiveProject(updatedProject)
+        }
+      } else if (draggedMarker.type === 'audioBlock' && draggedMarker.blockId) {
+        const orig = (selectedShot.audioTrack || []).find((b) => b.id === draggedMarker.blockId)
+        if (!orig) return
+        const asset = audioAssets.find((a) => a.id === orig.audioId)
+        const assetDur = asset?.durationSec ?? orig.sourceOutSec
+        let next: ShotAudioBlock = orig
+        if (draggedMarker.clipDrag === 'trimIn') {
+          const end = audioBlockEnd(orig)
+          const newT = Math.max(0, Math.min(end - 0.05, newTime))
+          const durationSec = end - newT
+          if (orig.loop) {
+            next = { ...orig, t: newT, durationSec }
+          } else {
+            const sourceOutSec = orig.sourceOutSec
+            const sourceInSec = Math.max(0, sourceOutSec - durationSec)
+            next = {
+              ...orig,
+              t: newT,
+              durationSec: sourceOutSec - sourceInSec,
+              sourceInSec,
+              sourceOutSec
+            }
+          }
+        } else if (draggedMarker.clipDrag === 'trimOut') {
+          const maxEnd = selectedShot.durationSec
+          const newEnd = Math.max(orig.t + 0.05, Math.min(maxEnd, newTime))
+          const durationSec = newEnd - orig.t
+          if (orig.loop) {
+            next = { ...orig, durationSec }
+          } else {
+            const sourceOutSec = Math.min(assetDur, orig.sourceInSec + durationSec)
+            next = {
+              ...orig,
+              durationSec: sourceOutSec - orig.sourceInSec,
+              sourceOutSec
+            }
+          }
+        } else {
+          const maxT = Math.max(0, selectedShot.durationSec - orig.durationSec)
+          const rawT = newTime - (draggedMarker.grabOffsetSec || 0)
+          const newT = Math.max(0, Math.min(maxT, rawT))
+          next = { ...orig, t: newT }
+        }
+        if (activeProject && activeProject.assetPipeline) {
+          const updatedProject = {
+            ...activeProject,
+            assetPipeline: {
+              ...activeProject.assetPipeline,
+              storyboardShots: activeProject.assetPipeline.storyboardShots?.map((s) =>
+                s.id === selectedShotId
+                  ? { ...s, audioTrack: (s.audioTrack || []).map((b) => (b.id === next.id ? next : b)) }
+                  : s
+              )
+            }
+          }
+          setActiveProject(updatedProject)
+        }
+      } else if (draggedMarker.type === 'backgroundKey' && draggedMarker.keyId) {
+        const keyId = draggedMarker.keyId
+        const clamped = Math.max(0, Math.min(selectedShot.durationSec, newTime))
+        if (activeProject && activeProject.assetPipeline) {
+          const updatedProject = {
+            ...activeProject,
+            assetPipeline: {
+              ...activeProject.assetPipeline,
+              storyboardShots: activeProject.assetPipeline.storyboardShots?.map((s) =>
+                s.id === selectedShotId
+                  ? {
+                      ...s,
+                      backgroundKeys: (s.backgroundKeys || []).map((k) =>
+                        k.id === keyId ? { ...k, t: clamped } : k
+                      )
+                    }
+                  : s
+              )
+            }
+          }
+          setActiveProject(updatedProject)
+        }
+      } else if (draggedMarker.type === 'layerRange' && draggedMarker.layerId) {
+        const layer = selectedShot.layers.find((l) => l.id === draggedMarker.layerId)
+        if (layer && activeProject && activeProject.assetPipeline) {
+          const current = layerPresenceRange(layer, selectedShot.durationSec)
+          let from = current.from
+          let to = current.to
+          if (draggedMarker.clipDrag === 'trimIn') from = newTime
+          else to = newTime
+          const next = clampVisibilityRange(from, to, selectedShot.durationSec)
+          const layers = selectedShot.layers.map((l) =>
+            l.id !== draggedMarker.layerId
+              ? l
+              : { ...l, visibleFromSec: next.from, visibleToSec: next.to }
+          )
+          const updatedProject = {
+            ...activeProject,
+            assetPipeline: {
+              ...activeProject.assetPipeline,
+              storyboardShots: activeProject.assetPipeline.storyboardShots?.map((s) =>
+                s.id === selectedShotId ? { ...s, layers } : s
+              )
+            }
+          }
+          setActiveProject(updatedProject)
+        }
+      } else if (draggedMarker.type === 'eventCue' && draggedMarker.cueId) {
+        const cueId = draggedMarker.cueId
+        const clamped = Math.max(0, Math.min(selectedShot.durationSec, newTime))
+        if (activeProject && activeProject.assetPipeline) {
+          const updatedProject = {
+            ...activeProject,
+            assetPipeline: {
+              ...activeProject.assetPipeline,
+              storyboardShots: activeProject.assetPipeline.storyboardShots?.map((s) =>
+                s.id === selectedShotId
+                  ? {
+                      ...s,
+                      eventCues: (s.eventCues || []).map((c) =>
+                        c.id === cueId ? { ...c, t: clamped } : c
+                      )
+                    }
+                  : s
+              )
+            }
+          }
+          setActiveProject(updatedProject)
+        }
+      } else {
+        const updated = [...selectedShot.effectsTrack]
+        updated[draggedMarker.index] = { ...updated[draggedMarker.index], t: newTime }
+        
+        // Update local state immediately - setActiveProject takes object, not function!
+        if (activeProject && activeProject.assetPipeline) {
+          const updatedProject = {
+            ...activeProject,
+            assetPipeline: {
+              ...activeProject.assetPipeline,
+              storyboardShots: activeProject.assetPipeline.storyboardShots?.map(s => 
+                s.id === selectedShotId ? { ...s, effectsTrack: updated } : s
+              )
+            }
+          }
+          setActiveProject(updatedProject)
+        }
+      }
     }
   }
 
-  const handleTimelinePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+  const handleTimelinePointerCancel = (e: React.PointerEvent<HTMLDivElement>) => {
+    releaseHeldPointer(e)
+    setDragMode(null)
     setDraggedMarker(null)
-    e.currentTarget.releasePointerCapture(e.pointerId)
+  }
+
+  const handleTimelinePointerUp = async (e: React.PointerEvent<HTMLDivElement>) => {
+    // Must run before any await. After persist, React has nulled currentTarget.
+    releaseHeldPointer(e)
+    try {
+    if (!selectedShot) return
+    
+    // Persist marker changes to disk
+    if (dragMode === 'marker' as any && draggedMarker) {
+      if (draggedMarker.type === 'camera') {
+        // Remember which key we were editing by time (not index, as it may change after sort)
+        const editedKeyTime = selectedShot.cameraTrack[draggedMarker.index]?.t
+        
+        // Sort camera track by time to maintain consistent order
+        const sortedTrack = [...selectedShot.cameraTrack].sort((a, b) => a.t - b.t)
+        
+        await window.indieForge.pipeline.updateShot(projectId!, selectedShotId!, { 
+          cameraTrack: sortedTrack
+        })
+        
+        // Reload to ensure consistency
+        const proj = await window.indieForge.projects.open(projectId!)
+        setActiveProject(proj)
+        
+        // Update selectedCameraIndex to match new sorted position
+        if (editedKeyTime !== undefined) {
+          const newShot = proj.assetPipeline?.storyboardShots?.find(s => s.id === selectedShotId)
+          if (newShot) {
+            const newIndex = newShot.cameraTrack.findIndex(k => Math.abs(k.t - editedKeyTime) < 0.001)
+            if (newIndex >= 0) {
+              setSelectedCameraIndex(newIndex)
+            }
+          }
+        }
+      } else if (draggedMarker.type === 'timedKey' && draggedMarker.keyId) {
+        const keyId = draggedMarker.keyId
+        const layer = selectedShot.layers.find((l) => l.id === draggedMarker.layerId)
+        const key = layer?.timedKeys?.find((k) => k.id === keyId)
+        try {
+          if (key) {
+            await window.indieForge.pipeline.updateLayerTimedKey(projectId!, keyId, { t: key.t })
+          }
+          const proj = await window.indieForge.projects.open(projectId!)
+          setActiveProject(proj)
+          setSelectedTimedKeyId(keyId)
+          setLayerError(null)
+        } catch (err) {
+          setLayerError(err instanceof Error ? err.message : 'Failed to move timed key')
+          const proj = await window.indieForge.projects.open(projectId!)
+          setActiveProject(proj)
+        }
+      } else if (draggedMarker.type === 'clipBlock' && draggedMarker.blockId) {
+        const block = (selectedShot.clipTrack || []).find((b) => b.id === draggedMarker.blockId)
+        try {
+          if (block) {
+            await window.indieForge.pipeline.updateShotClipBlock(projectId!, block.id, {
+              t: block.t,
+              sourceInSec: block.sourceInSec,
+              sourceOutSec: block.sourceOutSec
+            })
+          }
+          const proj = await window.indieForge.projects.open(projectId!)
+          setActiveProject(proj)
+          setSelectedClipBlockId(draggedMarker.blockId)
+          setLayerError(null)
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : 'Failed to move clip block'
+          if (msg.includes('--extend-shot') || msg.includes('never silent')) {
+            setPendingExtend({
+              message:
+                'This clip block would pass the shot end. Extend the shot to fit? Cancel keeps the current duration (never silent).',
+              run: async () => {
+                if (!block) return
+                await window.indieForge.pipeline.updateShotClipBlock(projectId!, block.id, {
+                  t: block.t,
+                  sourceInSec: block.sourceInSec,
+                  sourceOutSec: block.sourceOutSec,
+                  extendShot: true
+                })
+                const proj = await window.indieForge.projects.open(projectId!)
+                setActiveProject(proj)
+              }
+            })
+          } else {
+            setLayerError(msg)
+          }
+          const proj = await window.indieForge.projects.open(projectId!)
+          setActiveProject(proj)
+        }
+      } else if (draggedMarker.type === 'audioBlock' && draggedMarker.blockId) {
+        const block = (selectedShot.audioTrack || []).find((b) => b.id === draggedMarker.blockId)
+        try {
+          if (block) {
+            await window.indieForge.pipeline.updateShotAudioBlock(projectId!, block.id, {
+              t: block.t,
+              sourceInSec: block.sourceInSec,
+              sourceOutSec: block.sourceOutSec,
+              durationSec: block.durationSec,
+              loop: block.loop
+            })
+          }
+          const proj = await window.indieForge.projects.open(projectId!)
+          setActiveProject(proj)
+          setSelectedAudioBlockId(draggedMarker.blockId)
+          setLayerError(null)
+          setAudioError(null)
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : 'Failed to move audio block'
+          if (msg.includes('--extend-shot') || msg.includes('never silent')) {
+            setPendingExtend({
+              message:
+                'This audio block would pass the shot end. Extend the shot to fit? Cancel keeps the current duration (never silent).',
+              run: async () => {
+                if (!block) return
+                await window.indieForge.pipeline.updateShotAudioBlock(projectId!, block.id, {
+                  t: block.t,
+                  sourceInSec: block.sourceInSec,
+                  sourceOutSec: block.sourceOutSec,
+                  durationSec: block.durationSec,
+                  loop: block.loop,
+                  extendShot: true
+                })
+                const proj = await window.indieForge.projects.open(projectId!)
+                setActiveProject(proj)
+              }
+            })
+          } else {
+            setLayerError(msg)
+            setAudioError(msg)
+          }
+          const proj = await window.indieForge.projects.open(projectId!)
+          setActiveProject(proj)
+        }
+      } else if (draggedMarker.type === 'backgroundKey' && draggedMarker.keyId) {
+        const key = (selectedShot.backgroundKeys || []).find((k) => k.id === draggedMarker.keyId)
+        try {
+          if (key) {
+            await window.indieForge.pipeline.updateShotBackgroundKey(projectId!, key.id, { t: key.t })
+          }
+          const proj = await window.indieForge.projects.open(projectId!)
+          setActiveProject(proj)
+          setSelectedBackgroundKeyId(draggedMarker.keyId)
+          setBackgroundKeyError(null)
+        } catch (err) {
+          setBackgroundKeyError(err instanceof Error ? err.message : 'Failed to move background key')
+          const proj = await window.indieForge.projects.open(projectId!)
+          setActiveProject(proj)
+        }
+      } else if (draggedMarker.type === 'layerRange' && draggedMarker.layerId) {
+        const layer = selectedShot.layers.find((l) => l.id === draggedMarker.layerId)
+        try {
+          if (layer) {
+            await window.indieForge.pipeline.updateLayer(projectId!, selectedShotId!, layer.id, {
+              visibleFromSec: layer.visibleFromSec ?? 0,
+              visibleToSec: layer.visibleToSec ?? selectedShot.durationSec
+            })
+          }
+          const proj = await window.indieForge.projects.open(projectId!)
+          setActiveProject(proj)
+          setLayerError(null)
+        } catch (err) {
+          setLayerError(err instanceof Error ? err.message : 'Failed to trim layer presence')
+          const proj = await window.indieForge.projects.open(projectId!)
+          setActiveProject(proj)
+        }
+      } else if (draggedMarker.type === 'eventCue' && draggedMarker.cueId) {
+        const cue = (selectedShot.eventCues || []).find((c) => c.id === draggedMarker.cueId)
+        try {
+          if (cue) {
+            await window.indieForge.pipeline.updateShotEventCue(projectId!, cue.id, { t: cue.t })
+          }
+          const proj = await window.indieForge.projects.open(projectId!)
+          setActiveProject(proj)
+          setSelectedEventCueId(draggedMarker.cueId)
+          setEventCueError(null)
+        } catch (err) {
+          setEventCueError(err instanceof Error ? err.message : 'Failed to move event cue')
+          const proj = await window.indieForge.projects.open(projectId!)
+          setActiveProject(proj)
+        }
+      } else {
+        // Sort effects track by time too
+        const sortedTrack = [...selectedShot.effectsTrack].sort((a, b) => a.t - b.t)
+        
+        await window.indieForge.pipeline.updateShot(projectId!, selectedShotId!, { 
+          effectsTrack: sortedTrack 
+        })
+        
+        // Reload to ensure consistency
+        const proj = await window.indieForge.projects.open(projectId!)
+        setActiveProject(proj)
+      }
+    }
+    } finally {
+      setDragMode(null)
+      setDraggedMarker(null)
+    }
   }
 
   const handleAddCameraKeyframe = async () => {
     if (!selectedShot) return
     
+    // Use interpolated camera state if available, otherwise default to center
+    const currentCam = getInterpolatedCamera(playbackTime)
     const keyframe: CameraKeyframe = {
       t: playbackTime,
-      target: { x: 0.5, y: 0.5 },
-      zoom: 1.0
+      target: currentCam?.target || { x: 0.5, y: 0.5 },
+      zoom: currentCam?.zoom || 1.0,
+      framingRect: currentCam?.framingRect
     }
     
     await window.indieForge.pipeline.addCameraKeyframe(projectId!, selectedShotId!, keyframe)
     const updated = await window.indieForge.projects.open(projectId!)
     setActiveProject(updated)
   }
+  
+  const handleUpdateCameraKeyframe = async (index: number, updated: CameraKeyframe) => {
+    if (!selectedShot) return
+    
+    const newTrack = [...selectedShot.cameraTrack]
+    newTrack[index] = updated
+    
+    await window.indieForge.pipeline.updateShot(projectId!, selectedShotId!, { cameraTrack: newTrack })
+    const proj = await window.indieForge.projects.open(projectId!)
+    setActiveProject(proj)
+    
+    // Keep inspector open and jump to key time so user sees the change
+    setPlaybackTime(updated.t)
+    // Don't close inspector - let user iteratively adjust
+  }
+  
+  const handleDeleteCameraKeyframe = async (index: number) => {
+    if (!selectedShot || !confirm('Delete this camera keyframe?')) return
+    
+    const time = selectedShot.cameraTrack[index].t
+    await window.indieForge.pipeline.removeCameraKeyframe(projectId!, selectedShotId!, time)
+    const updated = await window.indieForge.projects.open(projectId!)
+    setActiveProject(updated)
+    setEditingCamera(false)
+    setSelectedCameraIndex(null)
+  }
 
   const handleAddEffect = async (presetId?: string, inlineType?: ScenePresetType) => {
     if (!selectedShot) return
+
+    let finalPresetId = presetId
     
+    // If inline type, create a quick preset
+    if (inlineType && !presetId) {
+      try {
+        const newPreset = await window.indieForge.pipeline.createPreset(inlineType, {})
+        finalPresetId = newPreset.id
+        const updated = await window.indieForge.projects.open(projectId!)
+        setActiveProject(updated)
+      } catch (err) {
+        console.error('Failed to create preset:', err)
+        alert('Failed to create effect preset')
+        return
+      }
+    }
+
     const effect: EffectMarker = {
       t: playbackTime,
-      ...(presetId ? { presetId } : { inlineType, inlineParams: {} })
+      presetId: finalPresetId
     }
     
     await window.indieForge.pipeline.addEffectMarker(projectId!, selectedShotId!, effect)
     const updated = await window.indieForge.projects.open(projectId!)
     setActiveProject(updated)
     setShowAddEffect(false)
+  }
+
+  const handleUpdateEffectParams = async (effectIndex: number, params: Record<string, unknown>) => {
+    if (!selectedShot || effectIndex < 0 || effectIndex >= selectedShot.effectsTrack.length) return
+    
+    const effect = selectedShot.effectsTrack[effectIndex]
+    if (!effect.presetId) return
+    
+    try {
+      const preset = presets.find(p => p.id === effect.presetId)
+      if (!preset) return
+      
+      // Replace params for this type (don't merge)
+      await window.indieForge.pipeline.updatePreset(effect.presetId, { params })
+      const updated = await window.indieForge.projects.open(projectId!)
+      setActiveProject(updated)
+      
+      // Keep inspector open and jump to effect time so user sees the result
+      setPlaybackTime(effect.t)
+      // Don't close inspector - let user iteratively adjust
+    } catch (err) {
+      console.error('Failed to update effect:', err)
+      alert(err instanceof Error ? err.message : 'Failed to update effect')
+    }
   }
 
   const handleDeleteMarker = async (type: 'camera' | 'effect', index: number) => {
@@ -513,21 +2916,25 @@ export function StoryboardEditor() {
     setActiveProject(updated)
   }
 
-  const handleAddCharacter = async (characterId: string) => {
+  const handleAddCharacter = async (characterId: string, poseId?: string) => {
     if (!selectedShot) return
     
     const character = characters.find(c => c.id === characterId)
     const approvedPoses = poses.filter(p => p.characterId === characterId && p.status === 'approved')
+    const chosenPose = poseId
+      ? poses.find((p) => p.id === poseId)
+      : approvedPoses[0] || poses.find((p) => p.characterId === characterId)
     
-    if (approvedPoses.length === 0) {
-      alert(`No approved poses for ${character?.name || 'character'}`)
+    if (!chosenPose) {
+      setLayerError(`No poses for ${character?.name || 'character'}`)
       return
     }
 
     const layer: Omit<StoryboardLayer, 'id'> = {
       zOrder: Math.max(...selectedShot.layers.map(l => l.zOrder), 0) + 1,
       characterId,
-      poseId: approvedPoses[0].id,
+      poseId: chosenPose.id,
+      visible: true,
       x: 0.5,
       y: 0.5,
       scale: 1.0,
@@ -536,10 +2943,298 @@ export function StoryboardEditor() {
       opacity: 1.0
     }
     
-    await window.indieForge.pipeline.addLayer(projectId!, selectedShotId!, layer)
-    const updated = await window.indieForge.projects.open(projectId!)
+    try {
+      setLayerError(null)
+      await window.indieForge.pipeline.addLayer(projectId!, selectedShotId!, layer)
+      const updated = await window.indieForge.projects.open(projectId!)
+      setActiveProject(updated)
+      setShowAddCharacter(false)
+      const shot = updated.assetPipeline?.storyboardShots?.find((s) => s.id === selectedShotId)
+      const newest = shot?.layers.slice().sort((a, b) => b.zOrder - a.zOrder)[0]
+      if (newest) setSelectedLayerId(newest.id)
+    } catch (err) {
+      setLayerError(err instanceof Error ? err.message : 'Failed to add character layer')
+    }
+  }
+
+  const applyShotBackgroundUpdate = async (
+    shotId: string,
+    game: string,
+    updates: Record<string, unknown>
+  ) => {
+    if (!projectId) return
+    try {
+      setBackgroundError(null)
+      const updated = await window.indieForge.pipeline.updateShot(projectId, shotId, updates)
+      if (selectedShotIdRef.current !== shotId || gameIdRef.current !== game) return
+      setActiveProject(updated)
+    } catch (err) {
+      if (selectedShotIdRef.current !== shotId || gameIdRef.current !== game) return
+      setBackgroundError(err instanceof Error ? err.message : 'Failed to update background')
+    }
+  }
+
+  const handleSelectLibraryBackground = async (assetId: string, stateId: string | null) => {
+    if (!selectedShotId) return
+    await applyShotBackgroundUpdate(selectedShotId, gameId, {
+      backgroundVisualAssetId: assetId,
+      backgroundAssetStateId: stateId,
+      backgroundImage: null
+    })
+  }
+
+  const handleFitSourceAspect = async (layerId: string) => {
+    if (!projectId || !selectedShotId) return
+    try {
+      setLayerError(null)
+      await window.indieForge.pipeline.updateLayer(projectId, selectedShotId, layerId, {
+        scale: SOURCE_FIT_SCALE
+      })
+      const updated = await window.indieForge.projects.open(projectId)
+      setActiveProject(updated)
+    } catch (err) {
+      setLayerError(err instanceof Error ? err.message : 'Failed to reset source aspect')
+    }
+  }
+
+  const handleChangeLibraryBackgroundState = async (stateId: string | null) => {
+    if (!selectedShotId) return
+    await applyShotBackgroundUpdate(selectedShotId, gameId, {
+      backgroundAssetStateId: stateId
+    })
+  }
+
+  const handleImportBackgroundImage = async () => {
+    const shotId = selectedShotId
+    const game = gameId
+    if (!shotId || !projectId) return
+    try {
+      setBackgroundError(null)
+      const { filePath } = await window.indieForge.files.chooseImage()
+      if (!filePath) return
+      if (selectedShotIdRef.current !== shotId || gameIdRef.current !== game) return
+      const updated = await window.indieForge.pipeline.updateShot(projectId, shotId, {
+        backgroundImage: filePath,
+        backgroundVisualAssetId: null,
+        backgroundAssetStateId: null
+      })
+      if (selectedShotIdRef.current !== shotId || gameIdRef.current !== game) return
+      setActiveProject(updated)
+    } catch (err) {
+      if (selectedShotIdRef.current !== shotId || gameIdRef.current !== game) return
+      setBackgroundError(err instanceof Error ? err.message : 'Failed to import background image')
+    }
+  }
+
+  const handleClearBackgroundImage = async () => {
+    if (!selectedShotId) return
+    await applyShotBackgroundUpdate(selectedShotId, gameId, {
+      backgroundImage: null,
+      backgroundVisualAssetId: null,
+      backgroundAssetStateId: null
+    })
+  }
+
+  const handleAddAssetLayer = async () => {
+    if (!selectedShot || !addAssetId) {
+      setLayerError('Select a Library visual asset')
+      return
+    }
+    const layer: Omit<StoryboardLayer, 'id'> = {
+      zOrder: Math.max(...selectedShot.layers.map(l => l.zOrder), 0) + 1,
+      visualAssetId: addAssetId,
+      assetStateId: addAssetStateId || null,
+      visible: true,
+      x: 0.5,
+      y: 0.5,
+      scale: 1.0,
+      rotation: 0,
+      flipX: false,
+      opacity: 1.0
+    }
+    try {
+      setLayerError(null)
+      await window.indieForge.pipeline.addLayer(projectId!, selectedShotId!, layer)
+      const updated = await window.indieForge.projects.open(projectId!)
+      setActiveProject(updated)
+      setShowAddAsset(false)
+      setAddAssetId('')
+      setAddAssetStateId('')
+      const shot = updated.assetPipeline?.storyboardShots?.find((s) => s.id === selectedShotId)
+      const newest = shot?.layers.slice().sort((a, b) => b.zOrder - a.zOrder)[0]
+      if (newest) setSelectedLayerId(newest.id)
+    } catch (err) {
+      setLayerError(err instanceof Error ? err.message : 'Failed to add asset layer')
+    }
+  }
+
+  const persistLayerStack = async (nextLayers: StoryboardLayer[]) => {
+    if (!selectedShot || !projectId || !selectedShotId) return
+    try {
+      setLayerError(null)
+      await window.indieForge.pipeline.updateShot(projectId, selectedShotId, { layers: nextLayers })
+      await reloadProject()
+    } catch (err) {
+      setLayerError(err instanceof Error ? err.message : 'Failed to reorder layers')
+      await reloadProject()
+    }
+  }
+
+  const handleUpdateLayerFields = async (
+    layerId: string,
+    updates: Partial<StoryboardLayer> & { visibleFromSec?: number | null; visibleToSec?: number | null }
+  ) => {
+    if (!projectId || !selectedShotId) return
+    await window.indieForge.pipeline.updateLayer(projectId, selectedShotId, layerId, updates)
+    const updated = await window.indieForge.projects.open(projectId)
     setActiveProject(updated)
-    setShowAddCharacter(false)
+  }
+
+  const applyLibraryPick = async (action: LibraryPickAction) => {
+    setLibraryPicker(null)
+    if (!selectedShot || !pipeline) return
+    try {
+      setLayerError(null)
+      if (action.type === 'addCharacterLayer') {
+        await handleAddCharacter(action.characterId, action.poseId)
+        return
+      }
+      if (action.type === 'addVisualLayer') {
+        setAddAssetId(action.visualAssetId)
+        const layer: Omit<StoryboardLayer, 'id'> = {
+          zOrder: Math.max(...selectedShot.layers.map((l) => l.zOrder), 0) + 1,
+          visualAssetId: action.visualAssetId,
+          assetStateId: null,
+          visible: true,
+          x: 0.5,
+          y: 0.5,
+          scale: 1,
+          rotation: 0,
+          flipX: false,
+          opacity: 1
+        }
+        await window.indieForge.pipeline.addLayer(projectId!, selectedShotId!, layer)
+        const updated = await window.indieForge.projects.open(projectId!)
+        setActiveProject(updated)
+        const shot = updated.assetPipeline?.storyboardShots?.find((s) => s.id === selectedShotId)
+        const newest = shot?.layers.slice().sort((a, b) => b.zOrder - a.zOrder)[0]
+        if (newest) setSelectedLayerId(newest.id)
+        return
+      }
+      if (action.type === 'setShotBackground') {
+        if (backgroundKeyPickPending) {
+          setBackgroundKeyPickPending(false)
+          await handleAddBackgroundKeyFromPick(action.visualAssetId, null)
+          return
+        }
+        await handleSelectLibraryBackground(action.visualAssetId, null)
+        return
+      }
+      if (action.type === 'setBackgroundClip') {
+        if (backgroundKeyPickPending) {
+          setBackgroundKeyPickPending(false)
+          setBackgroundKeyError('Background keys are stills. Use the Clips track for video overlays.')
+          return
+        }
+        await window.indieForge.pipeline.updateShot(projectId!, selectedShotId!, {
+          backgroundClipId: action.clipId
+        })
+        await reloadProject()
+        return
+      }
+      if (action.type === 'chooseClip') {
+        const clip = gameClips.find((c) => c.id === action.clipId)
+        setAddClipId(action.clipId)
+        setAddClipSourceIn('0')
+        setAddClipSourceOut(clip ? String(clip.durationSec) : '')
+        setShowAddClip(true)
+        return
+      }
+      if (action.type === 'chooseAudio') {
+        const asset = audioAssets.find((a) => a.id === action.audioId)
+        setAddAudioId(action.audioId)
+        setAddAudioLoop(asset ? defaultLoopForAudioKind(asset.kind) : false)
+        setAddAudioSourceIn('0')
+        setAddAudioSourceOut(asset ? String(asset.durationSec) : '')
+        if (selectedShot) {
+          const remaining = remainingShotTime(selectedShot.durationSec, playbackTime)
+          setAddAudioDuration(
+            remaining > 0 ? String(Number(remaining.toFixed(3))) : asset ? String(asset.durationSec) : ''
+          )
+        }
+        setAddAudioVolume('1')
+        setAddAudioFadeIn('0')
+        setAddAudioFadeOut('0')
+        setShowAddAudio(true)
+        return
+      }
+      if (action.type === 'chooseEvent') {
+        setAddEventCueEventId(action.eventId)
+        setShowAddEventCue(true)
+        return
+      }
+      if (action.type === 'chooseEffectPreset') {
+        await handleAddEffect(action.presetId)
+        return
+      }
+      if (action.type === 'addClipBlock') {
+        const clip = gameClips.find((c) => c.id === action.clipId)
+        if (!clip) {
+          setLayerError('Clip is not in the selected Game')
+          return
+        }
+        const ok = await runClipWrite(async (extendShot) => {
+          await window.indieForge.pipeline.addShotClipBlock(projectId!, selectedShotId!, {
+            clipId: action.clipId,
+            role: action.role,
+            t: playbackTime,
+            sourceInSec: 0,
+            sourceOutSec: clip.durationSec,
+            extendShot
+          })
+        })
+        if (ok) {
+          const updated = await window.indieForge.projects.open(projectId!)
+          const shot = updated.assetPipeline?.storyboardShots?.find((s) => s.id === selectedShotId)
+          const newest = shot?.layers.slice().sort((a, b) => b.zOrder - a.zOrder)[0]
+          if (action.role === 'layer' && newest) setSelectedLayerId(newest.id)
+        }
+      }
+    } catch (err) {
+      setLayerError(err instanceof Error ? err.message : 'Failed to place Library item')
+    }
+  }
+
+  const handleAddTextLayer = async () => {
+    if (!selectedShot) return
+    const layer: Omit<StoryboardLayer, 'id'> = {
+      zOrder: Math.max(...selectedShot.layers.map(l => l.zOrder), 0) + 1,
+      text: addTextContent,
+      fontRef: addTextFont || DEFAULT_FONT_REF,
+      paletteRef: addTextPalette || DEFAULT_PALETTE_REF,
+      visible: true,
+      x: 0.5,
+      y: 0.5,
+      scale: 1.0,
+      rotation: 0,
+      flipX: false,
+      opacity: 1.0
+    }
+    try {
+      setLayerError(null)
+      await window.indieForge.pipeline.addLayer(projectId!, selectedShotId!, layer)
+      const updated = await window.indieForge.projects.open(projectId!)
+      setActiveProject(updated)
+      setShowAddText(false)
+      setAddTextContent('New text')
+      setAddTextFont(DEFAULT_FONT_REF)
+      setAddTextPalette(DEFAULT_PALETTE_REF)
+      const shot = updated.assetPipeline?.storyboardShots?.find((s) => s.id === selectedShotId)
+      const newest = shot?.layers.slice().sort((a, b) => b.zOrder - a.zOrder)[0]
+      if (newest) setSelectedLayerId(newest.id)
+    } catch (err) {
+      setLayerError(err instanceof Error ? err.message : 'Failed to add text layer')
+    }
   }
 
   const handleChangePose = async (poseId: string) => {
@@ -597,6 +3292,63 @@ export function StoryboardEditor() {
     }
   }
 
+  const handleDeleteStoryboard = async (storyboardId: string) => {
+    const sb = storyboards.find(s => s.id === storyboardId)
+    if (!sb) return
+    
+    const linkedScene = sb.sceneId ? scenes.find(s => s.id === sb.sceneId) : null
+    const confirmMsg = linkedScene
+      ? `Delete storyboard "${sb.name}"? This will clear the storyboard link from scene "${linkedScene.name}".`
+      : `Delete storyboard "${sb.name}"?`
+    
+    if (!confirm(confirmMsg)) return
+
+    try {
+      // If linked to a scene, clear the scene's storyboardId first
+      if (sb.sceneId) {
+        await window.indieForge.pipeline.updateScene(sb.sceneId, { storyboardId: undefined })
+      }
+      
+      await window.indieForge.pipeline.deleteStoryboard(projectId!, storyboardId)
+      const updated = await window.indieForge.projects.open(projectId!)
+      setActiveProject(updated)
+      setSelectedStoryboardId(null)
+      setSelectedShotId(null)
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to delete storyboard')
+    }
+  }
+
+  const handleDeleteShot = async (shotId: string) => {
+    if (!selectedStoryboardId) return
+    
+    const shot = shots.find(s => s.id === shotId)
+    if (!shot) return
+    
+    if (!confirm(`Delete shot "${shot.name}"?`)) return
+
+    try {
+      await window.indieForge.pipeline.deleteShot(projectId!, selectedStoryboardId, shotId)
+      const updated = await window.indieForge.projects.open(projectId!)
+      setActiveProject(updated)
+      setSelectedShotId(null)
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to delete shot')
+    }
+  }
+
+  const handleLinkToScene = async (storyboardId: string, sceneId: string) => {
+    try {
+      await window.indieForge.pipeline.updateStoryboard(projectId!, storyboardId, { sceneId })
+      await window.indieForge.pipeline.updateScene(sceneId, { storyboardId })
+      const updated = await window.indieForge.projects.open(projectId!)
+      setActiveProject(updated)
+      setLinkingScene(null)
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to link storyboard to scene')
+    }
+  }
+
   const handleFlipLayer = async () => {
     if (!selectedLayer) return
     await window.indieForge.pipeline.updateLayer(projectId!, selectedShotId!, selectedLayerId!, { flipX: !selectedLayer.flipX })
@@ -605,11 +3357,492 @@ export function StoryboardEditor() {
   }
 
   const handleDeleteLayer = async () => {
-    if (!selectedLayerId || !confirm('Delete this layer?')) return
-    await window.indieForge.pipeline.deleteLayer(projectId!, selectedShotId!, selectedLayerId)
+    if (!selectedLayerId) return
+    setConfirmDeleteLayer(true)
+  }
+
+  const confirmDeleteLayerNow = async () => {
+    if (!selectedLayerId) return
+    try {
+      setLayerError(null)
+      await window.indieForge.pipeline.deleteLayer(projectId!, selectedShotId!, selectedLayerId)
+      const updated = await window.indieForge.projects.open(projectId!)
+      setActiveProject(updated)
+      setSelectedLayerId(null)
+    } catch (err) {
+      setLayerError(err instanceof Error ? err.message : 'Failed to delete layer')
+    } finally {
+      setConfirmDeleteLayer(false)
+    }
+  }
+
+  const handleAddTimedKey = async () => {
+    if (!selectedShot || !selectedLayer) {
+      setLayerError('Select a character or visual-asset layer to add a pose/state key')
+      return
+    }
+    const kind = getLayerKind(selectedLayer)
+    try {
+      setLayerError(null)
+      let action: LayerTimedKey['action']
+      if (kind === 'character' && selectedLayer.characterId) {
+        const poseId =
+          selectedLayer.poseId ||
+          poses.find((p) => p.characterId === selectedLayer.characterId && p.status === 'approved')?.id ||
+          poses.find((p) => p.characterId === selectedLayer.characterId)?.id
+        if (!poseId) throw new Error('Character layer has no pose to key')
+        action = { type: 'setPose', poseId }
+      } else if (kind === 'visualAsset' && selectedLayer.visualAssetId) {
+        const stateId =
+          selectedLayer.assetStateId ||
+          assetStates.find((s) => s.assetId === selectedLayer.visualAssetId)?.id
+        if (!stateId) throw new Error('Visual-asset layer has no state to key')
+        action = { type: 'setState', stateId }
+      } else {
+        throw new Error('Select a character or visual-asset layer to add a pose/state key')
+      }
+      await window.indieForge.pipeline.addLayerTimedKey(projectId!, selectedShotId!, selectedLayer.id, {
+        t: playbackTime,
+        action
+      })
+      const updated = await window.indieForge.projects.open(projectId!)
+      setActiveProject(updated)
+      const shot = updated.assetPipeline?.storyboardShots?.find((s) => s.id === selectedShotId)
+      const layer = shot?.layers.find((l) => l.id === selectedLayer.id)
+      const created = (layer?.timedKeys || []).find((k) => Math.abs(k.t - playbackTime) < 0.001)
+      if (created) {
+        setSelectedTimedKeyId(created.id)
+        setTimedKeyTimeDraft(created.t.toFixed(2))
+      }
+      setSidebarTab('background')
+      setEditingCamera(false)
+      setSelectedCameraIndex(null)
+      setEditingEffect(false)
+      setSelectedEffectIndex(null)
+    } catch (err) {
+      setLayerError(err instanceof Error ? err.message : 'Failed to add timed key')
+      setSidebarTab('background')
+    }
+  }
+
+  const handleUpdateTimedKey = async (
+    keyId: string,
+    updates: { t?: number; action?: LayerTimedKey['action'] }
+  ) => {
+    try {
+      setLayerError(null)
+      await window.indieForge.pipeline.updateLayerTimedKey(projectId!, keyId, updates)
+      const updated = await window.indieForge.projects.open(projectId!)
+      setActiveProject(updated)
+      setSelectedTimedKeyId(keyId)
+      if (updates.t !== undefined) setTimedKeyTimeDraft(updates.t.toFixed(2))
+    } catch (err) {
+      setLayerError(err instanceof Error ? err.message : 'Failed to update timed key')
+      const updated = await window.indieForge.projects.open(projectId!)
+      setActiveProject(updated)
+    }
+  }
+
+  const confirmDeleteTimedKeyNow = async () => {
+    if (!confirmDeleteTimedKeyId) return
+    try {
+      setLayerError(null)
+      await window.indieForge.pipeline.deleteLayerTimedKey(projectId!, confirmDeleteTimedKeyId)
+      const updated = await window.indieForge.projects.open(projectId!)
+      setActiveProject(updated)
+      if (selectedTimedKeyId === confirmDeleteTimedKeyId) setSelectedTimedKeyId(null)
+    } catch (err) {
+      setLayerError(err instanceof Error ? err.message : 'Failed to delete timed key')
+    } finally {
+      setConfirmDeleteTimedKeyId(null)
+    }
+  }
+
+  const reloadProject = async () => {
     const updated = await window.indieForge.projects.open(projectId!)
     setActiveProject(updated)
-    setSelectedLayerId(null)
+    return updated
+  }
+
+  const runClipWrite = async (fn: (extendShot: boolean) => Promise<void>): Promise<boolean> => {
+    try {
+      setLayerError(null)
+      await fn(false)
+      await reloadProject()
+      return true
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      if (msg.includes('--extend-shot') || msg.includes('never silent') || msg.includes('extend the shot')) {
+        setPendingExtend({
+          message:
+            'This clip block ends after the shot duration. Extend the shot to fit the block? Cancel keeps the current duration — Forge never silently extends.',
+          run: async () => {
+            await fn(true)
+            await reloadProject()
+          }
+        })
+        await reloadProject()
+        return false
+      }
+      setLayerError(msg)
+      await reloadProject()
+      return false
+    }
+  }
+
+  const handleAddClipBlock = async () => {
+    if (!selectedShot || !addClipId) {
+      setLayerError('Select a clip from this Game')
+      return
+    }
+    const clip = gameClips.find((c) => c.id === addClipId)
+    if (!clip) {
+      setLayerError('Clip is not in the selected Game')
+      return
+    }
+    const sourceInSec = Number(addClipSourceIn)
+    const sourceOutSec = addClipSourceOut === '' ? clip.durationSec : Number(addClipSourceOut)
+    const ok = await runClipWrite(async (extendShot) => {
+      await window.indieForge.pipeline.addShotClipBlock(projectId!, selectedShotId!, {
+        clipId: addClipId,
+        role: addClipRole,
+        t: playbackTime,
+        sourceInSec,
+        sourceOutSec,
+        extendShot
+      })
+    })
+    if (ok) setShowAddClip(false)
+  }
+
+  const handlePromoteImplicitBlock = async () => {
+    if (!selectedClipBlock || !selectedClipBlock.implicit) return
+    await runClipWrite(async (extendShot) => {
+      await window.indieForge.pipeline.addShotClipBlock(projectId!, selectedShotId!, {
+        clipId: selectedClipBlock.clipId,
+        role: selectedClipBlock.role,
+        layerId: selectedClipBlock.layerId || undefined,
+        t: selectedClipBlock.t,
+        sourceInSec: selectedClipBlock.sourceInSec,
+        sourceOutSec: selectedClipBlock.sourceOutSec,
+        extendShot
+      })
+    })
+  }
+
+  const handleCommitClipBlockEdits = async () => {
+    if (!selectedClipBlock || selectedClipBlock.implicit) return
+    const t = Number(clipTimeDraft)
+    const sourceInSec = Number(clipInDraft)
+    const sourceOutSec = Number(clipOutDraft)
+    await runClipWrite(async (extendShot) => {
+      await window.indieForge.pipeline.updateShotClipBlock(projectId!, selectedClipBlock.id, {
+        t,
+        sourceInSec,
+        sourceOutSec,
+        extendShot
+      })
+    })
+  }
+
+  const confirmDeleteClipBlockNow = async () => {
+    if (!confirmDeleteClipBlockId) return
+    try {
+      setLayerError(null)
+      await window.indieForge.pipeline.deleteShotClipBlock(projectId!, confirmDeleteClipBlockId)
+      await reloadProject()
+      if (selectedClipBlockId === confirmDeleteClipBlockId) setSelectedClipBlockId(null)
+    } catch (err) {
+      setLayerError(err instanceof Error ? err.message : 'Failed to delete clip block')
+    } finally {
+      setConfirmDeleteClipBlockId(null)
+    }
+  }
+
+  const runAudioWrite = async (fn: (extendShot: boolean) => Promise<void>): Promise<boolean> => {
+    try {
+      setLayerError(null)
+      setAudioError(null)
+      await fn(false)
+      await reloadProject()
+      return true
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      if (msg.includes('--extend-shot') || msg.includes('never silent') || msg.includes('extend the shot')) {
+        setPendingExtend({
+          message:
+            'This audio block ends after the shot duration. Extend the shot to play the full authored length? Cancel keeps the current shot length — Forge never silently extends. To keep the shot length, Cancel, click Fit remaining shot, then Place (or shorten Duration so the block ends at the shot end). Previous shot length is not restored from history.',
+          run: async () => {
+            await fn(true)
+            await reloadProject()
+          }
+        })
+        await reloadProject()
+        return false
+      }
+      setLayerError(msg)
+      setAudioError(msg)
+      await reloadProject()
+      return false
+    }
+  }
+
+  const remainingShotForPlayhead = selectedShot
+    ? remainingShotTime(selectedShot.durationSec, playbackTime)
+    : 0
+
+  const applyFitRemainingToAddForm = () => {
+    if (!selectedShot) return
+    const remaining = remainingShotTime(selectedShot.durationSec, playbackTime)
+    if (remaining <= 0) {
+      setAudioError(`Cannot fit audio: playhead ${playbackTime}s is at or after shot duration ${selectedShot.durationSec}s`)
+      return
+    }
+    setAddAudioDuration(String(Number(remaining.toFixed(3))))
+    if (!addAudioLoop) {
+      const inn = Number(addAudioSourceIn)
+      const start = Number.isFinite(inn) ? inn : 0
+      setAddAudioSourceOut(String(Number((start + remaining).toFixed(3))))
+    }
+    setAudioError(null)
+  }
+
+  const handleAddAudioBlock = async () => {
+    if (!selectedShot || !addAudioId) {
+      setAudioError('Select audio from this Game library')
+      return
+    }
+    const asset = audioAssets.find((a) => a.id === addAudioId)
+    if (!asset) {
+      setAudioError('Audio is not in the selected Game')
+      return
+    }
+    const sourceInSec = Number(addAudioSourceIn)
+    const sourceOutSec = addAudioSourceOut === '' ? asset.durationSec : Number(addAudioSourceOut)
+    const durationSec = addAudioDuration !== '' ? Number(addAudioDuration) : undefined
+    const ok = await runAudioWrite(async (extendShot) => {
+      await window.indieForge.pipeline.addShotAudioBlock(projectId!, selectedShotId!, {
+        audioId: addAudioId,
+        role: asset.kind,
+        t: playbackTime,
+        sourceInSec,
+        sourceOutSec,
+        durationSec,
+        loop: addAudioLoop,
+        volume: Number(addAudioVolume),
+        fadeInSec: Number(addAudioFadeIn),
+        fadeOutSec: Number(addAudioFadeOut),
+        extendShot
+      })
+    })
+    if (ok) setShowAddAudio(false)
+  }
+
+  const handleCommitAudioBlockEdits = async (loopOverride?: boolean) => {
+    if (!selectedAudioBlock) return
+    const t = Number(audioTimeDraft)
+    const sourceInSec = Number(audioInDraft)
+    let sourceOutSec = Number(audioOutDraft)
+    let durationSec = Number(audioDurationDraft)
+    const loop = loopOverride !== undefined ? loopOverride : audioLoopDraft
+    if (!loop && Number.isFinite(sourceInSec) && Number.isFinite(sourceOutSec) && Number.isFinite(durationSec)) {
+      const trim = sourceOutSec - sourceInSec
+      const outChanged = Math.abs(sourceOutSec - selectedAudioBlock.sourceOutSec) > 0.001
+      const durChanged = Math.abs(durationSec - selectedAudioBlock.durationSec) > 0.001
+      if (durChanged && !outChanged) {
+        sourceOutSec = sourceInSec + durationSec
+      } else if (outChanged) {
+        durationSec = trim
+      } else if (Math.abs(durationSec - trim) > 0.001) {
+        sourceOutSec = sourceInSec + durationSec
+      }
+    }
+    await runAudioWrite(async (extendShot) => {
+      await window.indieForge.pipeline.updateShotAudioBlock(projectId!, selectedAudioBlock.id, {
+        t,
+        sourceInSec,
+        sourceOutSec,
+        durationSec,
+        loop,
+        volume: Number(audioVolumeDraft),
+        fadeInSec: Number(audioFadeInDraft),
+        fadeOutSec: Number(audioFadeOutDraft),
+        extendShot
+      })
+    })
+  }
+
+  const handleFitAudioBlockToShot = async () => {
+    if (!selectedAudioBlock || !selectedShot) return
+    try {
+      setLayerError(null)
+      setAudioError(null)
+      await window.indieForge.pipeline.updateShotAudioBlock(projectId!, selectedAudioBlock.id, {
+        fitShot: true
+      })
+      await reloadProject()
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      setAudioError(msg)
+      setLayerError(msg)
+    }
+  }
+
+  const handleCommitShotDuration = async () => {
+    if (!selectedShot || !projectId || !selectedShotId) return
+    const n = Number(shotDurationDraft)
+    if (!Number.isFinite(n) || n <= 0) {
+      setShotDurationError('Shot duration must be a positive number of seconds')
+      setShotDurationDraft(String(selectedShot.durationSec))
+      return
+    }
+    if (Math.abs(n - selectedShot.durationSec) < 1e-9) {
+      setShotDurationError(null)
+      return
+    }
+    try {
+      setShotDurationError(null)
+      setLayerError(null)
+      await window.indieForge.pipeline.updateShot(projectId, selectedShotId, { durationSec: n })
+      await reloadProject()
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      setShotDurationError(msg)
+      setLayerError(msg)
+      setShotDurationDraft(String(selectedShot.durationSec))
+    }
+  }
+
+  const confirmDeleteAudioBlockNow = async () => {
+    if (!confirmDeleteAudioBlockId) return
+    try {
+      setLayerError(null)
+      setAudioError(null)
+      await window.indieForge.pipeline.deleteShotAudioBlock(projectId!, confirmDeleteAudioBlockId)
+      await reloadProject()
+      if (selectedAudioBlockId === confirmDeleteAudioBlockId) setSelectedAudioBlockId(null)
+    } catch (err) {
+      setAudioError(err instanceof Error ? err.message : 'Failed to delete audio block')
+    } finally {
+      setConfirmDeleteAudioBlockId(null)
+    }
+  }
+
+  const handleAddEventCue = async () => {
+    if (!selectedShot || !addEventCueEventId) {
+      setEventCueError('Select a named event from this Game')
+      return
+    }
+    try {
+      setEventCueError(null)
+      await window.indieForge.pipeline.addShotEventCue(projectId!, selectedShotId!, {
+        t: playbackTime,
+        eventId: addEventCueEventId
+      })
+      await reloadProject()
+      setShowAddEventCue(false)
+    } catch (err) {
+      setEventCueError(err instanceof Error ? err.message : 'Failed to add event cue')
+    }
+  }
+
+  const handleCommitEventCueEdits = async (eventIdOverride?: string) => {
+    if (!selectedEventCue) return
+    const t = Number(eventCueTimeDraft)
+    const eventId = eventIdOverride ?? selectedEventCue.eventId
+    try {
+      setEventCueError(null)
+      await window.indieForge.pipeline.updateShotEventCue(projectId!, selectedEventCue.id, {
+        t,
+        eventId
+      })
+      await reloadProject()
+    } catch (err) {
+      setEventCueError(err instanceof Error ? err.message : 'Failed to update event cue')
+      setEventCueTimeDraft(selectedEventCue.t.toFixed(2))
+    }
+  }
+
+  const handleAddBackgroundKeyFromPick = async (
+    visualAssetId: string,
+    stateId: string | null
+  ) => {
+    if (!selectedShot) return
+    try {
+      setBackgroundKeyError(null)
+      await window.indieForge.pipeline.addShotBackgroundKey(projectId!, selectedShotId!, {
+        t: playbackTime,
+        backgroundVisualAssetId: visualAssetId,
+        backgroundAssetStateId: stateId
+      })
+      await reloadProject()
+    } catch (err) {
+      setBackgroundKeyError(err instanceof Error ? err.message : 'Failed to add background key')
+    }
+  }
+
+  const handleCommitBackgroundKeyEdits = async (patch?: {
+    t?: number
+    backgroundVisualAssetId?: string | null
+    backgroundAssetStateId?: string | null
+    backgroundImage?: string | null
+  }) => {
+    if (!selectedBackgroundKey) return
+    const t = patch?.t ?? Number(backgroundKeyTimeDraft)
+    try {
+      setBackgroundKeyError(null)
+      await window.indieForge.pipeline.updateShotBackgroundKey(projectId!, selectedBackgroundKey.id, {
+        t,
+        ...patch
+      })
+      await reloadProject()
+    } catch (err) {
+      setBackgroundKeyError(err instanceof Error ? err.message : 'Failed to update background key')
+      setBackgroundKeyTimeDraft(selectedBackgroundKey.t.toFixed(2))
+    }
+  }
+
+  const confirmDeleteBackgroundKeyNow = async () => {
+    if (!confirmDeleteBackgroundKeyId) return
+    try {
+      setBackgroundKeyError(null)
+      await window.indieForge.pipeline.deleteShotBackgroundKey(projectId!, confirmDeleteBackgroundKeyId)
+      await reloadProject()
+      if (selectedBackgroundKeyId === confirmDeleteBackgroundKeyId) setSelectedBackgroundKeyId(null)
+    } catch (err) {
+      setBackgroundKeyError(err instanceof Error ? err.message : 'Failed to delete background key')
+    } finally {
+      setConfirmDeleteBackgroundKeyId(null)
+    }
+  }
+
+  const confirmDeleteEventCueNow = async () => {
+    if (!confirmDeleteEventCueId) return
+    try {
+      setEventCueError(null)
+      await window.indieForge.pipeline.deleteShotEventCue(projectId!, confirmDeleteEventCueId)
+      await reloadProject()
+      if (selectedEventCueId === confirmDeleteEventCueId) setSelectedEventCueId(null)
+    } catch (err) {
+      setEventCueError(err instanceof Error ? err.message : 'Failed to delete event cue')
+    } finally {
+      setConfirmDeleteEventCueId(null)
+    }
+  }
+
+  const confirmExtendShotNow = async () => {
+    if (!pendingExtend) return
+    try {
+      setLayerError(null)
+      await pendingExtend.run()
+    } catch (err) {
+      setLayerError(err instanceof Error ? err.message : 'Failed to extend shot')
+    } finally {
+      setPendingExtend(null)
+      setShowAddClip(false)
+      setShowAddAudio(false)
+      setShowAddEventCue(false)
+    }
   }
 
   const handleSaveNotes = async () => {
@@ -635,25 +3868,49 @@ export function StoryboardEditor() {
   }
 
   const animatePlayback = () => {
-    const animate = () => {
+    let lastTime = performance.now()
+    
+    const animate = (currentTime: number) => {
+      const deltaTime = (currentTime - lastTime) / 1000 // Convert to seconds
+      lastTime = currentTime
+      
       setPlaybackTime(t => {
         if (!selectedShot) return 0
-        const newTime = t + 0.016
+        const newTime = t + deltaTime
+        
         if (newTime >= selectedShot.durationSec) {
-          setPlaybackState('stopped')
-          return 0
+          if (loopPlayback) {
+            queueMicrotask(() => resetEventPreview())
+            return 0
+          } else {
+            // Stop: clamp to duration and stop playback
+            setTimeout(() => setPlaybackState('stopped'), 0)
+            return selectedShot.durationSec
+          }
         }
         return newTime
       })
+      
+      // Continue animation - check will happen on next render
       animationFrameRef.current = requestAnimationFrame(animate)
     }
     animationFrameRef.current = requestAnimationFrame(animate)
   }
+  
+  // Stop animation when playback stops
+  useEffect(() => {
+    if (playbackState !== 'playing' && animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current)
+      animationFrameRef.current = null
+    }
+  }, [playbackState])
 
   const handleStopPlayback = () => {
     setPlaybackState('stopped')
     setPlaybackTime(0)
     if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current)
+    // Fire is not gated on transport; Stop must cancel event SFX even if we were paused.
+    resetEventPreview()
   }
 
   useEffect(() => {
@@ -661,6 +3918,44 @@ export function StoryboardEditor() {
       if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current)
     }
   }, [])
+  
+  // Auto-select camera keyframe when playhead is on one (Phase C.3b - fixed for Matt)
+  useEffect(() => {
+    if (!selectedShot || playbackState === 'playing' || cameraManuallySelected) return
+    
+    const onKeyframe = selectedShot.cameraTrack.findIndex(kf => 
+      Math.abs(kf.t - playbackTime) < 0.05
+    )
+    
+    if (onKeyframe >= 0 && !editingCamera) {
+      setSelectedCameraIndex(onKeyframe)
+      setEditingCamera(true)
+      setCameraManuallySelected(false)
+    } else if (onKeyframe < 0 && editingCamera && !cameraManuallySelected) {
+      // Only auto-close if not manually selected
+      setEditingCamera(false)
+      setSelectedCameraIndex(null)
+    }
+  }, [playbackTime, selectedShot, playbackState, editingCamera, cameraManuallySelected])
+  
+  // Keyboard support for deleting selected camera keyframe
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.key === 'Delete' || e.key === 'Backspace') && 
+          selectedCameraIndex !== null && 
+          editingCamera &&
+          mode === 'camera') {
+        // Don't delete if user is typing in an input
+        if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
+        
+        e.preventDefault()
+        handleDeleteCameraKeyframe(selectedCameraIndex)
+      }
+    }
+    
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [selectedCameraIndex, editingCamera, mode])
 
   if (!activeProject || !gameId) {
     return <p style={{ color: 'var(--muted)' }}>Loading...</p>
@@ -717,30 +4012,173 @@ export function StoryboardEditor() {
             No storyboards yet
           </div>
         ) : (
-          storyboards.map(sb => (
-          <div
-            key={sb.id}
-            onClick={() => {
-              setSelectedStoryboardId(sb.id)
-              setSelectedShotId(null)
-            }}
-            style={{
-              padding: '0.5rem',
-              marginBottom: '0.5rem',
-              background: selectedStoryboardId === sb.id ? 'var(--forge-gold)' : 'var(--bg-secondary)',
-              color: selectedStoryboardId === sb.id ? 'var(--bg)' : 'var(--text)',
-              borderRadius: '4px',
-              cursor: 'pointer',
-              fontSize: '0.9rem'
-            }}
-          >
-            {sb.name}
+          storyboards.map(sb => {
+          const sbScene = sb.sceneId ? scenes.find(s => s.id === sb.sceneId) : null
+          const isOrphan = !sb.sceneId
+          return (
+            <div
+              key={sb.id}
+              style={{
+                marginBottom: '0.5rem',
+                border: selectedStoryboardId === sb.id ? '2px solid var(--forge-gold)' : '1px solid var(--border)',
+                borderRadius: '4px',
+                background: 'var(--bg-secondary)'
+              }}
+            >
+              <div
+                onClick={() => {
+                  setSelectedStoryboardId(sb.id)
+                  setSelectedShotId(null)
+                }}
+                style={{
+                  padding: '0.5rem',
+                  cursor: 'pointer',
+                  fontSize: '0.9rem'
+                }}
+              >
+                <div style={{ fontWeight: selectedStoryboardId === sb.id ? 'bold' : 'normal' }}>
+                  {sb.name}
+                </div>
+                {sbScene ? (
+                  <div style={{ 
+                    fontSize: '0.75rem', 
+                    marginTop: '0.25rem',
+                    color: 'var(--success)'
+                  }}>
+                    ✓ Scene: {sbScene.name}
+                  </div>
+                ) : (
+                  <div style={{ 
+                    fontSize: '0.75rem', 
+                    marginTop: '0.25rem',
+                    color: 'var(--muted)'
+                  }}>
+                    ⚠ Not linked to a scene
+                  </div>
+                )}
+              </div>
+              {isOrphan && (
+                <div style={{ 
+                  padding: '0 0.5rem 0.5rem', 
+                  display: 'flex', 
+                  gap: '0.25rem',
+                  fontSize: '0.75rem'
+                }}>
+                  <button
+                    type="button"
+                    onClick={() => setLinkingScene(sb.id)}
+                    style={{ flex: 1, padding: '0.25rem', fontSize: '0.75rem' }}
+                  >
+                    Link to Scene
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      handleDeleteStoryboard(sb.id)
+                    }}
+                    style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', background: 'var(--danger)', color: 'white' }}
+                  >
+                    Delete
+                  </button>
+                </div>
+              )}
+              {!isOrphan && selectedStoryboardId === sb.id && (
+                <div style={{ 
+                  padding: '0 0.5rem 0.5rem',
+                  fontSize: '0.75rem'
+                }}>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      handleDeleteStoryboard(sb.id)
+                    }}
+                    style={{ width: '100%', padding: '0.25rem', fontSize: '0.75rem', background: 'var(--danger)', color: 'white' }}
+                  >
+                    Delete Storyboard
+                  </button>
+                </div>
+              )}
+            </div>
+          )
+        })
+        )}
+        
+        {linkingScene && (
+          <div style={{ 
+            position: 'fixed', 
+            inset: 0, 
+            background: 'rgba(0,0,0,0.5)', 
+            display: 'flex', 
+            alignItems: 'center', 
+            justifyContent: 'center',
+            zIndex: 1000
+          }}>
+            <div style={{ 
+              background: 'var(--bg)', 
+              padding: '1.5rem', 
+              borderRadius: '8px',
+              maxWidth: '400px',
+              width: '90%'
+            }}>
+              <h3 style={{ margin: '0 0 1rem 0' }}>Link to Scene</h3>
+              <div style={{ marginBottom: '1rem' }}>
+                {scenes.length === 0 ? (
+                  <p style={{ color: 'var(--muted)' }}>No scenes available. Create a scene first.</p>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', maxHeight: '300px', overflowY: 'auto' }}>
+                    {scenes.map(scene => (
+                      <button
+                        key={scene.id}
+                        type="button"
+                        onClick={() => handleLinkToScene(linkingScene, scene.id)}
+                        style={{ 
+                          padding: '0.75rem', 
+                          textAlign: 'left',
+                          background: 'var(--bg-secondary)',
+                          border: '1px solid var(--border)',
+                          borderRadius: '4px'
+                        }}
+                      >
+                        <div>{scene.name}</div>
+                        {scene.storyboardId && (
+                          <div style={{ fontSize: '0.75rem', color: 'var(--muted)', marginTop: '0.25rem' }}>
+                            Already has storyboard (will be replaced)
+                          </div>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setLinkingScene(null)}
+                style={{ width: '100%' }}
+              >
+                Cancel
+              </button>
+            </div>
           </div>
-        ))
         )}
         
         {selectedStoryboard && (
           <>
+            {attachedScene && (
+              <div style={{
+                marginTop: '1rem',
+                padding: '0.5rem',
+                background: 'var(--bg)',
+                borderRadius: '4px',
+                fontSize: '0.85rem',
+                color: 'var(--muted)',
+                border: '1px solid var(--border)'
+              }}>
+                <div style={{ fontWeight: 'bold', marginBottom: '0.25rem' }}>Attached to Scene:</div>
+                <div>{attachedScene.name}</div>
+              </div>
+            )}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '1.5rem 0 0.75rem 0' }}>
               <h3 style={{ fontSize: '1rem', margin: 0 }}>Shots</h3>
               <button
@@ -786,19 +4224,58 @@ export function StoryboardEditor() {
             {shots.map((shot, idx) => (
               <div
                 key={shot.id}
-                onClick={() => setSelectedShotId(shot.id)}
                 style={{
-                  padding: '0.5rem',
                   marginBottom: '0.5rem',
-                  background: selectedShotId === shot.id ? 'var(--forge-gold)' : 'var(--bg-secondary)',
-                  color: selectedShotId === shot.id ? 'var(--bg)' : 'var(--text)',
+                  border: selectedShotId === shot.id ? '2px solid var(--forge-gold)' : '1px solid var(--border)',
                   borderRadius: '4px',
-                  cursor: 'pointer',
-                  fontSize: '0.85rem'
+                  background: 'var(--bg-secondary)'
                 }}
               >
-                <div style={{ fontWeight: 'bold' }}>{idx + 1}. {shot.name}</div>
-                <div style={{ fontSize: '0.75rem', opacity: 0.8 }}>{shot.durationSec}s</div>
+                <div
+                  onClick={() => setSelectedShotId(shot.id)}
+                  style={{
+                    padding: '0.5rem',
+                    cursor: 'pointer',
+                    fontSize: '0.85rem'
+                  }}
+                >
+                  <div style={{ fontWeight: 'bold' }}>{idx + 1}. {shot.name}</div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>{shot.durationSec}s · {shot.layers.length} layer{shot.layers.length !== 1 ? 's' : ''}</div>
+                </div>
+                {selectedShotId === shot.id && (
+                  <div style={{ padding: '0 0.5rem 0.5rem' }}>
+                    <label
+                      style={{ display: 'block', fontSize: '0.7rem', color: 'var(--muted)', marginBottom: '0.35rem' }}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      Duration (s)
+                      <input
+                        type="number"
+                        step="0.05"
+                        min="0.05"
+                        value={shotDurationDraft}
+                        onChange={(e) => setShotDurationDraft(e.target.value)}
+                        onBlur={() => void handleCommitShotDuration()}
+                        onClick={(e) => e.stopPropagation()}
+                        title="Enter a duration. Shrink is refused if audio, clips, keys, camera, or effects would be cut. Previous length is not restored from history."
+                        style={{ width: '100%', marginTop: '0.15rem', fontSize: '0.8rem' }}
+                      />
+                    </label>
+                    {shotDurationError && (
+                      <div style={{ color: '#ff8a8a', fontSize: '0.7rem', marginBottom: '0.35rem' }}>{shotDurationError}</div>
+                    )}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleDeleteShot(shot.id)
+                      }}
+                      style={{ width: '100%', padding: '0.25rem', fontSize: '0.75rem', background: 'var(--danger)', color: 'white' }}
+                    >
+                      Delete Shot
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
           </>
@@ -809,7 +4286,7 @@ export function StoryboardEditor() {
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
         {selectedShot ? (
           <>
-            <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem', alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: '1rem', marginBottom: '0.5rem', alignItems: 'center' }}>
               <h3 style={{ margin: 0 }}>{selectedShot.name}</h3>
               <div style={{ display: 'flex', gap: '0.5rem' }}>
                 <button
@@ -833,15 +4310,58 @@ export function StoryboardEditor() {
                   Camera
                 </button>
               </div>
-              <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.5rem' }}>
+              <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                 <button type="button" onClick={handlePlayAnimatic}>
                   {playbackState === 'playing' ? '⏸ Pause' : '▶ Play'}
                 </button>
                 <button type="button" onClick={handleStopPlayback}>
                   ⏹ Stop
                 </button>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.85rem', cursor: 'pointer', userSelect: 'none' }}>
+                  <input
+                    type="checkbox"
+                    checked={loopPlayback}
+                    onChange={(e) => setLoopPlayback(e.target.checked)}
+                  />
+                  Loop
+                </label>
               </div>
             </div>
+            
+            {mode === 'camera' && (
+              <div style={{ 
+                marginBottom: '0.5rem', 
+                padding: '0.5rem', 
+                background: 'rgba(0, 170, 255, 0.1)', 
+                borderLeft: '3px solid #00AAFF',
+                fontSize: '0.85rem',
+                color: 'var(--text-secondary)'
+              }}>
+                💡 <strong>Camera mode:</strong> Shows framing preview. Drag timeline or playback to see camera zoom/position change.
+                {selectedShot && selectedShot.cameraTrack.length > 1 && (
+                  <div style={{ marginTop: '0.25rem', fontSize: '0.75rem', fontStyle: 'italic' }}>
+                    Camera smoothly interpolates between keys. Scrub timeline to preview each moment.
+                  </div>
+                )}
+                {selectedShot && selectedShot.cameraTrack.length === 0 && (
+                  <div style={{ marginTop: '0.25rem', fontSize: '0.75rem', fontStyle: 'italic' }}>
+                    Add camera keyframes with "+ Camera" button. First key sets the camera position.
+                  </div>
+                )}
+              </div>
+            )}
+            {mode === 'layout' && selectedShot && selectedShot.cameraTrack.length > 0 && (
+              <div style={{ 
+                marginBottom: '0.5rem', 
+                padding: '0.5rem', 
+                background: 'rgba(255, 200, 0, 0.1)', 
+                borderLeft: '3px solid #FFC800',
+                fontSize: '0.85rem',
+                color: 'var(--text-secondary)'
+              }}>
+                💡 Switch to <strong>Camera mode</strong> to preview camera zoom/framing. Layout mode shows unframed view.
+              </div>
+            )}
 
             <div style={{ flex: 1, background: 'var(--bg-secondary)', borderRadius: '8px', padding: '1rem' }}>
               <canvas
@@ -851,6 +4371,7 @@ export function StoryboardEditor() {
                 onPointerDown={handlePointerDown}
                 onPointerMove={handlePointerMove}
                 onPointerUp={handlePointerUp}
+                onPointerCancel={handlePointerCancel}
                 style={{
                   width: '100%',
                   height: 'auto',
@@ -861,103 +4382,1407 @@ export function StoryboardEditor() {
                   touchAction: 'none'
                 }}
               />
+              
+              {mode === 'camera' && (() => {
+                const cam = getInterpolatedCamera(playbackTime)
+                if (!cam) return null
+                
+                // Find which keys are active for interpolation
+                const sorted = [...selectedShot.cameraTrack].sort((a, b) => a.t - b.t)
+                let interpolationInfo = ''
+                if (sorted.length > 0) {
+                  const onKey = sorted.find(k => Math.abs(k.t - playbackTime) < 0.01)
+                  if (onKey) {
+                    interpolationInfo = ' (on key)'
+                  } else {
+                    const before = sorted.filter(k => k.t <= playbackTime).pop()
+                    const after = sorted.find(k => k.t > playbackTime)
+                    if (before && after) {
+                      interpolationInfo = ` (blend ${before.t.toFixed(1)}s → ${after.t.toFixed(1)}s)`
+                    }
+                  }
+                }
+                
+                const targetLabel = typeof cam.target === 'string' 
+                  ? selectedShot?.layers.find(l => l.id === cam.target)?.characterId || 'layer'
+                  : `(${cam.target.x.toFixed(2)}, ${cam.target.y.toFixed(2)})`
+                return (
+                  <div style={{
+                    marginTop: '0.5rem',
+                    padding: '0.5rem',
+                    background: 'rgba(0, 170, 255, 0.15)',
+                    borderRadius: '4px',
+                    fontSize: '0.8rem',
+                    color: '#00AAFF',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center'
+                  }}>
+                    <span>
+                      <strong>Camera:</strong> Zoom {cam.zoom.toFixed(2)}x · Target: {targetLabel}{interpolationInfo}
+                    </span>
+                    <span style={{ color: 'var(--muted)', fontSize: '0.75rem' }}>
+                      @ {playbackTime.toFixed(2)}s
+                    </span>
+                  </div>
+                )
+              })()}
+              {(() => {
+                const bg = sampleBackgroundClip(selectedShot, clips, playbackTime)
+                const layerHits = selectedShot.layers
+                  .map((layer) => sampleLayerClip(selectedShot, clips, layer.id, playbackTime))
+                  .filter(Boolean)
+                const samples = [...(bg ? [bg] : []), ...layerHits]
+                if (samples.length === 0 && clipBlocks.length === 0) return null
+                if (samples.length === 0) {
+                  return (
+                    <div style={{ marginTop: '0.35rem', fontSize: '0.75rem', color: 'var(--muted)' }}>
+                      Clips: none active at {playbackTime.toFixed(2)}s (outside block = hidden)
+                    </div>
+                  )
+                }
+                return (
+                  <div style={{ marginTop: '0.35rem', fontSize: '0.75rem', color: '#C9A0FF' }}>
+                    {samples.map((s, i) => {
+                      const video = videosRef.current.get(s!.clipId)
+                      const clip = clips.find((c) => c.id === s!.clipId)
+                      return (
+                        <span key={`${s!.blockId}-${i}`}>
+                          {i > 0 ? ' · ' : ''}
+                          {s!.role} {clip?.moment || s!.clipId} src {s!.sourceTimeSec.toFixed(2)}s
+                          {s!.implicit ? ' (implicit)' : ''}
+                          {video?.status === 'ready'
+                            ? ''
+                            : video
+                              ? ` [${video.status}]`
+                              : ''}
+                        </span>
+                      )
+                    })}
+                  </div>
+                )
+              })()}
             </div>
 
-            {/* Timeline */}
+              {/* Timeline - inspector moved to sidebar */}
             <div style={{ marginTop: '1rem', padding: '1rem', background: 'var(--bg-secondary)', borderRadius: '8px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', alignItems: 'center' }}>
                 <span style={{ fontSize: '0.9rem', fontWeight: 'bold' }}>Timeline</span>
-                <div style={{ display: 'flex', gap: '0.5rem', fontSize: '0.85rem' }}>
-                  {mode === 'camera' && (
-                    <button type="button" onClick={handleAddCameraKeyframe} style={{ fontSize: '0.8rem', padding: '0.25rem 0.5rem' }}>
-                      + Camera @ {playbackTime.toFixed(1)}s
-                    </button>
-                  )}
+                <div style={{ display: 'flex', gap: '0.5rem', fontSize: '0.85rem', alignItems: 'center' }}>
+                  <button 
+                    type="button" 
+                    onClick={() => {
+                      handleAddCameraKeyframe()
+                      if (mode !== 'camera') {
+                        setMode('camera')
+                      }
+                    }} 
+                    style={{ 
+                      fontSize: '0.8rem', 
+                      padding: '0.25rem 0.5rem',
+                      background: mode === 'camera' ? 'var(--forge-gold)' : 'var(--bg-secondary)',
+                      color: mode === 'camera' ? 'var(--bg)' : 'var(--text)',
+                      border: mode === 'camera' ? 'none' : '1px solid var(--border)'
+                    }}
+                    title={mode === 'camera' ? 'Add camera keyframe at current time' : 'Add camera keyframe (switches to Camera mode)'}
+                  >
+                    + Camera @ {playbackTime.toFixed(1)}s
+                  </button>
                   <button type="button" onClick={() => setShowAddEffect(true)} style={{ fontSize: '0.8rem', padding: '0.25rem 0.5rem' }}>
                     + Effect
                   </button>
-                  <span style={{ color: 'var(--muted)' }}>
-                    {playbackTime.toFixed(2)}s / {selectedShot.durationSec}s
-                  </span>
+                  <button
+                    type="button"
+                    onClick={handleAddTimedKey}
+                    style={{ fontSize: '0.8rem', padding: '0.25rem 0.5rem' }}
+                    title="Add a pose/state key on the selected character or visual-asset layer (not a duplicate layer)"
+                  >
+                    + Pose/State @ {playbackTime.toFixed(1)}s
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAddClipRole('layer')
+                      setAddClipSourceIn('0')
+                      setAddClipSourceOut('')
+                      setAddClipId('')
+                      setLibraryPicker({
+                        purpose: 'clipBlock',
+                        title: 'Choose a clip',
+                        initialTab: 'clips'
+                      })
+                    }}
+                    style={{ fontSize: '0.8rem', padding: '0.25rem 0.5rem' }}
+                    title="Place a timed clip block with visible duration (not an instantaneous key)"
+                  >
+                    + Clip @ {playbackTime.toFixed(1)}s
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAddAudioId('')
+                      setAddAudioSourceIn('0')
+                      setAddAudioSourceOut('')
+                      setAddAudioDuration('')
+                      setAddAudioVolume('1')
+                      setAddAudioFadeIn('0')
+                      setAddAudioFadeOut('0')
+                      setAudioError(null)
+                      setLibraryPicker({
+                        purpose: 'audioAsset',
+                        title: 'Choose audio'
+                      })
+                    }}
+                    style={{ fontSize: '0.8rem', padding: '0.25rem 0.5rem' }}
+                    title="Place a timed music or SFX block. Duration defaults to remaining shot time. Playback uses HTMLAudioElement.play()/pause()."
+                  >
+                    + Audio @ {playbackTime.toFixed(1)}s
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAddEventCueEventId('')
+                      setEventCueError(null)
+                      setLibraryPicker({
+                        purpose: 'eventDefinition',
+                        title: 'Choose event'
+                      })
+                    }}
+                    style={{ fontSize: '0.8rem', padding: '0.25rem 0.5rem' }}
+                    title="Place a one-shot named-event cue. Play fires it once when the playhead crosses this time going forward."
+                  >
+                    + Event @ {playbackTime.toFixed(1)}s
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setBackgroundKeyError(null)
+                      setBackgroundKeyPickPending(true)
+                      setLibraryPicker({
+                        purpose: 'shotBackground',
+                        title: 'Background still at playhead'
+                      })
+                    }}
+                    style={{ fontSize: '0.8rem', padding: '0.25rem 0.5rem' }}
+                    title="Cut the still background at the playhead. Holds until the next background key. Clip-track background blocks still overlay stills."
+                  >
+                    + Background @ {playbackTime.toFixed(1)}s
+                  </button>
+                  <label style={{ fontSize: '0.75rem', color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                    {playbackTime.toFixed(2)}s /
+                    <input
+                      type="number"
+                      step="0.05"
+                      min="0.05"
+                      value={shotDurationDraft}
+                      onChange={(e) => setShotDurationDraft(e.target.value)}
+                      onBlur={() => void handleCommitShotDuration()}
+                      title="Shot duration (seconds). Enter a value to shorten or lengthen. Shrink is refused if other content would be cut."
+                      style={{ width: '4.5rem', fontSize: '0.75rem' }}
+                    />
+                    s
+                  </label>
                 </div>
               </div>
+              {shotDurationError && (
+                <div style={{ color: '#ff8a8a', fontSize: '0.75rem', marginBottom: '0.45rem' }}>{shotDurationError}</div>
+              )}
               
               <div 
-                style={{ position: 'relative', height: '60px', background: 'var(--bg)', borderRadius: '4px', cursor: 'pointer' }}
+                style={{ 
+                  position: 'relative', 
+                  height: `${TIMELINE_HEIGHT_PX}px`, 
+                  background: 'var(--bg)', 
+                  borderRadius: '4px', 
+                  cursor: 'pointer',
+                  userSelect: 'none',
+                  WebkitUserSelect: 'none'
+                }}
                 onPointerDown={handleTimelinePointerDown}
                 onPointerMove={handleTimelinePointerMove}
                 onPointerUp={handleTimelinePointerUp}
+                onPointerCancel={handleTimelinePointerCancel}
               >
-                {/* Playhead */}
+                {/* Track Labels - pointerEvents none to not block marker clicks */}
+                <div style={{ position: 'absolute', left: '0.5rem', top: '5px', fontSize: '0.7rem', fontWeight: 'bold', color: '#00AAFF', zIndex: 5, pointerEvents: 'none' }}>
+                  Camera
+                </div>
+                <div style={{ position: 'absolute', left: '0.5rem', top: '45px', fontSize: '0.7rem', fontWeight: 'bold', color: '#8EC8FF', zIndex: 5, pointerEvents: 'none' }}>
+                  Background
+                </div>
+                <div style={{ position: 'absolute', left: '0.5rem', top: '85px', fontSize: '0.7rem', fontWeight: 'bold', color: '#7CFFB2', zIndex: 5, pointerEvents: 'none' }}>
+                  Pose/State
+                </div>
+                <div style={{ position: 'absolute', left: '0.5rem', top: '125px', fontSize: '0.7rem', fontWeight: 'bold', color: '#FF6B6B', zIndex: 5, pointerEvents: 'none' }}>
+                  Effects
+                </div>
+                <div style={{ position: 'absolute', left: '0.5rem', top: '165px', fontSize: '0.7rem', fontWeight: 'bold', color: '#C9A0FF', zIndex: 5, pointerEvents: 'none' }}>
+                  Clips
+                </div>
+                <div style={{ position: 'absolute', left: '0.5rem', top: '205px', fontSize: '0.7rem', fontWeight: 'bold', color: '#FFB347', zIndex: 5, pointerEvents: 'none' }}>
+                  Audio
+                </div>
+                <div style={{ position: 'absolute', left: '0.5rem', top: '245px', fontSize: '0.7rem', fontWeight: 'bold', color: '#F48FB1', zIndex: 5, pointerEvents: 'none' }}>
+                  Events
+                </div>
+                
+                {/* Track Dividers */}
+                <div style={{ position: 'absolute', left: 0, right: 0, top: '40px', height: '1px', background: 'rgba(255,255,255,0.1)', pointerEvents: 'none' }} />
+                <div style={{ position: 'absolute', left: 0, right: 0, top: '80px', height: '1px', background: 'rgba(255,255,255,0.1)', pointerEvents: 'none' }} />
+                <div style={{ position: 'absolute', left: 0, right: 0, top: '120px', height: '1px', background: 'rgba(255,255,255,0.1)', pointerEvents: 'none' }} />
+                <div style={{ position: 'absolute', left: 0, right: 0, top: '160px', height: '1px', background: 'rgba(255,255,255,0.1)', pointerEvents: 'none' }} />
+                <div style={{ position: 'absolute', left: 0, right: 0, top: '200px', height: '1px', background: 'rgba(255,255,255,0.1)', pointerEvents: 'none' }} />
+                <div style={{ position: 'absolute', left: 0, right: 0, top: '240px', height: '1px', background: 'rgba(255,255,255,0.1)', pointerEvents: 'none' }} />
+                
+                {/* Playhead - visual indicator, clicks handled by timeline */}
                 <div
                   style={{
                     position: 'absolute',
                     left: `${(playbackTime / selectedShot.durationSec) * 100}%`,
                     top: 0,
                     bottom: 0,
-                    width: '2px',
-                    background: '#FFC800',
+                    width: '12px',
+                    transform: 'translateX(-6px)',
+                    cursor: 'ew-resize',
                     zIndex: 10,
                     pointerEvents: 'none'
                   }}
-                />
+                >
+                  <div style={{
+                    position: 'absolute',
+                    left: '5px',
+                    top: 0,
+                    bottom: 0,
+                    width: '2px',
+                    background: '#FFC800',
+                    pointerEvents: 'none'
+                  }} />
+                  <div style={{
+                    position: 'absolute',
+                    left: '0',
+                    top: '0',
+                    width: '12px',
+                    height: '12px',
+                    background: '#FFC800',
+                    clipPath: 'polygon(50% 0%, 100% 100%, 0% 100%)',
+                    pointerEvents: 'none'
+                  }} />
+                </div>
                 
                 {/* Camera keyframes */}
-                {selectedShot.cameraTrack.map((kf, idx) => (
-                  <div
-                    key={idx}
-                    onContextMenu={(e) => {
-                      e.preventDefault()
-                      handleDeleteMarker('camera', idx)
-                    }}
-                    style={{
-                      position: 'absolute',
-                      left: `${(kf.t / selectedShot.durationSec) * 100}%`,
-                      top: '10px',
-                      width: '14px',
-                      height: '14px',
-                      background: '#00AAFF',
-                      borderRadius: '50%',
-                      transform: 'translateX(-50%)',
-                      cursor: 'grab',
-                      border: '2px solid #fff',
-                      boxShadow: '0 2px 4px rgba(0,0,0,0.3)'
-                    }}
-                    title={`Camera @ ${kf.t.toFixed(1)}s (right-click to delete)`}
-                  />
-                ))}
+                {selectedShot.cameraTrack.map((kf, idx) => {
+                  const targetLabel = typeof kf.target === 'string' 
+                    ? `layer ${kf.target.slice(0, 8)}...` 
+                    : `(${kf.target.x.toFixed(2)}, ${kf.target.y.toFixed(2)})`
+                  const tooltip = `Camera @ ${kf.t.toFixed(1)}s\nZoom: ${kf.zoom.toFixed(1)}x\nTarget: ${targetLabel}`
+                  
+                  return (
+                    <div
+                      key={idx}
+                      onPointerDown={(e) => {
+                        // Don't stopPropagation - let timeline handle dragging
+                        // Select this camera marker, clear effect selection
+                        setSelectedCameraIndex(idx)
+                        setEditingCamera(true)
+                        setCameraManuallySelected(true)
+                        // Clear effect selection to show only one inspector
+                        setEditingEffect(false)
+                        setSelectedEffectIndex(null)
+                        setSelectedEventCueId(null)
+                        // Auto-switch to Camera & Effects tab
+                        setSidebarTab('camera')
+                      }}
+                      style={{
+                        position: 'absolute',
+                        left: `${(kf.t / selectedShot.durationSec) * 100}%`,
+                        top: '15px',
+                        width: '20px',
+                        height: '20px',
+                        background: selectedCameraIndex === idx ? '#FFD700' : '#00AAFF',
+                        borderRadius: '50%',
+                        transform: 'translateX(-50%)',
+                        cursor: 'move',
+                        border: selectedCameraIndex === idx ? '3px solid #FFF' : '2px solid #fff',
+                        boxShadow: selectedCameraIndex === idx ? '0 0 8px rgba(255, 215, 0, 0.6)' : '0 2px 4px rgba(0,0,0,0.3)',
+                        zIndex: selectedCameraIndex === idx ? 11 : 5
+                      }}
+                      title={tooltip}
+                    />
+                  )
+                })}
+
+                {backgroundKeys.map((key) => {
+                  const duration = selectedShot.durationSec || 1
+                  const selected = selectedBackgroundKeyId === key.id
+                  const issue = pipeline ? backgroundKeyIssues(key, pipeline, selectedShot.id) : null
+                  const label = describeBackgroundKey(key, pipeline)
+                  const tooltip = `${label} @ ${key.t.toFixed(2)}s\nHolds until the next background key (hard cut)${issue ? `\n${issue}` : ''}`
+                  return (
+                    <div
+                      key={key.id}
+                      onPointerDown={() => {
+                        setSelectedBackgroundKeyId(key.id)
+                        setSidebarTab('background')
+                        setEditingCamera(false)
+                        setSelectedCameraIndex(null)
+                        setEditingEffect(false)
+                        setSelectedEffectIndex(null)
+                        setSelectedTimedKeyId(null)
+                        setSelectedClipBlockId(null)
+                        setSelectedAudioBlockId(null)
+                        setSelectedEventCueId(null)
+                      }}
+                      style={{
+                        position: 'absolute',
+                        left: `${(key.t / duration) * 100}%`,
+                        top: '55px',
+                        width: '18px',
+                        height: '18px',
+                        background: selected ? '#FFD700' : issue ? '#C44' : '#8EC8FF',
+                        borderRadius: '3px',
+                        transform: 'translateX(-50%)',
+                        cursor: 'move',
+                        border: selected ? '3px solid #FFF' : '2px solid #fff',
+                        boxShadow: selected ? '0 0 8px rgba(255, 215, 0, 0.6)' : '0 2px 4px rgba(0,0,0,0.3)',
+                        zIndex: selected ? 11 : 5
+                      }}
+                      title={tooltip}
+                    />
+                  )
+                })}
+
+                {selectedLayer &&
+                  (() => {
+                    const duration = selectedShot.durationSec || 1
+                    const range = layerPresenceRange(selectedLayer, selectedShot.durationSec)
+                    const left = (range.from / duration) * 100
+                    const width = Math.max(0.4, ((range.to - range.from) / duration) * 100)
+                    return (
+                      <div
+                        key={`range-${selectedLayer.id}`}
+                        style={{
+                          position: 'absolute',
+                          left: `${left}%`,
+                          top: '88px',
+                          width: `${width}%`,
+                          height: '24px',
+                          background: 'rgba(124, 255, 178, 0.28)',
+                          border: '1px solid #7CFFB2',
+                          borderRadius: '3px',
+                          pointerEvents: 'none',
+                          zIndex: 4,
+                          boxSizing: 'border-box'
+                        }}
+                        title={`Presence ${range.from.toFixed(2)}s–${range.to.toFixed(2)}s (half-open). Drag ends to trim. Eye hide is separate.`}
+                      />
+                    )
+                  })()}
+                
+                {/* Pose/state timed keys (same layer, not duplicate layers) */}
+                {timedKeyRows.map((row) => {
+                  const selected = selectedTimedKeyId === row.key.id
+                  const layer = selectedShot.layers.find((l) => l.id === row.layerId)
+                  const layerName = pipeline && layer ? describeLayerLabel(layer, pipeline) : row.layerId
+                  const issue = pipeline ? timedKeyIssues(row.key, layer || ({} as StoryboardLayer), pipeline, selectedShot.id) : null
+                  const tooltip = `${layerName}\n${timedKeyActionLabel(row.key)} @ ${row.key.t.toFixed(2)}s (step/hold)${issue ? `\n${issue}` : ''}`
+                  return (
+                    <div
+                      key={row.key.id}
+                      onPointerDown={() => {
+                        setSelectedTimedKeyId(row.key.id)
+                        setSelectedLayerId(row.layerId)
+                        setSidebarTab('background')
+                        setEditingCamera(false)
+                        setSelectedCameraIndex(null)
+                        setEditingEffect(false)
+                        setSelectedEffectIndex(null)
+                        setSelectedEventCueId(null)
+                      }}
+                      style={{
+                        position: 'absolute',
+                        left: `${(row.key.t / selectedShot.durationSec) * 100}%`,
+                        top: '90px',
+                        width: '18px',
+                        height: '18px',
+                        background: selected ? '#FFD700' : issue ? '#C44' : '#7CFFB2',
+                        borderRadius: '3px',
+                        transform: 'translateX(-50%)',
+                        cursor: 'move',
+                        border: selected ? '3px solid #FFF' : '2px solid #fff',
+                        boxShadow: selected ? '0 0 8px rgba(255, 215, 0, 0.6)' : '0 2px 4px rgba(0,0,0,0.3)',
+                        zIndex: selected ? 11 : 5
+                      }}
+                      title={tooltip}
+                    />
+                  )
+                })}
                 
                 {/* Effect markers */}
-                {selectedShot.effectsTrack.map((ef, idx) => (
-                  <div
-                    key={idx}
-                    onContextMenu={(e) => {
-                      e.preventDefault()
-                      handleDeleteMarker('effect', idx)
-                    }}
-                    style={{
-                      position: 'absolute',
-                      left: `${(ef.t / selectedShot.durationSec) * 100}%`,
-                      bottom: '10px',
-                      width: '14px',
-                      height: '14px',
-                      background: '#FF6B6B',
-                      borderRadius: '50%',
-                      transform: 'translateX(-50%)',
-                      cursor: 'grab',
-                      border: '2px solid #fff',
-                      boxShadow: '0 2px 4px rgba(0,0,0,0.3)'
-                    }}
-                    title={`Effect @ ${ef.t.toFixed(1)}s (right-click to delete)`}
-                  />
-                ))}
+                {selectedShot.effectsTrack.map((ef, idx) => {
+                  const preset = ef.presetId ? presets.find(p => p.id === ef.presetId) : null
+                  const label = preset ? preset.type : 'effect'
+                  return (
+                    <div
+                      key={idx}
+                      onPointerDown={(e) => {
+                        // Don't stopPropagation - let timeline handle dragging
+                        // Select this effect marker, clear camera selection
+                        setSelectedEffectIndex(idx)
+                        setEditingEffect(true)
+                        // Clear camera selection to show only one inspector
+                        setEditingCamera(false)
+                        setSelectedCameraIndex(null)
+                        // Auto-switch to Camera & Effects tab
+                        setSidebarTab('camera')
+                      }}
+                      style={{
+                        position: 'absolute',
+                        left: `${(ef.t / selectedShot.durationSec) * 100}%`,
+                        top: '130px',
+                        width: '20px',
+                        height: '20px',
+                        background: selectedEffectIndex === idx ? '#FFD700' : '#FF6B6B',
+                        borderRadius: '50%',
+                        transform: 'translateX(-50%)',
+                        cursor: 'move',
+                        border: selectedEffectIndex === idx ? '3px solid #FFF' : '2px solid #fff',
+                        boxShadow: selectedEffectIndex === idx ? '0 0 8px rgba(255, 215, 0, 0.6)' : '0 2px 4px rgba(0,0,0,0.3)',
+                        zIndex: selectedEffectIndex === idx ? 11 : 5
+                      }}
+                      title={`${label} @ ${ef.t.toFixed(1)}s (drag to move, right-click to delete)`}
+                    />
+                  )
+                })}
+
+                {clipBlocks.map((block) => {
+                  const duration = selectedShot.durationSec || 1
+                  const left = (block.t / duration) * 100
+                  const width = Math.max(0.8, (block.durationSec / duration) * 100)
+                  const selected = selectedClipBlockId === block.id
+                  const clip = clips.find((c) => c.id === block.clipId)
+                  const issue = pipeline && !block.implicit
+                    ? clipBlockIssues(block, selectedShot, pipeline, selectedShot.id)
+                    : null
+                  const video = videosRef.current.get(block.clipId)
+                  const mediaNote =
+                    video?.status === 'ready'
+                      ? 'ready'
+                      : video?.status === 'loading'
+                        ? 'loading'
+                        : video?.message || (clip ? '' : 'missing clip')
+                  const tooltip = `${block.implicit ? 'Implicit (legacy) ' : ''}${block.role} ${clip?.moment || block.clipId}\n${block.t.toFixed(2)}s–${clipBlockEnd(block).toFixed(2)}s\nsrc ${block.sourceInSec.toFixed(2)}–${block.sourceOutSec.toFixed(2)}\n${mediaNote}${issue ? `\n${issue}` : ''}\nBefore/after block: hidden (not last frame)`
+                  return (
+                    <div
+                      key={block.id}
+                      onPointerDown={() => {
+                        setSelectedClipBlockId(block.id)
+                        if (block.layerId) setSelectedLayerId(block.layerId)
+                        setSidebarTab('background')
+                        setEditingCamera(false)
+                        setSelectedCameraIndex(null)
+                        setEditingEffect(false)
+                        setSelectedEffectIndex(null)
+                        setSelectedTimedKeyId(null)
+                        setSelectedAudioBlockId(null)
+                        setSelectedEventCueId(null)
+                      }}
+                      style={{
+                        position: 'absolute',
+                        left: `${left}%`,
+                        top: '168px',
+                        width: `${width}%`,
+                        height: '26px',
+                        background: selected ? '#E2C6FF' : block.implicit ? 'transparent' : issue ? '#C44' : '#7B4DFF',
+                        border: block.implicit
+                          ? `2px dashed ${selected ? '#FFF' : '#C9A0FF'}`
+                          : selected
+                            ? '3px solid #FFF'
+                            : '2px solid #fff',
+                        borderRadius: '4px',
+                        cursor: block.implicit ? 'pointer' : 'ew-resize',
+                        boxSizing: 'border-box',
+                        zIndex: selected ? 11 : 5,
+                        overflow: 'hidden',
+                        fontSize: '0.65rem',
+                        color: selected || block.implicit ? '#1a1a1a' : '#fff',
+                        padding: '2px 4px',
+                        lineHeight: 1.1,
+                        whiteSpace: 'nowrap',
+                        textOverflow: 'ellipsis'
+                      }}
+                      title={tooltip}
+                    >
+                      {(clip?.moment || block.role).slice(0, 12)}
+                    </div>
+                  )
+                })}
+
+                {audioBlocks.map((block) => {
+                  const duration = selectedShot.durationSec || 1
+                  const left = (block.t / duration) * 100
+                  const width = Math.max(0.8, (block.durationSec / duration) * 100)
+                  const selected = selectedAudioBlockId === block.id
+                  const asset = audioAssets.find((a) => a.id === block.audioId)
+                  const issue = pipeline ? audioBlockIssues(block, selectedShot, pipeline, selectedShot.id) : null
+                  const voice = audioVoicesRef.current.get(block.id)
+                  const mediaNote =
+                    voice?.status === 'ready'
+                      ? 'ready'
+                      : voice?.status === 'loading'
+                        ? 'loading'
+                        : voice?.message || (asset ? '' : 'missing audio')
+                  const tooltip = `${block.role}${block.loop ? ' loop' : ''} ${asset?.name || block.audioId}\n${block.t.toFixed(2)}s–${audioBlockEnd(block).toFixed(2)}s\nsrc ${block.sourceInSec.toFixed(2)}–${block.sourceOutSec.toFixed(2)}\nvol ${block.volume} fade ${block.fadeInSec}/${block.fadeOutSec}\n${mediaNote}${issue ? `\n${issue}` : ''}\nSilence outside bar. Play uses HTMLAudio play()/pause().`
+                  return (
+                    <div
+                      key={block.id}
+                      onPointerDown={() => {
+                        setSelectedAudioBlockId(block.id)
+                        setSidebarTab('background')
+                        setEditingCamera(false)
+                        setSelectedCameraIndex(null)
+                        setEditingEffect(false)
+                        setSelectedEffectIndex(null)
+                        setSelectedTimedKeyId(null)
+                        setSelectedClipBlockId(null)
+                        setSelectedEventCueId(null)
+                      }}
+                      style={{
+                        position: 'absolute',
+                        left: `${left}%`,
+                        top: '208px',
+                        width: `${width}%`,
+                        height: '26px',
+                        background: selected
+                          ? '#FFD8A8'
+                          : issue
+                            ? '#C44'
+                            : block.role === 'music'
+                              ? '#E07A2F'
+                              : '#FFB347',
+                        border: selected ? '3px solid #FFF' : '2px solid #fff',
+                        borderRadius: '4px',
+                        cursor: 'ew-resize',
+                        boxSizing: 'border-box',
+                        zIndex: selected ? 11 : 5,
+                        overflow: 'hidden',
+                        fontSize: '0.65rem',
+                        color: selected ? '#1a1a1a' : '#1a1a1a',
+                        padding: '2px 4px',
+                        lineHeight: 1.1,
+                        whiteSpace: 'nowrap',
+                        textOverflow: 'ellipsis'
+                      }}
+                      title={tooltip}
+                    >
+                      {(asset?.name || block.role).slice(0, 12)}
+                    </div>
+                  )
+                })}
+
+                {eventCues.map((cue) => {
+                  const duration = selectedShot.durationSec || 1
+                  const selected = selectedEventCueId === cue.id
+                  const event = eventDefinitions.find((e) => e.id === cue.eventId)
+                  const issue = pipeline ? eventCueIssues(cue, pipeline, selectedShot.id) : null
+                  const tooltip = `${event?.name || cue.eventId} @ ${cue.t.toFixed(2)}s\nFires once per forward Play crossing${issue ? `\n${issue}` : ''}`
+                  return (
+                    <div
+                      key={cue.id}
+                      onPointerDown={() => {
+                        setSelectedEventCueId(cue.id)
+                        setSidebarTab('background')
+                        setEditingCamera(false)
+                        setSelectedCameraIndex(null)
+                        setEditingEffect(false)
+                        setSelectedEffectIndex(null)
+                        setSelectedTimedKeyId(null)
+                        setSelectedClipBlockId(null)
+                        setSelectedAudioBlockId(null)
+                      }}
+                      style={{
+                        position: 'absolute',
+                        left: `${(cue.t / duration) * 100}%`,
+                        top: '248px',
+                        width: '18px',
+                        height: '18px',
+                        background: selected ? '#FFD700' : issue ? '#C44' : '#F48FB1',
+                        borderRadius: '50%',
+                        transform: 'translateX(-50%)',
+                        cursor: 'move',
+                        border: selected ? '3px solid #FFF' : '2px solid #fff',
+                        boxShadow: selected ? '0 0 8px rgba(255, 215, 0, 0.6)' : '0 2px 4px rgba(0,0,0,0.3)',
+                        zIndex: selected ? 11 : 5
+                      }}
+                      title={tooltip}
+                    />
+                  )
+                })}
               </div>
+
+              {selectedTimedKeyRow && selectedShot && (
+                <div style={{ marginTop: '0.5rem', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                  <strong>Pose/State key</strong>
+                  {' · '}
+                  {pipeline
+                    ? describeLayerLabel(
+                        selectedShot.layers.find((l) => l.id === selectedTimedKeyRow.layerId) || selectedShot.layers[0],
+                        pipeline
+                      )
+                    : selectedTimedKeyRow.layerId}
+                  {' · '}
+                  {timedKeyActionLabel(selectedTimedKeyRow.key)}
+                  {' @ '}
+                  {selectedTimedKeyRow.key.t.toFixed(2)}s
+                  {' (step/hold; authored starting pose/state unchanged)'}
+                </div>
+              )}
+
+              {showAddClip && (
+                <div style={{ marginTop: '0.5rem', padding: '0.75rem', background: 'var(--bg)', borderRadius: '4px', border: '2px solid #C9A0FF' }}>
+                  <div style={{ fontWeight: 'bold', marginBottom: '0.35rem', fontSize: '0.9rem' }}>
+                    Add clip block at {playbackTime.toFixed(2)}s
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--muted)', marginBottom: '0.5rem' }}>
+                    Range bar with duration (not a key). Playhead drives video time so reverse scrub works.
+                    Overflow needs an explicit extend — never silent. Before/after the block the clip is hidden.
+                  </div>
+                  {gameClips.length === 0 ? (
+                    <div style={{ fontSize: '0.8rem', marginBottom: '0.5rem' }}>
+                      No clips in this Game. Import mp4/webm (mov attempted) in Clips first.
+                    </div>
+                  ) : (
+                    <>
+                      <label style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.35rem' }}>
+                        Clip
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setLibraryPicker({
+                              purpose: 'clipBlock',
+                              title: 'Choose a clip',
+                              initialTab: 'clips'
+                            })
+                          }
+                          style={{
+                            width: '100%',
+                            marginTop: '0.2rem',
+                            fontSize: '0.85rem',
+                            padding: '0.4rem',
+                            background: 'var(--forge-gold)',
+                            color: '#000',
+                            textAlign: 'left'
+                          }}
+                        >
+                          {addClipId
+                            ? `${gameClips.find((c) => c.id === addClipId)?.moment || addClipId} (${gameClips.find((c) => c.id === addClipId)?.durationSec ?? '?'}s)`
+                            : 'Choose clip…'}
+                        </button>
+                      </label>
+                      <label style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.35rem' }}>
+                        Role
+                        <select
+                          value={addClipRole}
+                          onChange={(e) => setAddClipRole(e.target.value as 'layer' | 'background')}
+                          style={{ width: '100%', marginTop: '0.2rem', fontSize: '0.85rem' }}
+                        >
+                          <option value="layer">Layer (creates clip layer if needed)</option>
+                          <option value="background">Background</option>
+                        </select>
+                      </label>
+                      <div style={{ display: 'flex', gap: '0.5rem' }}>
+                        <label style={{ flex: 1, fontSize: '0.75rem' }}>
+                          Source in
+                          <input
+                            type="number"
+                            step="0.05"
+                            min="0"
+                            value={addClipSourceIn}
+                            onChange={(e) => setAddClipSourceIn(e.target.value)}
+                            style={{ width: '100%', marginTop: '0.2rem', fontSize: '0.85rem' }}
+                          />
+                        </label>
+                        <label style={{ flex: 1, fontSize: '0.75rem' }}>
+                          Source out
+                          <input
+                            type="number"
+                            step="0.05"
+                            min="0"
+                            value={addClipSourceOut}
+                            onChange={(e) => setAddClipSourceOut(e.target.value)}
+                            style={{ width: '100%', marginTop: '0.2rem', fontSize: '0.85rem' }}
+                          />
+                        </label>
+                      </div>
+                      {(() => {
+                        const c = gameClips.find((x) => x.id === addClipId)
+                        if (!c) return null
+                        const win = defaultSourceWindow(
+                          { ...c, durationSec: Number(addClipSourceOut || c.durationSec) - Number(addClipSourceIn || 0) > 0
+                            ? c.durationSec
+                            : c.durationSec },
+                          selectedShot.durationSec,
+                          playbackTime
+                        )
+                        const end = playbackTime + (Number(addClipSourceOut || c.durationSec) - Number(addClipSourceIn || 0))
+                        if (end > selectedShot.durationSec) {
+                          return (
+                            <div style={{ fontSize: '0.75rem', color: '#e8c36a', marginTop: '0.35rem' }}>
+                              Block would end at {end.toFixed(2)}s (shot {selectedShot.durationSec}s). You will be asked to extend — never silent.
+                            </div>
+                          )
+                        }
+                        return win.needsExtend ? (
+                          <div style={{ fontSize: '0.75rem', color: '#e8c36a', marginTop: '0.35rem' }}>
+                            Clip is longer than remaining shot time. Extend is opt-in.
+                          </div>
+                        ) : null
+                      })()}
+                    </>
+                  )}
+                  <div style={{ display: 'flex', gap: '0.35rem', marginTop: '0.5rem' }}>
+                    <button
+                      type="button"
+                      onClick={handleAddClipBlock}
+                      disabled={!addClipId}
+                      style={{ flex: 1, fontSize: '0.85rem', background: '#7B4DFF', color: '#fff' }}
+                    >
+                      Place block
+                    </button>
+                    <button type="button" onClick={() => setShowAddClip(false)} style={{ flex: 1, fontSize: '0.85rem' }}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {selectedClipBlock && selectedShot && (
+                <div style={{ marginTop: '0.5rem', padding: '0.6rem', background: 'var(--bg)', borderRadius: '4px', fontSize: '0.8rem' }}>
+                  <div>
+                    <strong>{selectedClipBlock.implicit ? 'Implicit clip (legacy)' : 'Clip block'}</strong>
+                    {' · '}
+                    {selectedClipBlock.role}
+                    {' · '}
+                    {clips.find((c) => c.id === selectedClipBlock.clipId)?.moment || selectedClipBlock.clipId}
+                    {' · '}
+                    {selectedClipBlock.t.toFixed(2)}s–{clipBlockEnd(selectedClipBlock).toFixed(2)}s
+                  </div>
+                  <div style={{ color: 'var(--muted)', marginTop: '0.2rem', fontSize: '0.75rem' }}>
+                    Half-open [t, t+duration). Outside the bar the clip is not drawn (not freeze-frame).
+                    {selectedClipBlock.implicit
+                      ? ' Legacy layer.clipId / backgroundClipId plays from 0 without extending the shot until you convert it to an explicit block.'
+                      : ' Drag the bar to move (clamped inside the shot). Drag edges to trim. Play/pause/stop/loop and reverse scrub seek source time.'}
+                  </div>
+                  {(() => {
+                    const video = videosRef.current.get(selectedClipBlock.clipId)
+                    const clip = clips.find((c) => c.id === selectedClipBlock.clipId)
+                    if (!clip) return <div style={{ color: '#ff8a8a', marginTop: '0.25rem' }}>Missing clip library item</div>
+                    if (video?.status === 'loading') return <div style={{ color: '#9ad', marginTop: '0.25rem' }}>Loading media… seeking when ready</div>
+                    if (video && video.status !== 'ready') {
+                      return <div style={{ color: '#ff8a8a', marginTop: '0.25rem' }}>{video.message}</div>
+                    }
+                    if (video?.status === 'ready' && video.durationSec && Math.abs(video.durationSec - clip.durationSec) > 0.2) {
+                      return (
+                        <div style={{ color: '#e8c36a', marginTop: '0.25rem' }}>
+                          Host duration {video.durationSec.toFixed(2)}s vs library {clip.durationSec}s — using library trim window
+                        </div>
+                      )
+                    }
+                    return video?.status === 'ready' ? (
+                      <div style={{ color: '#9ad', marginTop: '0.25rem' }}>Seek-ready · forge-file preview</div>
+                    ) : null
+                  })()}
+                  {selectedClipBlock.implicit ? (
+                    <button
+                      type="button"
+                      onClick={handlePromoteImplicitBlock}
+                      style={{ marginTop: '0.4rem', fontSize: '0.8rem' }}
+                    >
+                      Convert to explicit block
+                    </button>
+                  ) : (
+                    <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.4rem', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                      <label style={{ fontSize: '0.75rem' }}>
+                        Start
+                        <input
+                          type="number"
+                          step="0.05"
+                          min="0"
+                          value={clipTimeDraft}
+                          onChange={(e) => setClipTimeDraft(e.target.value)}
+                          onBlur={handleCommitClipBlockEdits}
+                          style={{ width: '4.5rem', marginLeft: '0.25rem' }}
+                        />
+                      </label>
+                      <label style={{ fontSize: '0.75rem' }}>
+                        In
+                        <input
+                          type="number"
+                          step="0.05"
+                          min="0"
+                          value={clipInDraft}
+                          onChange={(e) => setClipInDraft(e.target.value)}
+                          onBlur={handleCommitClipBlockEdits}
+                          style={{ width: '4.5rem', marginLeft: '0.25rem' }}
+                        />
+                      </label>
+                      <label style={{ fontSize: '0.75rem' }}>
+                        Out
+                        <input
+                          type="number"
+                          step="0.05"
+                          min="0"
+                          value={clipOutDraft}
+                          onChange={(e) => setClipOutDraft(e.target.value)}
+                          onBlur={handleCommitClipBlockEdits}
+                          style={{ width: '4.5rem', marginLeft: '0.25rem' }}
+                        />
+                      </label>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>
+                        {selectedClipBlock.durationSec.toFixed(2)}s
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmDeleteClipBlockId(selectedClipBlock.id)}
+                        style={{ fontSize: '0.75rem', background: 'var(--danger)', color: 'white' }}
+                      >
+                        Delete block
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {showAddAudio && (
+                <div style={{ marginTop: '0.5rem', padding: '0.75rem', background: 'var(--bg)', borderRadius: '4px', border: '2px solid #FFB347' }}>
+                  <div style={{ fontWeight: 'bold', marginBottom: '0.5rem', fontSize: '0.9rem' }}>
+                    Add audio at {playbackTime.toFixed(1)}s
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--muted)', marginBottom: '0.45rem' }}>
+                    Duration defaults to remaining shot ({remainingShotForPlayhead.toFixed(2)}s). Library file stays full.
+                    Loop repeats the source inside the shot. Extend only after confirm.
+                  </div>
+                  {audioAssets.length === 0 ? (
+                    <div style={{ fontSize: '0.8rem', color: 'var(--muted)' }}>
+                      Import audio in Library → Audio for this Game first.
+                    </div>
+                  ) : (
+                    <>
+                      <label style={{ fontSize: '0.8rem', display: 'block', marginBottom: '0.35rem' }}>
+                        Asset
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setLibraryPicker({
+                              purpose: 'audioAsset',
+                              title: 'Choose audio'
+                            })
+                          }
+                          style={{
+                            width: '100%',
+                            marginTop: '0.2rem',
+                            fontSize: '0.85rem',
+                            padding: '0.4rem',
+                            background: 'var(--forge-gold)',
+                            color: '#000',
+                            textAlign: 'left'
+                          }}
+                        >
+                          {addAudioId
+                            ? `${audioAssets.find((a) => a.id === addAudioId)?.kind || ''} · ${
+                                audioAssets.find((a) => a.id === addAudioId)?.name || addAudioId
+                              }`
+                            : 'Choose audio…'}
+                        </button>
+                      </label>
+                      <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                        <label style={{ fontSize: '0.75rem' }}>
+                          In
+                          <input
+                            type="number"
+                            step="0.05"
+                            min="0"
+                            value={addAudioSourceIn}
+                            onChange={(e) => setAddAudioSourceIn(e.target.value)}
+                            style={{ width: '4.5rem', marginLeft: '0.25rem' }}
+                          />
+                        </label>
+                        <label style={{ fontSize: '0.75rem' }}>
+                          Out
+                          <input
+                            type="number"
+                            step="0.05"
+                            min="0"
+                            value={addAudioSourceOut}
+                            onChange={(e) => setAddAudioSourceOut(e.target.value)}
+                            style={{ width: '4.5rem', marginLeft: '0.25rem' }}
+                          />
+                        </label>
+                        <label style={{ fontSize: '0.75rem' }}>
+                          <input
+                            type="checkbox"
+                            checked={addAudioLoop}
+                            onChange={(e) => setAddAudioLoop(e.target.checked)}
+                            style={{ marginRight: '0.25rem' }}
+                          />
+                          Loop
+                        </label>
+                        <label style={{ fontSize: '0.75rem' }}>
+                          Duration
+                          <input
+                            type="number"
+                            step="0.05"
+                            min="0.05"
+                            value={addAudioDuration}
+                            onChange={(e) => setAddAudioDuration(e.target.value)}
+                            style={{ width: '4.5rem', marginLeft: '0.25rem' }}
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          onClick={applyFitRemainingToAddForm}
+                          style={{ fontSize: '0.75rem' }}
+                          title="Set Duration to remaining shot time. Loop keeps the full library source. Does not extend the shot."
+                        >
+                          Fit remaining shot
+                        </button>
+                        <label style={{ fontSize: '0.75rem' }}>
+                          Vol
+                          <input
+                            type="number"
+                            step="0.05"
+                            min="0"
+                            max="1"
+                            value={addAudioVolume}
+                            onChange={(e) => setAddAudioVolume(e.target.value)}
+                            style={{ width: '3.5rem', marginLeft: '0.25rem' }}
+                          />
+                        </label>
+                        <label style={{ fontSize: '0.75rem' }}>
+                          Fade in
+                          <input
+                            type="number"
+                            step="0.05"
+                            min="0"
+                            value={addAudioFadeIn}
+                            onChange={(e) => setAddAudioFadeIn(e.target.value)}
+                            style={{ width: '3.5rem', marginLeft: '0.25rem' }}
+                          />
+                        </label>
+                        <label style={{ fontSize: '0.75rem' }}>
+                          Fade out
+                          <input
+                            type="number"
+                            step="0.05"
+                            min="0"
+                            value={addAudioFadeOut}
+                            onChange={(e) => setAddAudioFadeOut(e.target.value)}
+                            style={{ width: '3.5rem', marginLeft: '0.25rem' }}
+                          />
+                        </label>
+                      </div>
+                    </>
+                  )}
+                  {audioError && (
+                    <div style={{ color: '#ff8a8a', fontSize: '0.75rem', marginTop: '0.35rem' }}>{audioError}</div>
+                  )}
+                  <div style={{ display: 'flex', gap: '0.35rem', marginTop: '0.5rem' }}>
+                    <button
+                      type="button"
+                      onClick={handleAddAudioBlock}
+                      disabled={!addAudioId}
+                      style={{ flex: 1, fontSize: '0.85rem', background: '#E07A2F', color: '#fff' }}
+                    >
+                      Place block
+                    </button>
+                    <button type="button" onClick={() => setShowAddAudio(false)} style={{ flex: 1, fontSize: '0.85rem' }}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {selectedAudioBlock && selectedShot && (
+                <div style={{ marginTop: '0.5rem', padding: '0.6rem', background: 'var(--bg)', borderRadius: '4px', fontSize: '0.8rem' }}>
+                  <div>
+                    <strong>Audio block</strong>
+                    {' · '}
+                    {selectedAudioBlock.role}
+                    {selectedAudioBlock.loop ? ' loop' : ''}
+                    {' · '}
+                    {audioAssets.find((a) => a.id === selectedAudioBlock.audioId)?.name || selectedAudioBlock.audioId}
+                    {' · '}
+                    {selectedAudioBlock.t.toFixed(2)}s–{audioBlockEnd(selectedAudioBlock).toFixed(2)}s
+                  </div>
+                  <div style={{ color: 'var(--muted)', marginTop: '0.2rem', fontSize: '0.75rem' }}>
+                    Half-open [t, t+duration). Silence outside. Paused/reverse scrub seeks silently.
+                    Play uses HTMLAudioElement.play()/pause() — not paused currentTime. Clips stay muted.
+                    Fit remaining shot clamps this block to the current shot end; it does not restore a previous shot length.
+                  </div>
+                  {(() => {
+                    const voice = audioVoicesRef.current.get(selectedAudioBlock.id)
+                    const asset = audioAssets.find((a) => a.id === selectedAudioBlock.audioId)
+                    if (!asset) return <div style={{ color: '#ff8a8a', marginTop: '0.25rem' }}>Missing library audio</div>
+                    if (voice?.status === 'loading') return <div style={{ color: '#9ad', marginTop: '0.25rem' }}>Loading audio…</div>
+                    if (voice && voice.status !== 'ready') {
+                      return <div style={{ color: '#ff8a8a', marginTop: '0.25rem' }}>{voice.message}</div>
+                    }
+                    return voice?.status === 'ready' ? (
+                      <div style={{ color: '#9ad', marginTop: '0.25rem' }}>
+                        {playbackState === 'playing' ? 'Audible play()/pause() · forge-file' : 'Paused — silent seek'}
+                      </div>
+                    ) : null
+                  })()}
+                  {audioError && (
+                    <div style={{ color: '#ff8a8a', marginTop: '0.25rem' }}>{audioError}</div>
+                  )}
+                  <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.4rem', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                    <label style={{ fontSize: '0.75rem' }}>
+                      Start
+                      <input
+                        type="number"
+                        step="0.05"
+                        min="0"
+                        value={audioTimeDraft}
+                        onChange={(e) => setAudioTimeDraft(e.target.value)}
+                        onBlur={() => void handleCommitAudioBlockEdits()}
+                        style={{ width: '4.5rem', marginLeft: '0.25rem' }}
+                      />
+                    </label>
+                    <label style={{ fontSize: '0.75rem' }}>
+                      In
+                      <input
+                        type="number"
+                        step="0.05"
+                        min="0"
+                        value={audioInDraft}
+                        onChange={(e) => setAudioInDraft(e.target.value)}
+                        onBlur={() => void handleCommitAudioBlockEdits()}
+                        style={{ width: '4.5rem', marginLeft: '0.25rem' }}
+                      />
+                    </label>
+                    <label style={{ fontSize: '0.75rem' }}>
+                      Out
+                      <input
+                        type="number"
+                        step="0.05"
+                        min="0"
+                        value={audioOutDraft}
+                        onChange={(e) => setAudioOutDraft(e.target.value)}
+                        onBlur={() => void handleCommitAudioBlockEdits()}
+                        style={{ width: '4.5rem', marginLeft: '0.25rem' }}
+                      />
+                    </label>
+                    <label style={{ fontSize: '0.75rem' }}>
+                      <input
+                        type="checkbox"
+                        checked={audioLoopDraft}
+                        onChange={(e) => {
+                          const loop = e.target.checked
+                          setAudioLoopDraft(loop)
+                          void handleCommitAudioBlockEdits(loop)
+                        }}
+                        style={{ marginRight: '0.25rem' }}
+                      />
+                      Loop
+                    </label>
+                    <label style={{ fontSize: '0.75rem' }}>
+                      Dur
+                      <input
+                        type="number"
+                        step="0.05"
+                        min="0.05"
+                        value={audioDurationDraft}
+                        onChange={(e) => setAudioDurationDraft(e.target.value)}
+                        onBlur={() => void handleCommitAudioBlockEdits()}
+                        style={{ width: '4.5rem', marginLeft: '0.25rem' }}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => void handleFitAudioBlockToShot()}
+                      style={{ fontSize: '0.75rem' }}
+                      title="Clamp this block to the current shot duration. Library source is kept. Does not restore a previous shot length."
+                    >
+                      Fit remaining shot
+                    </button>
+                    <label style={{ fontSize: '0.75rem' }}>
+                      Vol
+                      <input
+                        type="number"
+                        step="0.05"
+                        min="0"
+                        max="1"
+                        value={audioVolumeDraft}
+                        onChange={(e) => setAudioVolumeDraft(e.target.value)}
+                        onBlur={() => void handleCommitAudioBlockEdits()}
+                        style={{ width: '3.5rem', marginLeft: '0.25rem' }}
+                      />
+                    </label>
+                    <label style={{ fontSize: '0.75rem' }}>
+                      Fade in
+                      <input
+                        type="number"
+                        step="0.05"
+                        min="0"
+                        value={audioFadeInDraft}
+                        onChange={(e) => setAudioFadeInDraft(e.target.value)}
+                        onBlur={() => void handleCommitAudioBlockEdits()}
+                        style={{ width: '3.5rem', marginLeft: '0.25rem' }}
+                      />
+                    </label>
+                    <label style={{ fontSize: '0.75rem' }}>
+                      Fade out
+                      <input
+                        type="number"
+                        step="0.05"
+                        min="0"
+                        value={audioFadeOutDraft}
+                        onChange={(e) => setAudioFadeOutDraft(e.target.value)}
+                        onBlur={() => void handleCommitAudioBlockEdits()}
+                        style={{ width: '3.5rem', marginLeft: '0.25rem' }}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDeleteAudioBlockId(selectedAudioBlock.id)}
+                      style={{ fontSize: '0.75rem', background: 'var(--danger)', color: 'white' }}
+                    >
+                      Delete block
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {showAddEventCue && (
+                <div style={{ marginTop: '0.5rem', padding: '0.6rem', background: 'var(--bg)', borderRadius: '4px', fontSize: '0.8rem' }}>
+                  <div style={{ fontWeight: 'bold', marginBottom: '0.35rem' }}>
+                    Add event cue @ {playbackTime.toFixed(2)}s
+                  </div>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--muted)', marginBottom: '0.4rem' }}>
+                    Play fires this named event once when the playhead crosses this time going forward.
+                    Pause, reverse scrub, and seek-into do not fire. Fire in the Events panel still works.
+                  </div>
+                  {eventDefinitions.length === 0 ? (
+                    <div style={{ color: '#ff8a8a', fontSize: '0.75rem' }}>
+                      Create a named event first (sidebar Events). Example: button_touch.
+                    </div>
+                  ) : (
+                    <label style={{ display: 'block', fontSize: '0.75rem' }}>
+                      Event
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setLibraryPicker({
+                            purpose: 'eventDefinition',
+                            title: 'Choose event',
+                            onAction: (action) => {
+                              if (action.type === 'chooseEvent') setAddEventCueEventId(action.eventId)
+                            }
+                          })
+                        }
+                        style={{
+                          marginLeft: '0.35rem',
+                          fontSize: '0.8rem',
+                          padding: '0.3rem 0.5rem',
+                          background: 'var(--forge-gold)',
+                          color: '#000'
+                        }}
+                      >
+                        {eventDefinitions.find((ev) => ev.id === addEventCueEventId)?.name || 'Choose event…'}
+                      </button>
+                    </label>
+                  )}
+                  {eventCueError && (
+                    <div style={{ color: '#ff8a8a', fontSize: '0.75rem', marginTop: '0.35rem' }}>{eventCueError}</div>
+                  )}
+                  <div style={{ display: 'flex', gap: '0.35rem', marginTop: '0.5rem' }}>
+                    <button
+                      type="button"
+                      onClick={() => void handleAddEventCue()}
+                      disabled={!addEventCueEventId}
+                      style={{ flex: 1, fontSize: '0.85rem', background: '#F48FB1', color: '#1a1a1a' }}
+                    >
+                      Place cue
+                    </button>
+                    <button type="button" onClick={() => setShowAddEventCue(false)} style={{ flex: 1, fontSize: '0.85rem' }}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {selectedEventCue && selectedShot && (
+                <div style={{ marginTop: '0.5rem', padding: '0.6rem', background: 'var(--bg)', borderRadius: '4px', fontSize: '0.8rem' }}>
+                  <div>
+                    <strong>Event cue</strong>
+                    {' · '}
+                    {eventDefinitions.find((e) => e.id === selectedEventCue.eventId)?.name || selectedEventCue.eventId}
+                    {' @ '}
+                    {selectedEventCue.t.toFixed(2)}s
+                  </div>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--muted)', marginTop: '0.25rem' }}>
+                    One-shot forward-play crossing. Does not change authored layers or audioTrack.
+                  </div>
+                  {eventCueWarning && (
+                    <div style={{ color: '#e6b800', fontSize: '0.75rem', marginTop: '0.35rem' }}>{eventCueWarning}</div>
+                  )}
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '0.45rem', alignItems: 'center' }}>
+                    <label style={{ fontSize: '0.75rem' }}>
+                      t
+                      <input
+                        type="number"
+                        step="0.05"
+                        min="0"
+                        value={eventCueTimeDraft}
+                        onChange={(e) => setEventCueTimeDraft(e.target.value)}
+                        onBlur={() => void handleCommitEventCueEdits()}
+                        style={{ width: '4.5rem', marginLeft: '0.25rem' }}
+                      />
+                    </label>
+                    <label style={{ fontSize: '0.75rem' }}>
+                      event
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setLibraryPicker({
+                            purpose: 'eventDefinition',
+                            title: 'Choose event',
+                            onAction: (action) => {
+                              if (action.type === 'chooseEvent') void handleCommitEventCueEdits(action.eventId)
+                            }
+                          })
+                        }
+                        style={{
+                          marginLeft: '0.25rem',
+                          fontSize: '0.8rem',
+                          padding: '0.25rem 0.45rem',
+                          background: 'var(--forge-gold)',
+                          color: '#000'
+                        }}
+                      >
+                        {eventDefinitions.find((ev) => ev.id === selectedEventCue.eventId)?.name ||
+                          selectedEventCue.eventId}
+                      </button>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDeleteEventCueId(selectedEventCue.id)}
+                      style={{ fontSize: '0.75rem', background: 'var(--danger)', color: 'white' }}
+                    >
+                      Delete cue
+                    </button>
+                  </div>
+                  {eventCueError && (
+                    <div style={{ color: '#ff8a8a', fontSize: '0.75rem', marginTop: '0.35rem' }}>{eventCueError}</div>
+                  )}
+                </div>
+              )}
+
+              {backgroundKeyError && !selectedBackgroundKey && (
+                <div style={{ color: '#ff8a8a', fontSize: '0.75rem', marginTop: '0.35rem' }}>{backgroundKeyError}</div>
+              )}
+
+              {selectedBackgroundKey && selectedShot && (
+                <div style={{ marginTop: '0.5rem', padding: '0.6rem', background: 'var(--bg)', borderRadius: '4px', fontSize: '0.8rem' }}>
+                  <div>
+                    <strong>Background key</strong>
+                    {' · '}
+                    {describeBackgroundKey(selectedBackgroundKey, pipeline)}
+                    {' @ '}
+                    {selectedBackgroundKey.t.toFixed(2)}s
+                  </div>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--muted)', marginTop: '0.25rem' }}>
+                    Hard cut; holds until the next background key. Static shot background is t=0 before the first key.
+                    Clip-track background blocks still draw over stills while active.
+                  </div>
+                  {pipeline && backgroundKeyIssues(selectedBackgroundKey, pipeline, selectedShot.id) && (
+                    <div style={{ color: '#ff8a8a', fontSize: '0.75rem', marginTop: '0.35rem' }}>
+                      {backgroundKeyIssues(selectedBackgroundKey, pipeline, selectedShot.id)}
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '0.45rem', alignItems: 'center' }}>
+                    <label style={{ fontSize: '0.75rem' }}>
+                      t
+                      <input
+                        type="number"
+                        step="0.05"
+                        min="0"
+                        value={backgroundKeyTimeDraft}
+                        onChange={(e) => setBackgroundKeyTimeDraft(e.target.value)}
+                        onBlur={() => void handleCommitBackgroundKeyEdits()}
+                        style={{ width: '4.5rem', marginLeft: '0.25rem' }}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setLibraryPicker({
+                          purpose: 'shotBackground',
+                          title: 'Change background still',
+                          onAction: (action) => {
+                            if (action.type === 'setShotBackground') {
+                              void handleCommitBackgroundKeyEdits({
+                                backgroundVisualAssetId: action.visualAssetId,
+                                backgroundAssetStateId: null
+                              })
+                            }
+                          }
+                        })
+                      }
+                      style={{
+                        fontSize: '0.8rem',
+                        padding: '0.25rem 0.45rem',
+                        background: 'var(--forge-gold)',
+                        color: '#000'
+                      }}
+                    >
+                      Library…
+                    </button>
+                    {(() => {
+                      const asset = visualAssets.find((a) => a.id === selectedBackgroundKey.backgroundVisualAssetId)
+                      const owned = asset ? assetStates.filter((s) => s.assetId === asset.id) : []
+                      if (!asset || owned.length === 0) return null
+                      return (
+                        <label style={{ fontSize: '0.75rem' }}>
+                          state
+                          <select
+                            value={selectedBackgroundKey.backgroundAssetStateId || ''}
+                            onChange={(e) =>
+                              void handleCommitBackgroundKeyEdits({
+                                backgroundAssetStateId: e.target.value || null
+                              })
+                            }
+                            style={{ marginLeft: '0.25rem', fontSize: '0.8rem' }}
+                          >
+                            <option value="">Default / static</option>
+                            {owned.map((state) => (
+                              <option key={state.id} value={state.id}>
+                                {state.name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      )
+                    })()}
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDeleteBackgroundKeyId(selectedBackgroundKey.id)}
+                      style={{ fontSize: '0.75rem', background: 'var(--danger)', color: 'white' }}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                  {backgroundKeyError && (
+                    <div style={{ color: '#ff8a8a', fontSize: '0.75rem', marginTop: '0.35rem' }}>{backgroundKeyError}</div>
+                  )}
+                </div>
+              )}
               
               {showAddEffect && (
                 <div style={{ marginTop: '0.5rem', padding: '0.75rem', background: 'var(--bg)', borderRadius: '4px', border: '2px solid var(--forge-gold)' }}>
                   <div style={{ fontWeight: 'bold', marginBottom: '0.5rem', fontSize: '0.9rem' }}>Add Effect at {playbackTime.toFixed(1)}s</div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem', marginBottom: '0.5rem' }}>
-                    {(['shake', 'flash', 'freeze', 'zoom_punch'] as ScenePresetType[]).map(type => (
+                    {(['shake', 'flash', 'freeze', 'zoom_punch', 'versus'] as ScenePresetType[]).map(type => (
                       <button
                         key={type}
                         type="button"
@@ -969,19 +5794,25 @@ export function StoryboardEditor() {
                     ))}
                   </div>
                   {presets.length > 0 && (
-                    <>
-                      <div style={{ fontSize: '0.85rem', marginBottom: '0.25rem' }}>Or use preset:</div>
-                      {presets.slice(0, 3).map(preset => (
-                        <button
-                          key={preset.id}
-                          type="button"
-                          onClick={() => handleAddEffect(preset.id)}
-                          style={{ width: '100%', marginBottom: '0.25rem', fontSize: '0.8rem', textAlign: 'left' }}
-                        >
-                          {preset.type}
-                        </button>
-                      ))}
-                    </>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setLibraryPicker({
+                          purpose: 'effectPreset',
+                          title: 'Choose effect recipe'
+                        })
+                      }
+                      style={{
+                        width: '100%',
+                        marginBottom: '0.5rem',
+                        fontSize: '0.8rem',
+                        padding: '0.45rem',
+                        background: 'var(--forge-gold)',
+                        color: '#000'
+                      }}
+                    >
+                      Library… existing recipe
+                    </button>
                   )}
                   <button type="button" onClick={() => setShowAddEffect(false)} style={{ width: '100%', marginTop: '0.5rem', fontSize: '0.85rem' }}>
                     Cancel
@@ -1040,106 +5871,599 @@ export function StoryboardEditor() {
         )}
       </div>
 
-      {/* Right sidebar */}
+      {/* Right sidebar with tabs */}
       {selectedShot && (
-        <div style={{ width: '280px', borderLeft: '1px solid var(--border)', paddingLeft: '1rem', overflowY: 'auto' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-            <h3 style={{ fontSize: '1rem', margin: 0 }}>Layers</h3>
-            <button 
-              type="button" 
-              onClick={() => setShowAddCharacter(true)} 
-              style={{ fontSize: '0.85rem', padding: '0.25rem 0.5rem' }}
+        <div style={{ width: '300px', borderLeft: '1px solid var(--border)', display: 'flex', flexDirection: 'column', maxHeight: '100%', minHeight: 0, flexShrink: 0 }}>
+          {/* Tab headers */}
+          <div style={{ display: 'flex', borderBottom: '2px solid var(--border)', flexShrink: 0 }}>
+            <button
+              type="button"
+              onClick={() => setSidebarTab('background')}
+              style={{
+                flex: 1,
+                padding: '0.75rem',
+                background: sidebarTab === 'background' ? 'var(--forge-gold)' : 'transparent',
+                color: sidebarTab === 'background' ? 'var(--bg)' : 'var(--text)',
+                border: 'none',
+                borderBottom: sidebarTab === 'background' ? '3px solid var(--forge-gold)' : '3px solid transparent',
+                cursor: 'pointer',
+                fontSize: '0.85rem',
+                fontWeight: 'bold'
+              }}
             >
-              + Character
+              Background / Layers
+            </button>
+            <button
+              type="button"
+              onClick={() => setSidebarTab('camera')}
+              style={{
+                flex: 1,
+                padding: '0.75rem',
+                background: sidebarTab === 'camera' ? 'var(--forge-gold)' : 'transparent',
+                color: sidebarTab === 'camera' ? 'var(--bg)' : 'var(--text)',
+                border: 'none',
+                borderBottom: sidebarTab === 'camera' ? '3px solid var(--forge-gold)' : '3px solid transparent',
+                cursor: 'pointer',
+                fontSize: '0.85rem',
+                fontWeight: 'bold'
+              }}
+            >
+              Camera & Effects
             </button>
           </div>
           
-          {showAddCharacter && (
-            <div style={{ marginBottom: '1rem', padding: '0.75rem', background: 'var(--bg)', borderRadius: '4px', border: '2px solid var(--forge-gold)' }}>
-              <div style={{ fontWeight: 'bold', marginBottom: '0.5rem', fontSize: '0.9rem' }}>Add Character</div>
-              {characters.map(char => (
-                <button
-                  key={char.id}
-                  type="button"
-                  onClick={() => handleAddCharacter(char.id)}
-                  style={{ width: '100%', marginBottom: '0.25rem', fontSize: '0.85rem', textAlign: 'left' }}
-                >
-                  {char.name}
-                </button>
-              ))}
-              <button type="button" onClick={() => setShowAddCharacter(false)} style={{ width: '100%', marginTop: '0.5rem', fontSize: '0.85rem' }}>
-                Cancel
-              </button>
-            </div>
-          )}
-          
-          {selectedShot.layers
-            .sort((a, b) => b.zOrder - a.zOrder)
-            .map(layer => {
-              const character = layer.characterId ? characters.find(c => c.id === layer.characterId) : null
-              const pose = layer.poseId ? poses.find(p => p.id === layer.poseId) : null
-              
-              return (
+          {sidebarTab === 'background' ? (
+            <>
+              <div style={{ flex: 1, overflowY: 'auto', padding: '0.75rem 0.85rem', minHeight: 0 }}>
+                <CollapsibleSection title="Background">
+                  <ShotBackgroundPicker
+                    gameId={gameId}
+                    shot={selectedShot}
+                    visualAssets={visualAssets}
+                    assetStates={assetStates}
+                    error={backgroundError}
+                    onSelectLibrary={handleSelectLibraryBackground}
+                    onChangeState={handleChangeLibraryBackgroundState}
+                    onImport={handleImportBackgroundImage}
+                    onClear={handleClearBackgroundImage}
+                    onOpenLibrary={() =>
+                      setLibraryPicker({
+                        purpose: 'shotBackground',
+                        title: 'Shot background',
+                        initialTab: 'backgrounds'
+                      })
+                    }
+                  />
+                  <div>
+                    <div style={{ fontSize: '0.85rem', marginBottom: '0.25rem', fontWeight: 'bold' }}>Clip:</div>
+                    <div style={{ display: 'flex', gap: '0.35rem' }}>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setLibraryPicker({
+                            purpose: 'backgroundClip',
+                            title: 'Background clip',
+                            initialTab: 'clips'
+                          })
+                        }
+                        style={{
+                          flex: 1,
+                          fontSize: '0.8rem',
+                          padding: '0.4rem',
+                          background: 'var(--forge-gold)',
+                          color: '#000'
+                        }}
+                      >
+                        {selectedShot.backgroundClipId
+                          ? gameClips.find((c) => c.id === selectedShot.backgroundClipId)?.moment || 'Clip set'
+                          : 'Library…'}
+                      </button>
+                      {selectedShot.backgroundClipId && (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            await window.indieForge.pipeline.updateShot(projectId!, selectedShotId!, {
+                              backgroundClipId: null
+                            })
+                            const updated = await window.indieForge.projects.open(projectId!)
+                            setActiveProject(updated)
+                          }}
+                          style={{ fontSize: '0.8rem', padding: '0.4rem' }}
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </div>
+                    <div style={{ fontSize: '0.7rem', marginTop: '0.25rem', color: 'var(--muted)', fontStyle: 'italic' }}>
+                      Library pick sets legacy backgroundClipId (implicit play from 0, never extends the shot).
+                      Timed placement lives on the Clips timeline track. An explicit background block replaces implicit playback.
+                      {(selectedShot.backgroundImage || selectedShot.backgroundVisualAssetId) && selectedShot.backgroundClipId
+                        ? ' Clip draws over the static image while the block is active.'
+                        : ''}
+                    </div>
+                  </div>
+                </CollapsibleSection>
+
+                <CollapsibleSection title="Stage Treatment" defaultOpen={false}>
+                  <div style={{ marginBottom: '0.75rem' }}>
+                    <label style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.25rem', color: 'var(--text-secondary)' }}>
+                      BG Dim: {Math.round((selectedShot.stageTreatment?.bgDim ?? 0) * 100)}%
+                    </label>
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      value={(selectedShot.stageTreatment?.bgDim ?? 0) * 100}
+                      onChange={async (e) => {
+                        const value = parseInt(e.target.value) / 100
+                        await window.indieForge.pipeline.updateShot(projectId!, selectedShotId!, {
+                          stageTreatment: {
+                            ...selectedShot.stageTreatment,
+                            bgDim: value
+                          }
+                        })
+                        const updated = await window.indieForge.projects.open(projectId!)
+                        setActiveProject(updated)
+                      }}
+                      style={{ width: '100%' }}
+                    />
+                  </div>
+                  <div style={{ marginBottom: '0.75rem' }}>
+                    <label style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.25rem', color: 'var(--text-secondary)' }}>
+                      Vignette: {Math.round((selectedShot.stageTreatment?.vignette ?? 0) * 100)}%
+                    </label>
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      value={(selectedShot.stageTreatment?.vignette ?? 0) * 100}
+                      onChange={async (e) => {
+                        const value = parseInt(e.target.value) / 100
+                        await window.indieForge.pipeline.updateShot(projectId!, selectedShotId!, {
+                          stageTreatment: {
+                            ...selectedShot.stageTreatment,
+                            vignette: value
+                          }
+                        })
+                        const updated = await window.indieForge.projects.open(projectId!)
+                        setActiveProject(updated)
+                      }}
+                      style={{ width: '100%' }}
+                    />
+                  </div>
+                  {(selectedShot.stageTreatment?.bgDim || selectedShot.stageTreatment?.vignette) && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await window.indieForge.pipeline.updateShot(projectId!, selectedShotId!, {
+                          stageTreatment: undefined
+                        })
+                        const updated = await window.indieForge.projects.open(projectId!)
+                        setActiveProject(updated)
+                      }}
+                      style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem' }}
+                    >
+                      Clear Treatment
+                    </button>
+                  )}
+                </CollapsibleSection>
+
+                <CollapsibleSection title="Layers">
+                  <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowAddText(false)
+                        setLibraryPicker({
+                          purpose: 'addLayer',
+                          title: 'Add character / pose',
+                          initialTab: 'characters'
+                        })
+                      }}
+                      style={{ fontSize: '0.75rem', padding: '0.25rem 0.4rem' }}
+                    >
+                      + Character / Pose
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowAddText(false)
+                        setLibraryPicker({
+                          purpose: 'addLayer',
+                          title: 'Add from Library',
+                          initialTab: 'images'
+                        })
+                      }}
+                      style={{ fontSize: '0.75rem', padding: '0.25rem 0.4rem' }}
+                    >
+                      + Asset
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowAddText(true)}
+                      style={{ fontSize: '0.75rem', padding: '0.25rem 0.4rem' }}
+                    >
+                      + Text
+                    </button>
+                  </div>
+                  {layerError && (
+                    <div style={{ marginBottom: '0.75rem', padding: '0.5rem', background: 'var(--danger, #7a2020)', color: '#fff', borderRadius: '4px', fontSize: '0.8rem' }}>
+                      {layerError}
+                    </div>
+                  )}
+                  {showAddText && (
+                    <div style={{ marginBottom: '1rem', padding: '0.75rem', background: 'var(--bg)', borderRadius: '4px', border: '2px solid var(--forge-gold)' }}>
+                      <div style={{ fontWeight: 'bold', marginBottom: '0.5rem', fontSize: '0.9rem' }}>Add Text</div>
+                      <textarea
+                        value={addTextContent}
+                        onChange={(e) => setAddTextContent(e.target.value)}
+                        rows={3}
+                        style={{ width: '100%', marginBottom: '0.5rem', fontSize: '0.85rem' }}
+                      />
+                      <label style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.5rem' }}>
+                        Font
+                        <select
+                          value={addTextFont}
+                          onChange={(e) => setAddTextFont(e.target.value)}
+                          style={{ width: '100%', marginTop: '0.25rem', fontSize: '0.85rem' }}
+                        >
+                          <option value={DEFAULT_FONT_REF}>default (system sans-serif)</option>
+                          {fonts.map(font => (
+                            <option key={font.id} value={font.id}>{font.name}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.5rem' }}>
+                        Palette
+                        <select
+                          value={addTextPalette}
+                          onChange={(e) => setAddTextPalette(e.target.value)}
+                          style={{ width: '100%', marginTop: '0.25rem', fontSize: '0.85rem' }}
+                        >
+                          <option value={DEFAULT_PALETTE_REF}>default (#ffffff)</option>
+                          {palettes.map(pal => (
+                            <option key={pal.id} value={pal.id}>{pal.name}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <button type="button" onClick={handleAddTextLayer} style={{ width: '100%', fontSize: '0.85rem', background: 'var(--forge-gold)', color: '#000' }}>
+                        Add to shot
+                      </button>
+                      <button type="button" onClick={() => setShowAddText(false)} style={{ width: '100%', marginTop: '0.35rem', fontSize: '0.85rem' }}>
+                        Cancel
+                      </button>
+                    </div>
+                  )}
+                  <LayersPanel
+                    layers={selectedShot.layers}
+                    pipeline={pipeline}
+                    selectedLayerId={selectedLayerId}
+                    onSelect={(id) => setSelectedLayerId(id)}
+                    onToggleVisible={(id, visible) => {
+                      void persistLayerStack(toggleLayerVisible(selectedShot.layers, id, visible))
+                    }}
+                    onMove={(id, direction) => {
+                      void persistLayerStack(moveLayerInStack(selectedShot.layers, id, direction))
+                    }}
+                    onReorder={(id, toFrontIndex) => {
+                      void persistLayerStack(reorderLayerToIndex(selectedShot.layers, id, toFrontIndex))
+                    }}
+                  />
+                </CollapsibleSection>
+
+              {pipeline && selectedShotId && (
+                <CollapsibleSection title="Events" defaultOpen={false}>
+                <EventBindingsPanel
+                  gameId={gameId}
+                  shotId={selectedShotId}
+                  layers={selectedShot.layers}
+                  pipeline={pipeline}
+                  poses={poses}
+                  assetStates={assetStates}
+                  events={eventDefinitions}
+                  bindings={eventBindings}
+                  previewSnapshot={previewSnapshot}
+                  audioAssets={audioAssets}
+                  sfxVoiceStatus={[...eventSfxVoicesRef.current.values()].map((v) => ({
+                    bindingId: v.bindingId,
+                    status: v.status,
+                    message: v.message
+                  }))}
+                  mixerError={eventSfxError}
+                  onProjectChanged={async () => {
+                    const updated = await window.indieForge.projects.open(projectId!)
+                    setActiveProject(updated)
+                  }}
+                  onFire={(eventId, payload) => {
+                    setEventSfxError(null)
+                    previewEngineRef.current.fire(eventId, performance.now(), payload as PrimitivePayload | undefined)
+                    commitPreview()
+                  }}
+                  onResetPreview={resetEventPreview}
+                  onChooseEvent={(onPicked) =>
+                    setLibraryPicker({
+                      purpose: 'eventDefinition',
+                      title: 'Choose event',
+                      onAction: (action) => {
+                        if (action.type === 'chooseEvent') onPicked(action.eventId)
+                      }
+                    })
+                  }
+                  onChooseAudio={(onPicked) =>
+                    setLibraryPicker({
+                      purpose: 'audioAsset',
+                      title: 'Choose audio',
+                      onAction: (action) => {
+                        if (action.type === 'chooseAudio') onPicked(action.audioId)
+                      }
+                    })
+                  }
+                />
+                </CollapsibleSection>
+              )}
+              </div>
+              <div
+                style={{
+                  flexShrink: 0,
+                  maxHeight: '42%',
+                  overflowY: 'auto',
+                  borderTop: '2px solid var(--forge-gold)',
+                  background: 'var(--bg-secondary)'
+                }}
+              >
                 <div
-                  key={layer.id}
-                  onClick={() => setSelectedLayerId(layer.id)}
                   style={{
-                    padding: '0.75rem',
-                    marginBottom: '0.5rem',
-                    background: selectedLayerId === layer.id ? 'var(--forge-gold)' : 'var(--bg-secondary)',
-                    color: selectedLayerId === layer.id ? 'var(--bg)' : 'var(--text)',
-                    borderRadius: '4px',
-                    cursor: 'pointer',
-                    fontSize: '0.85rem'
+                    fontSize: '0.7rem',
+                    fontWeight: 'bold',
+                    padding: '0.4rem 0.65rem 0',
+                    letterSpacing: '0.04em',
+                    textTransform: 'uppercase',
+                    color: 'var(--muted)'
                   }}
                 >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
-                    <span style={{ fontWeight: 'bold' }}>z{layer.zOrder}</span>
-                    <span style={{ opacity: 0.7 }}>{layer.scale.toFixed(2)}x • {layer.rotation.toFixed(0)}°</span>
-                  </div>
-                  {character && <div style={{ fontSize: '0.9rem', fontWeight: 'bold' }}>{character.name}</div>}
-                  {pose && <div style={{ fontSize: '0.8rem', opacity: 0.8 }}>{pose.slot}</div>}
-                  {selectedLayerId === layer.id && character && (
-                    <select
-                      value={layer.poseId || ''}
-                      onChange={(e) => handleChangePose(e.target.value)}
-                      onClick={(e) => e.stopPropagation()}
-                      style={{
-                        width: '100%',
-                        marginTop: '0.5rem',
-                        padding: '0.25rem',
-                        fontSize: '0.8rem',
-                        background: 'var(--bg)',
-                        border: '1px solid var(--border)',
-                        borderRadius: '4px',
-                        color: 'var(--text)'
-                      }}
-                    >
-                      {poses.filter(p => p.characterId === character.id && p.status === 'approved').map(p => (
-                        <option key={p.id} value={p.id}>{p.slot}</option>
-                      ))}
-                    </select>
-                  )}
+                  Selected Layer
                 </div>
-              )
-            })}
-          
-          {selectedLayerId && selectedLayer && (
-            <div style={{ marginTop: '1rem', padding: '1rem', background: 'var(--bg-secondary)', borderRadius: '4px' }}>
-              <h4 style={{ fontSize: '0.9rem', margin: '0 0 0.75rem 0' }}>Layer Controls</h4>
-              <button type="button" onClick={handleFlipLayer} style={{ width: '100%', marginBottom: '0.5rem', fontSize: '0.85rem' }}>
-                {selectedLayer.flipX ? 'Unflip' : 'Flip'} Horizontal
-              </button>
-              <button 
-                type="button" 
-                onClick={handleDeleteLayer} 
-                style={{ width: '100%', fontSize: '0.85rem', background: 'var(--error)', color: '#fff' }}
-              >
-                Delete Layer
-              </button>
+                <SelectedLayerInspector
+                  layer={selectedLayer}
+                  shot={selectedShot}
+                  pipeline={pipeline}
+                  gameId={gameId}
+                  poses={poses}
+                  assetStates={assetStates}
+                  fonts={fonts}
+                  palettes={palettes}
+                  playbackTime={playbackTime}
+                  previewSnapshot={previewSnapshot}
+                  selectedTimedKeyId={selectedTimedKeyId}
+                  timedKeyTimeDraft={timedKeyTimeDraft}
+                  clipStatus={
+                    selectedLayer?.clipId
+                      ? videosRef.current.get(selectedLayer.clipId)?.status === 'loading'
+                        ? 'loading'
+                        : videosRef.current.get(selectedLayer.clipId) &&
+                            videosRef.current.get(selectedLayer.clipId)?.status !== 'ready' &&
+                            videosRef.current.get(selectedLayer.clipId)?.status !== 'loading'
+                          ? 'unavailable'
+                          : undefined
+                      : undefined
+                  }
+                  onFitSourceAspect={(id) => void handleFitSourceAspect(id)}
+                  onChangePose={handleChangePose}
+                  onChangeAssetState={(stateId) => {
+                    if (!selectedLayerId) return
+                    void handleUpdateLayerFields(selectedLayerId, { assetStateId: stateId })
+                  }}
+                  onSelectTimedKey={setSelectedTimedKeyId}
+                  onTimedKeyTimeDraft={setTimedKeyTimeDraft}
+                  onUpdateTimedKey={handleUpdateTimedKey}
+                  onDeleteTimedKey={(keyId) => setConfirmDeleteTimedKeyId(keyId)}
+                  onAddTimedKey={handleAddTimedKey}
+                  onChangeScale={(value) => {
+                    if (!selectedLayerId) return
+                    void handleUpdateLayerFields(selectedLayerId, { scale: value })
+                  }}
+                  onChangeRotation={(value) => {
+                    if (!selectedLayerId) return
+                    void handleUpdateLayerFields(selectedLayerId, { rotation: value })
+                  }}
+                  onChangeVisible={(visible) => {
+                    if (!selectedLayerId) return
+                    void handleUpdateLayerFields(selectedLayerId, { visible })
+                  }}
+                  onChangeVisibilityRange={(fromSec, toSec) => {
+                    if (!selectedLayerId) return
+                    void handleUpdateLayerFields(selectedLayerId, {
+                      visibleFromSec: fromSec,
+                      visibleToSec: toSec
+                    })
+                  }}
+                  onChangeText={(text) => {
+                    if (!selectedLayerId) return
+                    void handleUpdateLayerFields(selectedLayerId, { text })
+                  }}
+                  onChangeFont={(fontRef) => {
+                    if (!selectedLayerId) return
+                    void handleUpdateLayerFields(selectedLayerId, { fontRef })
+                  }}
+                  onChangePalette={(paletteRef) => {
+                    if (!selectedLayerId) return
+                    void handleUpdateLayerFields(selectedLayerId, { paletteRef })
+                  }}
+                  onFlip={handleFlipLayer}
+                  onDeleteLayer={handleDeleteLayer}
+                  onChangeFx={(fx) => {
+                    if (!selectedLayerId) return
+                    void handleUpdateLayerFields(selectedLayerId, { fx })
+                  }}
+                />
+              </div>
+            </>
+          ) : (
+            <div style={{ flex: 1, overflowY: 'auto', padding: '1rem', minHeight: 0 }}>
+              {(editingCamera || editingEffect) ? (
+                    <div style={{ 
+                      padding: '1rem', 
+                      background: 'var(--bg)', 
+                      borderRadius: '8px',
+                      border: editingCamera ? '2px solid #00AAFF' : '2px solid #FF6B6B'
+                    }}>
+                      {editingCamera && selectedCameraIndex !== null && selectedShot.cameraTrack[selectedCameraIndex] ? (
+                        <>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', paddingBottom: '0.5rem', borderBottom: '1px solid var(--border)' }}>
+                            <h4 style={{ margin: 0, color: '#00AAFF', fontSize: '0.9rem' }}>
+                              📷 Camera Key @ {selectedShot.cameraTrack[selectedCameraIndex].t.toFixed(2)}s
+                            </h4>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingCamera(false)
+                                setSelectedCameraIndex(null)
+                              }}
+                              style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem' }}
+                            >
+                              Close
+                            </button>
+                          </div>
+                          <CameraInspector
+                            keyframe={selectedShot.cameraTrack[selectedCameraIndex]}
+                            layers={selectedShot.layers}
+                            onSave={(updated) => handleUpdateCameraKeyframe(selectedCameraIndex, updated)}
+                            onClose={() => {
+                              setEditingCamera(false)
+                              setSelectedCameraIndex(null)
+                            }}
+                            onDelete={() => handleDeleteCameraKeyframe(selectedCameraIndex)}
+                          />
+                        </>
+                      ) : editingEffect && selectedEffectIndex !== null && selectedShot.effectsTrack[selectedEffectIndex] ? (
+                        <>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', paddingBottom: '0.5rem', borderBottom: '1px solid var(--border)' }}>
+                            <h4 style={{ margin: 0, color: '#FF6B6B', fontSize: '0.9rem' }}>
+                              ⚡ Effect @ {selectedShot.effectsTrack[selectedEffectIndex].t.toFixed(2)}s
+                            </h4>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingEffect(false)
+                                setSelectedEffectIndex(null)
+                              }}
+                              style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem' }}
+                            >
+                              Close
+                            </button>
+                          </div>
+                          <EffectInspector
+                            effect={selectedShot.effectsTrack[selectedEffectIndex]}
+                            presets={presets}
+                            onSave={(updated) => handleUpdateEffectMarker(selectedEffectIndex, updated)}
+                            onClose={() => {
+                              setEditingEffect(false)
+                              setSelectedEffectIndex(null)
+                            }}
+                            onDelete={() => handleDeleteMarker('effect', selectedEffectIndex)}
+                          />
+                        </>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--muted)', fontSize: '0.85rem' }}>
+                      Select a camera or effect marker on the timeline to edit
+                    </div>
+                  )}
             </div>
           )}
         </div>
+      )}
+            {confirmDeleteLayer && (
+        <ConfirmModal
+          title="Delete layer"
+          message="Delete this layer from the shot? This does not delete the Library asset, character, or pose."
+          confirmLabel="Delete"
+          danger
+          onConfirm={confirmDeleteLayerNow}
+          onCancel={() => setConfirmDeleteLayer(false)}
+        />
+      )}
+      {confirmDeleteTimedKeyId && (
+        <ConfirmModal
+          title="Delete timed key"
+          message="Delete this pose/state key from the layer timeline? The layer and its authored starting pose/state stay."
+          confirmLabel="Delete"
+          danger
+          onConfirm={confirmDeleteTimedKeyNow}
+          onCancel={() => setConfirmDeleteTimedKeyId(null)}
+        />
+      )}
+      {confirmDeleteClipBlockId && (
+        <ConfirmModal
+          title="Delete clip block"
+          message="Remove this timed clip block from the shot? The library clip is not deleted. Legacy layer.clipId / backgroundClipId may still play implicitly from 0."
+          confirmLabel="Delete"
+          danger
+          onConfirm={confirmDeleteClipBlockNow}
+          onCancel={() => setConfirmDeleteClipBlockId(null)}
+        />
+      )}
+      {confirmDeleteAudioBlockId && (
+        <ConfirmModal
+          title="Delete audio block"
+          message="Remove this timed audio block from the shot? The library audio is not deleted."
+          confirmLabel="Delete"
+          danger
+          onConfirm={confirmDeleteAudioBlockNow}
+          onCancel={() => setConfirmDeleteAudioBlockId(null)}
+        />
+      )}
+      {confirmDeleteEventCueId && (
+        <ConfirmModal
+          title="Delete event cue"
+          message="Remove this timeline event cue? The named event and its bindings stay. Fire still works."
+          confirmLabel="Delete"
+          danger
+          onConfirm={confirmDeleteEventCueNow}
+          onCancel={() => setConfirmDeleteEventCueId(null)}
+        />
+      )}
+      {confirmDeleteBackgroundKeyId && (
+        <ConfirmModal
+          title="Delete background key"
+          message="Remove this still-background cut? The shot's static background and other keys stay."
+          confirmLabel="Delete"
+          danger
+          onConfirm={confirmDeleteBackgroundKeyNow}
+          onCancel={() => setConfirmDeleteBackgroundKeyId(null)}
+        />
+      )}
+      {pendingExtend && (
+        <ConfirmModal
+          title="Extend shot?"
+          message={pendingExtend.message}
+          confirmLabel="Extend shot"
+          onConfirm={confirmExtendShotNow}
+          onCancel={() => setPendingExtend(null)}
+        />
+      )}
+      {libraryPicker && pipeline && gameId && (
+        <LibraryPickerModal
+          open
+          purpose={libraryPicker.purpose}
+          pipeline={pipeline}
+          gameId={gameId}
+          title={libraryPicker.title}
+          initialTab={libraryPicker.initialTab}
+          onClose={() => {
+            setLibraryPicker(null)
+            setBackgroundKeyPickPending(false)
+          }}
+          onPick={(action) => {
+            if (libraryPicker.onAction) {
+              libraryPicker.onAction(action)
+              setLibraryPicker(null)
+              return
+            }
+            void applyLibraryPick(action)
+          }}
+        />
       )}
     </div>
   )

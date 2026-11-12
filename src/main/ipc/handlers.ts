@@ -1,7 +1,7 @@
 import { copyFile, mkdir, readFile } from 'fs/promises'
 import { existsSync } from 'fs'
 import { basename, join } from 'path'
-import { app, dialog, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { IPC_CHANNELS } from '@shared/ipc'
 import type {
   CreateAssetDraft,
@@ -71,6 +71,13 @@ import {
   updateClip
 } from '../storage/clipService'
 import {
+  importAudio,
+  listAudioAssets,
+  getAudioAsset,
+  updateAudio,
+  removeAudio
+} from '../storage/audioService'
+import {
   createPreset,
   updatePreset,
   removePreset
@@ -93,8 +100,71 @@ import {
   addCameraKeyframe,
   removeCameraKeyframe,
   addEffectMarker,
-  removeEffectMarker
+  removeEffectMarker,
+  addLayerTimedKey,
+  listLayerTimedKeys,
+  getLayerTimedKey,
+  updateLayerTimedKey,
+  removeLayerTimedKey,
+  addShotClipBlock,
+  listShotClipBlocks,
+  getShotClipBlock,
+  updateShotClipBlock,
+  removeShotClipBlock,
+  addShotAudioBlock,
+  listShotAudioBlocks,
+  getShotAudioBlock,
+  updateShotAudioBlock,
+  removeShotAudioBlock,
+  addShotEventCue,
+  listShotEventCues,
+  getShotEventCue,
+  updateShotEventCue,
+  removeShotEventCue,
+  addShotBackgroundKey,
+  listShotBackgroundKeys,
+  getShotBackgroundKey,
+  updateShotBackgroundKey,
+  removeShotBackgroundKey
 } from '../../core/storage/storyboardService'
+import {
+  getVisualAssets,
+  getVisualAsset,
+  addVisualAsset,
+  updateVisualAsset,
+  deleteVisualAsset,
+  getAssetStates,
+  getAssetStatesForGame,
+  getAssetState,
+  addAssetState,
+  updateAssetState,
+  deleteAssetState
+} from '../../core/storage/studioStorage'
+import { importDirectShotBackground, isAbsoluteFilesystemPath } from '../../core/storage/shotBackgroundMedia'
+import {
+  createBinding,
+  createEvent,
+  listBindings,
+  listEvents,
+  getBinding,
+  getEvent,
+  removeBinding,
+  removeEvent,
+  updateBinding,
+  updateEvent
+} from '../../core/storage/eventService'
+import {
+  createScene as createSceneInPipeline,
+  getScene,
+  listScenes,
+  updateScene as updateSceneInPipeline,
+  removeScene,
+  addCharacterToCast,
+  removeCharacterFromCast,
+  attachPreset,
+  detachPreset,
+  createSceneStoryboard
+} from '../../core/storage/sceneService'
 import {
   listGameDefinitions,
   getGameDefinition,
@@ -434,10 +504,14 @@ export function registerIpcHandlers(): void {
   )
 
   ipcMain.handle(IPC_CHANNELS.FILES_CHOOSE_IMAGE, async () => {
-    const result = await dialog.showOpenDialog({
-      properties: ['openFile'],
+    const opts = {
+      properties: ['openFile' as const],
       filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp'] }]
-    })
+    }
+    const win = BrowserWindow.getFocusedWindow()
+    const result = win
+      ? await dialog.showOpenDialog(win, opts)
+      : await dialog.showOpenDialog(opts)
     return { filePath: result.canceled ? null : (result.filePaths[0] ?? null) }
   })
 
@@ -455,21 +529,67 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle(IPC_CHANNELS.FILES_READ_PREVIEW_DATA_URL, async (_e, filePath: string) => {
-    if (!filePath || !existsSync(filePath)) {
+    if (!filePath) {
+      throw new Error('File path is required')
+    }
+    
+    // Resolve relative paths against dataDir
+    const { getDataDir } = await import('../../core/storage/dataDir')
+    const { normalize } = await import('path')
+    let resolvedPath = filePath
+    
+    // If path is relative (doesn't start with / or drive letter), resolve against dataDir
+    if (!filePath.startsWith('/') && !/^[A-Za-z]:/.test(filePath)) {
+      resolvedPath = normalize(join(getDataDir(), filePath))
+    } else {
+      resolvedPath = normalize(filePath)
+    }
+    
+    // Enforce security: resolved path must be under dataDir
+    const dataDir = normalize(getDataDir())
+    if (!resolvedPath.startsWith(dataDir)) {
+      throw new Error(`File path outside data directory: ${filePath}`)
+    }
+    
+    if (!existsSync(resolvedPath)) {
       throw new Error(`File not found: ${filePath}`)
     }
-    const data = await readFile(filePath)
-    const mime = getPreviewMimeType(filePath)
+    
+    const data = await readFile(resolvedPath)
+    const mime = getPreviewMimeType(resolvedPath)
     return { dataUrl: `data:${mime};base64,${data.toString('base64')}` }
   })
 
   ipcMain.handle(IPC_CHANNELS.FILES_GET_LOCAL_URL, async (_e, filePath: string) => {
-    if (!filePath || !existsSync(filePath)) {
+    if (!filePath) {
+      throw new Error('File path is required')
+    }
+    
+    // Resolve relative paths against dataDir
+    const { getDataDir } = await import('../../core/storage/dataDir')
+    const { normalize } = await import('path')
+    let resolvedPath = filePath
+    
+    // If path is relative (doesn't start with / or drive letter), resolve against dataDir
+    if (!filePath.startsWith('/') && !/^[A-Za-z]:/.test(filePath)) {
+      resolvedPath = normalize(join(getDataDir(), filePath))
+    } else {
+      resolvedPath = normalize(filePath)
+    }
+    
+    // Enforce security: resolved path must be under dataDir
+    const dataDir = normalize(getDataDir())
+    if (!resolvedPath.startsWith(dataDir)) {
+      throw new Error(`File path outside data directory: ${filePath}`)
+    }
+    
+    if (!existsSync(resolvedPath)) {
       throw new Error(`File not found: ${filePath}`)
     }
-    // Build forge-file://local/<path> with per-segment encoding
+    
+    // Build forge-file://local/<absolute-path> with per-segment encoding
     // Standard scheme requires a host; use "local" as fixed host
-    const pathSegments = filePath.split('/').map(seg => encodeURIComponent(seg))
+    const pathSegments = resolvedPath.split('/').map(seg => encodeURIComponent(seg))
     const encodedPath = pathSegments.join('/')
     return { localUrl: `forge-file://local${encodedPath}` }
   })
@@ -794,6 +914,13 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.SHOT_UPDATE,
     async (_e, projectId: string, shotId: string, updates: any) => {
+      if (updates.backgroundImage && typeof updates.backgroundImage === 'string') {
+        const bgPath = updates.backgroundImage
+        if (isAbsoluteFilesystemPath(bgPath)) {
+          updates.backgroundImage = await importDirectShotBackground(bgPath)
+        }
+      }
+
       await updateShot(shotId, updates)
       return await loadProject(projectId)
     }
@@ -832,6 +959,44 @@ export function registerIpcHandlers(): void {
   )
 
   ipcMain.handle(
+    IPC_CHANNELS.LAYER_KEY_ADD,
+    async (_e, projectId: string, shotId: string, layerId: string, input: any) => {
+      await addLayerTimedKey(shotId, layerId, input)
+      return await loadProject(projectId)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.LAYER_KEY_LIST,
+    async (_e, shotId: string, layerId?: string) => {
+      return await listLayerTimedKeys(shotId, layerId)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.LAYER_KEY_GET,
+    async (_e, keyId: string) => {
+      return await getLayerTimedKey(keyId)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.LAYER_KEY_UPDATE,
+    async (_e, projectId: string, keyId: string, updates: any) => {
+      await updateLayerTimedKey(keyId, updates)
+      return await loadProject(projectId)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.LAYER_KEY_DELETE,
+    async (_e, projectId: string, keyId: string) => {
+      await removeLayerTimedKey(keyId)
+      return await loadProject(projectId)
+    }
+  )
+
+  ipcMain.handle(
     IPC_CHANNELS.CAMERA_KEYFRAME_ADD,
     async (_e, projectId: string, shotId: string, keyframe: any) => {
       await addCameraKeyframe(shotId, keyframe)
@@ -859,6 +1024,158 @@ export function registerIpcHandlers(): void {
     IPC_CHANNELS.EFFECT_MARKER_REMOVE,
     async (_e, projectId: string, shotId: string, t: number) => {
       await removeEffectMarker(shotId, t)
+      return await loadProject(projectId)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SHOT_CLIP_ADD,
+    async (_e, projectId: string, shotId: string, input: any) => {
+      await addShotClipBlock(shotId, input)
+      return await loadProject(projectId)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SHOT_CLIP_LIST,
+    async (_e, shotId: string) => {
+      return await listShotClipBlocks(shotId)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SHOT_CLIP_GET,
+    async (_e, blockId: string) => {
+      return await getShotClipBlock(blockId)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SHOT_CLIP_UPDATE,
+    async (_e, projectId: string, blockId: string, updates: any) => {
+      await updateShotClipBlock(blockId, updates)
+      return await loadProject(projectId)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SHOT_CLIP_DELETE,
+    async (_e, projectId: string, blockId: string) => {
+      await removeShotClipBlock(blockId)
+      return await loadProject(projectId)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SHOT_AUDIO_ADD,
+    async (_e, projectId: string, shotId: string, input: any) => {
+      await addShotAudioBlock(shotId, input)
+      return await loadProject(projectId)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SHOT_AUDIO_LIST,
+    async (_e, shotId: string) => {
+      return await listShotAudioBlocks(shotId)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SHOT_AUDIO_GET,
+    async (_e, blockId: string) => {
+      return await getShotAudioBlock(blockId)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SHOT_AUDIO_UPDATE,
+    async (_e, projectId: string, blockId: string, updates: any) => {
+      await updateShotAudioBlock(blockId, updates)
+      return await loadProject(projectId)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SHOT_AUDIO_DELETE,
+    async (_e, projectId: string, blockId: string) => {
+      await removeShotAudioBlock(blockId)
+      return await loadProject(projectId)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SHOT_EVENT_CUE_ADD,
+    async (_e, projectId: string, shotId: string, input: any) => {
+      await addShotEventCue(shotId, input)
+      return await loadProject(projectId)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SHOT_EVENT_CUE_LIST,
+    async (_e, shotId: string) => {
+      return await listShotEventCues(shotId)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SHOT_EVENT_CUE_GET,
+    async (_e, cueId: string) => {
+      return await getShotEventCue(cueId)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SHOT_EVENT_CUE_UPDATE,
+    async (_e, projectId: string, cueId: string, updates: any) => {
+      await updateShotEventCue(cueId, updates)
+      return await loadProject(projectId)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SHOT_EVENT_CUE_DELETE,
+    async (_e, projectId: string, cueId: string) => {
+      await removeShotEventCue(cueId)
+      return await loadProject(projectId)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SHOT_BACKGROUND_KEY_ADD,
+    async (_e, projectId: string, shotId: string, input: any) => {
+      await addShotBackgroundKey(shotId, input)
+      return await loadProject(projectId)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SHOT_BACKGROUND_KEY_LIST,
+    async (_e, shotId: string) => {
+      return await listShotBackgroundKeys(shotId)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SHOT_BACKGROUND_KEY_GET,
+    async (_e, keyId: string) => {
+      return await getShotBackgroundKey(keyId)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SHOT_BACKGROUND_KEY_UPDATE,
+    async (_e, projectId: string, keyId: string, updates: any) => {
+      await updateShotBackgroundKey(keyId, updates)
+      return await loadProject(projectId)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SHOT_BACKGROUND_KEY_DELETE,
+    async (_e, projectId: string, keyId: string) => {
+      await removeShotBackgroundKey(keyId)
       return await loadProject(projectId)
     }
   )
@@ -896,6 +1213,250 @@ export function registerIpcHandlers(): void {
       return { ok: true as const }
     }
   )
+
+  // Scene handlers (Phase C)
+  ipcMain.handle(
+    IPC_CHANNELS.SCENE_CREATE,
+    async (_e, gameId: string, input: any) => createSceneInPipeline(gameId, input)
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SCENE_GET,
+    async (_e, sceneId: string) => getScene(sceneId)
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SCENE_LIST,
+    async (_e, gameId: string) => listScenes(gameId)
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SCENE_UPDATE,
+    async (_e, sceneId: string, updates: any) => updateSceneInPipeline(sceneId, updates)
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SCENE_DELETE,
+    async (_e, sceneId: string, removeStoryboard?: boolean) => {
+      await removeScene(sceneId, { removeStoryboard })
+      return { ok: true as const }
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SCENE_ADD_CHARACTER,
+    async (_e, sceneId: string, characterId: string) => addCharacterToCast(sceneId, characterId)
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SCENE_REMOVE_CHARACTER,
+    async (_e, sceneId: string, characterId: string) => removeCharacterFromCast(sceneId, characterId)
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SCENE_ATTACH_PRESET,
+    async (_e, sceneId: string, presetId: string) => attachPreset(sceneId, presetId)
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SCENE_DETACH_PRESET,
+    async (_e, sceneId: string, presetId: string) => detachPreset(sceneId, presetId)
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.SCENE_CREATE_STORYBOARD,
+    async (_e, sceneId: string, input: any) => createSceneStoryboard(sceneId, input)
+  )
+
+  // P1: Visual Assets
+  ipcMain.handle(
+    IPC_CHANNELS.VISUAL_ASSET_LIST,
+    async (_e, gameId: string) => getVisualAssets(gameId)
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.VISUAL_ASSET_GET,
+    async (_e, assetId: string) => getVisualAsset(assetId)
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.VISUAL_ASSET_CREATE,
+    async (_e, asset: any) => {
+      await addVisualAsset(asset)
+      return asset
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.VISUAL_ASSET_UPDATE,
+    async (_e, asset: any) => {
+      await updateVisualAsset(asset)
+      return asset
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.VISUAL_ASSET_DELETE,
+    async (_e, assetId: string) => {
+      const result = await deleteVisualAsset(assetId)
+      return { ok: true as const, ...result }
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.VISUAL_ASSET_IMPORT_IMAGE,
+    async (_e, assetId: string, sourcePath: string) => {
+      const { importStaticAssetImage } = await import('../../core/storage/visualAssetMedia')
+      return await importStaticAssetImage(assetId, sourcePath)
+    }
+  )
+
+  // P1: Asset States
+  ipcMain.handle(
+    IPC_CHANNELS.ASSET_STATE_LIST,
+    async (_e, assetId: string) => getAssetStates(assetId)
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.ASSET_STATE_LIST_FOR_GAME,
+    async (_e, gameId: string) => getAssetStatesForGame(gameId)
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.ASSET_STATE_GET,
+    async (_e, stateId: string) => getAssetState(stateId)
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.ASSET_STATE_CREATE,
+    async (_e, assetId: string, name: string, sourcePath: string) => {
+      // Import similar to pose import - copy file to assets directory
+      const { randomUUID } = await import('crypto')
+      const { copyFile, mkdir } = await import('fs/promises')
+      const { join } = await import('path')
+      const sharp = (await import('sharp')).default
+      const { getDataDir } = await import('../../core/storage/dataDir')
+      
+      const stateId = randomUUID()
+      const assetsDir = join(getDataDir(), 'assets', assetId)
+      await mkdir(assetsDir, { recursive: true })
+      
+      // Copy file
+      const statePath = join(assetsDir, `state_${stateId}.png`)
+      await copyFile(sourcePath, statePath)
+      const { readSourceImageSize } = await import('../../core/storage/imageSize')
+      const sourceSize = await readSourceImageSize(sourcePath)
+      
+      const thumbPath = join(assetsDir, `state_${stateId}_thumb.png`)
+      await sharp(sourcePath)
+        .resize(256, 256, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
+        .png()
+        .toFile(thumbPath)
+      
+      const state = {
+        id: stateId,
+        assetId,
+        name,
+        file: statePath,
+        boundingBox: sourceSize,
+        schemaVersion: 1,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      }
+      
+      await addAssetState(state)
+      return state
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.ASSET_STATE_UPDATE,
+    async (_e, state: any) => {
+      await updateAssetState(state)
+      return state
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.ASSET_STATE_DELETE,
+    async (_e, stateId: string) => {
+      await deleteAssetState(stateId)
+      return { ok: true as const }
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.ASSET_STATE_SET_DEFAULT,
+    async (_e, assetId: string, stateId: string) => {
+      const asset = await getVisualAsset(assetId)
+      if (!asset) {
+        throw new Error(`Visual asset not found: ${assetId}`)
+      }
+      asset.defaultStateId = stateId
+      asset.updatedAt = new Date().toISOString()
+      await updateVisualAsset(asset)
+      return asset
+    }
+  )
+
+  // P3: Events + bindings (preview-fire stays in the renderer; never persisted)
+  ipcMain.handle(IPC_CHANNELS.EVENT_LIST, async (_e, gameId: string) => listEvents(gameId))
+  ipcMain.handle(IPC_CHANNELS.EVENT_GET, async (_e, eventId: string) => getEvent(eventId))
+  ipcMain.handle(
+    IPC_CHANNELS.EVENT_CREATE,
+    async (_e, input: { gameId: string; name: string; description?: string }) => createEvent(input)
+  )
+  ipcMain.handle(
+    IPC_CHANNELS.EVENT_UPDATE,
+    async (_e, eventId: string, patch: { name?: string; description?: string }) =>
+      updateEvent(eventId, patch)
+  )
+  ipcMain.handle(IPC_CHANNELS.EVENT_DELETE, async (_e, eventId: string) => {
+    await removeEvent(eventId)
+    return { ok: true as const }
+  })
+  ipcMain.handle(IPC_CHANNELS.BINDING_LIST, async (_e, shotId: string) => listBindings(shotId))
+  ipcMain.handle(IPC_CHANNELS.BINDING_GET, async (_e, bindingId: string) => getBinding(bindingId))
+  ipcMain.handle(IPC_CHANNELS.BINDING_CREATE, async (_e, input: any) => createBinding(input))
+  ipcMain.handle(
+    IPC_CHANNELS.BINDING_UPDATE,
+    async (_e, bindingId: string, patch: any) => updateBinding(bindingId, patch)
+  )
+  ipcMain.handle(IPC_CHANNELS.BINDING_DELETE, async (_e, bindingId: string) => {
+    await removeBinding(bindingId)
+    return { ok: true as const }
+  })
+
+  // A1: Game-scoped audio catalog (no mixer, no generation providers)
+  ipcMain.handle(IPC_CHANNELS.AUDIO_ASSET_LIST, async (_e, gameId: string) => listAudioAssets(gameId))
+  ipcMain.handle(IPC_CHANNELS.AUDIO_ASSET_GET, async (_e, audioId: string) => getAudioAsset(audioId))
+  ipcMain.handle(
+    IPC_CHANNELS.AUDIO_ASSET_IMPORT,
+    async (
+      _e,
+      sourcePath: string,
+      options: { gameId: string; kind: string; name?: string; tags?: string[]; engineNotes?: string }
+    ) => importAudio(sourcePath, options)
+  )
+  ipcMain.handle(
+    IPC_CHANNELS.AUDIO_ASSET_UPDATE,
+    async (
+      _e,
+      audioId: string,
+      gameId: string,
+      patch: {
+        name?: string
+        kind?: string
+        tags?: string[]
+        engineNotes?: string | null
+        file?: string
+      }
+    ) => updateAudio(audioId, patch, { gameId })
+  )
+  ipcMain.handle(IPC_CHANNELS.AUDIO_ASSET_DELETE, async (_e, audioId: string, gameId: string) => {
+    await removeAudio(audioId, { gameId })
+    return { ok: true as const }
+  })
 }
 
 export async function ensureAppDataDirs(): Promise<void> {

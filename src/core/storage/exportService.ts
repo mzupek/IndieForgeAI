@@ -13,6 +13,9 @@ import type {
 } from '@shared/types/exportManifest'
 import { EXPORT_MANIFEST_SCHEMA_VERSION } from '@shared/types/exportManifest'
 import { getAssetPipeline, saveStudio, updateAssetPipeline } from './studioStorage'
+import { getDataDir } from './dataDir'
+import { resolveBackgroundStillRefs, resolveShotBackgroundImagePath } from '../../shared/storyboard/shotBackground'
+import { backgroundKeyRefs } from '../../shared/storyboard/backgroundKeys'
 import type { Game } from '@shared/types/assetPipeline'
 import { generateStoryboardThumbnails } from '../export/storyboardThumbnails'
 import { homedir } from 'os'
@@ -254,7 +257,7 @@ async function generateManifest(
   }))
   
   // Build storyboards for export (v2)
-  const storyboards = pipeline.storyboards?.filter(sb => sb.gameId === gameId) ?? []
+  const storyboards = pipeline.storyboards?.filter(sb => sb.gameId === game.id) ?? []
   const manifestStoryboards = storyboards.map(sb => {
     const shots = pipeline.storyboardShots?.filter(shot => sb.shotIds.includes(shot.id)) ?? []
     
@@ -294,10 +297,41 @@ async function generateManifest(
             }
           }
           if (layer.imagePath) resolved.imagePath = layer.imagePath
+          if (layer.visible === false) resolved.visible = false
+          if (layer.visibleFromSec !== undefined) resolved.visibleFromSec = layer.visibleFromSec
+          if (layer.visibleToSec !== undefined) resolved.visibleToSec = layer.visibleToSec
           
           return resolved
         })
+
+        const clipTrack = (shot.clipTrack || []).map((block) => {
+          const blockClip = pipeline.clips.find((c) => c.id === block.clipId)
+          return {
+            id: block.id,
+            clipId: block.clipId,
+            clipFile: blockClip ? `clips/${basename(blockClip.file)}` : undefined,
+            role: block.role,
+            layerId: block.layerId ?? null,
+            t: block.t,
+            durationSec: block.durationSec,
+            sourceInSec: block.sourceInSec,
+            sourceOutSec: block.sourceOutSec
+          }
+        })
         
+        const bgResolved = resolveShotBackgroundImagePath(shot, pipeline)
+        let backgroundFile: string | undefined
+        if (bgResolved.path) {
+          const dataDir = getDataDir(dataDirOverride)
+          const normalized = bgResolved.path.replace(/\\/g, '/')
+          const dataPrefix = dataDir.replace(/\\/g, '/')
+          if (normalized.startsWith(dataPrefix)) {
+            backgroundFile = normalized.slice(dataPrefix.length).replace(/^[/\\]+/, '')
+          } else {
+            backgroundFile = shot.backgroundImage || normalized
+          }
+        }
+
         return {
           id: shot.id,
           name: shot.name,
@@ -305,9 +339,35 @@ async function generateManifest(
           aspectRatio: shot.aspectRatio,
           backgroundImage: shot.backgroundImage,
           backgroundClipId: shot.backgroundClipId,
+          backgroundVisualAssetId: shot.backgroundVisualAssetId,
+          backgroundAssetStateId: shot.backgroundAssetStateId,
+          backgroundFile,
+          backgroundKeys: (shot.backgroundKeys || []).map((key) => {
+            const keyResolved = resolveBackgroundStillRefs(backgroundKeyRefs(key), pipeline, shot.id)
+            let keyFile: string | undefined
+            if (keyResolved.path) {
+              const dataDir = getDataDir(dataDirOverride)
+              const normalized = keyResolved.path.replace(/\\/g, '/')
+              const dataPrefix = dataDir.replace(/\\/g, '/')
+              if (normalized.startsWith(dataPrefix)) {
+                keyFile = normalized.slice(dataPrefix.length).replace(/^[/\\]+/, '')
+              } else {
+                keyFile = key.backgroundImage || normalized
+              }
+            }
+            return {
+              id: key.id,
+              t: key.t,
+              backgroundVisualAssetId: key.backgroundVisualAssetId,
+              backgroundAssetStateId: key.backgroundAssetStateId,
+              backgroundImage: key.backgroundImage,
+              backgroundFile: keyFile
+            }
+          }),
           layers,
           cameraTrack: shot.cameraTrack,
           effectsTrack: shot.effectsTrack,
+          clipTrack: clipTrack.length > 0 ? clipTrack : undefined,
           notes: shot.notes,
           thumbnail: shot.thumbnail
         }

@@ -27,6 +27,8 @@ npm run forge -- <command>
 
 ## Commands
 
+Game Definitions (`forge definition`, alias `gamedef`) are documented in [Game Definition](#game-definition). Agents should use `--json` and isolated `FORGE_DATA_DIR` when experimenting.
+
 ### `forge games list`
 
 List all games across all projects.
@@ -664,6 +666,58 @@ forge clip remove <clip-id> --json
 
 ---
 
+## Audio Commands (A1 catalog)
+
+Game-scoped imported audio library. Files are **copied into studio storage** (`audio/<id>/`). This is not storyboard mixer playback (A2) and does not call Suno/Runway.
+
+Supported: `mp3`, `wav`, `ogg`, `m4a`. Kind is `music` or `sfx`. `--engine-notes` is an optional mapping note for existing engine clips — not a playable substitute.
+
+### `forge audio import <files...>`
+
+```bash
+forge audio import hit.wav --game game-neon-recall --kind sfx --tags "battle,hit" [--json]
+
+forge audio import loop.ogg --game game-neon-recall --kind music --name "Neon Circuitry" --engine-notes "existing Unity loop" [--json]
+```
+
+**Options:**
+- `--game <id>` (required)
+- `--kind <kind>` (required) - `music` | `sfx`
+- `--name <name>` - display name (single file only; default: filename)
+- `--tags <tags>` - comma-separated tags
+- `--engine-notes <text>` - optional engine mapping note
+
+### `forge audio list`
+
+```bash
+forge audio list --game game-neon-recall [--kind sfx] [--json]
+```
+
+### `forge audio show <audio-id>`
+
+```bash
+forge audio show <audio-id> --game game-neon-recall [--json]
+```
+
+### `forge audio update <audio-id>`
+
+```bash
+forge audio update <audio-id> --game game-neon-recall --name "Hit" --tags "battle" [--json]
+forge audio update <audio-id> --game game-neon-recall --file ./new-hit.wav [--json]
+```
+
+`--file` replaces the studio-owned copy and re-probes duration. `--engine-notes ""` clears the note.
+
+### `forge audio remove <audio-id>`
+
+```bash
+forge audio remove <audio-id> --game game-neon-recall [--json]
+```
+
+Rejected if later shot audio blocks or event `playSfx` bindings reference it (A2/A3). Unused catalog entries can be removed.
+
+---
+
 ## Clip Moment Types
 
 - **intro**: Character introduction or entrance
@@ -1053,8 +1107,17 @@ forge shot update \
   --name "Updated shot name" \
   --duration 4.0 \
   --notes "Engineer notes here" \
+  [--background-asset <visualAssetId> [--background-state <stateId>]] \
+  [--background-image <path>] \
+  [--background-clip <clipId>] \
+  [--clear-background-image] \
+  [--clear-background] \
   [--json]
 ```
+
+`--duration` is user-entered only. Forge does not restore a previous shot length from history. Shrink is refused (and lists blockers) if an audio block, clip block, timed key, camera keyframe, or effect marker would be cut.
+
+Static shot background is a **Library visual asset** on the shot's Game (`--background-asset`, optional `--background-state` for an explicit state; omit state for default/static). Canvas uses the full-resolution `asset.image` or `state.file`, not the thumbnail. `--background-image` is the secondary direct import: the file is copied into studio `backgrounds/` and the shot stores that relative path, not the original external source. `--clear-background-image` clears the static/library image only (clip unchanged). `--clear-background` also clears the clip. Image and clip can coexist (clip draws over the still while a background clip block is active).
 
 ### Remove Shot
 
@@ -1063,6 +1126,75 @@ forge shot remove \
   --storyboard <storyboardId> \
   --id <shotId> \
   [--json]
+```
+
+### Timed clip blocks
+
+Clip blocks are **range bars** on `shot.clipTrack` (not instantaneous keys, not C.3c FX keys). `durationSec` equals `sourceOutSec - sourceInSec` at 1x (no stretch). Sampling is half-open `[t, t+duration)`: **before and after the block the clip is not drawn** (not freeze last frame). Legacy `layer.clipId` / `backgroundClipId` without an explicit block for that target still play implicitly from `0` for `min(clip.duration, shot.duration)` — they never silently extend the shot. An explicit block for the same layer or background replaces that implicit playback. Overflow past shot duration requires `--extend-shot` (never silent). Overlap on the same target is rejected. Game-scoped clips: unassigned, or the clip’s character belongs to the shot’s Game.
+
+This is **IndieForge authoring + export data**. Unity/Godot importers are unchanged; engine playback parity is not claimed.
+
+```bash
+forge shot clip add --shot <shotId> --clip <clipId> --time 0.5 [--role layer|background] [--layer <layerId>] [--source-in 0] [--source-out 1.2] [--extend-shot] [--json]
+forge shot clip list --shot <shotId> [--json]
+forge shot clip show --id <blockId> [--json]
+forge shot clip update --id <blockId> [--time 1.0] [--source-in 0.2] [--source-out 1.0] [--extend-shot] [--json]
+forge shot clip remove --id <blockId> [--json]
+forge shot clip sample --shot <shotId> --time 0.8 [--json]
+```
+
+`sample` prints active blocks (including implicit) at the playhead. It is preview-only and never persisted. Reverse seek and loop wrap are the same function of time: loop to `t=0` hides a block that starts later.
+
+Preview in Storyboard uses `forge-file://` video elements driven by `currentTime` from the playhead (paused; not `video.play()`), so scrubbing backwards is deterministic. Unsupported or missing media is shown as an error; it is not promised. Clip video stays muted; there is no clip soundtrack option.
+
+### Timed audio blocks (A2)
+
+Audio blocks are **range bars** on `shot.audioTrack`. Role is `music` or `sfx` and must match the library asset kind. Half-open `[t, t+duration)`: **silence outside the bar**. Non-loop 1x `durationSec` equals `sourceOutSec - sourceInSec`. `--loop` wraps the trim window so authored duration may be longer than trim (default **on** for music, off for sfx). Music overlap is rejected (one bed). SFX overlap is allowed.
+
+Placing a long library file on a shorter shot **fits remaining shot time by default** (does not extend). Loop keeps the full source in/out and sets `durationSec` to remaining. Non-loop plays a prefix (`sourceOut` clamped). The library file is never rewritten. Overflow past shot duration still requires `--extend-shot` (never silent) when you pass an explicit overflowing `--duration`. `--fit-shot` clamps **this** block to the current shot end. It does **not** restore a previous shot length from history.
+
+`forge shot update --duration` is user-entered only. Shrink is refused if audio, clips, timed keys, camera keyframes, or effect markers would be cut; the error lists blockers. Shorten those items first, then enter the new duration. Existing records that were accidentally extended have that same path (shorten the audio block, then enter the shot duration). Do not delete or reimport the library audio.
+
+Storyboard playback uses `HTMLAudioElement.play()` / `pause()` synced to the master transport. **Paused `currentTime` seeks do not play sound.** Reverse scrub and pause position silently. Clip video remains muted. No cross-shot bus. Event SFX is A3 (not this command).
+
+```bash
+forge shot audio add --shot <shotId> --audio <audioId> --time 0.5 [--role music|sfx] [--source-in 0] [--source-out 1.2] [--duration 2] [--loop|--no-loop] [--volume 1] [--fade-in 0] [--fade-out 0] [--fit-shot] [--extend-shot] [--json]
+forge shot audio list --shot <shotId> [--json]
+forge shot audio show --id <blockId> [--json]
+forge shot audio update --id <blockId> [--time 1.0] [--source-in 0.2] [--source-out 1.0] [--duration 2] [--loop true|false] [--volume 0.8] [--fade-in 0.1] [--fade-out 0.1] [--fit-shot] [--extend-shot] [--json]
+forge shot audio remove --id <blockId> [--json]
+forge shot audio sample --shot <shotId> --time 0.8 [--json]
+forge shot update --id <shotId> --duration 3
+```
+
+`sample` prints active blocks, source time, and fade gain. It is preview-only and never persisted.
+
+### Event SFX (A3)
+
+`playSfx` is a **binding action** on a named event. It is **not** coupled to timed pose/state keys. Bind `playSfx` on the same event as `setPose` / `setState` / `setText` / `setVisibility` so one Fire button both changes the layer and plays a one-shot. `targetLayerId` is not required for `playSfx`.
+
+Preview never writes authored layers, defaults, or `shot.audioTrack`. `forge event fire` reports preview SFX state with `persisted: false`. That output is **not** host speaker audio.
+
+Playback: `durationSec` 0 plays the file once to completion unless Reset / Stop / shot change. Positive duration + `returnPolicy default` stops the voice at expiry. `hold` can play until completion / reset / stop. Event SFX never loops. Repeating the same binding cancels and restarts its voice; unrelated voices may overlap.
+
+```bash
+forge binding create --game <gameId> --shot <shotId> --event <eventId> --action playSfx --audio <audioId> [--volume 1] [--duration 0] [--return-policy default|hold] [--json]
+forge binding create --game <gameId> --shot <shotId> --event <eventId> --layer <layerId> --action setPose --pose <poseId> --duration 0.5 [--json]
+forge event fire --game <gameId> --shot <shotId> --event <eventId> [--now-ms 0] [--tick-ms 200] [--json]
+```
+
+### Event cues (timeline)
+
+Authored `shot.eventCues[]` are **one-shot markers** on the Events track. They are **not** P4 pose/state keys (those are step/hold samples). Play fires the named event once per **forward-play crossing** of `t`. Pause, reverse scrub, and seek-into do not fire (no bursts). Shot-loop wrap re-arms the cue for the next pass. Firing uses the same preview engine as the Fire button (all shot bindings, including `playSfx`) and does **not** mutate authored JSON. A4 export can carry cues later; this command does not export.
+
+Warns (does not fail) if the event has no bindings on this shot. Event delete is blocked while a cue still points at it. Shrinking the shot is refused if a cue would fall past the new end.
+
+```bash
+forge shot event-cue add --shot <shotId> --event <eventId> --time <seconds> [--json]
+forge shot event-cue list --shot <shotId> [--json]
+forge shot event-cue show --id <cueId> [--json]
+forge shot event-cue update --id <cueId> [--time <seconds>] [--event <eventId>] [--json]
+forge shot event-cue remove --id <cueId> [--json]
 ```
 
 ---
@@ -1111,10 +1243,16 @@ forge layer add \
 
 **Layer Coordinates:**
 - `x`, `y`: normalized stage coords [0-1] (0.5, 0.5 = center)
-- `scale`: scaling factor (1.0 = original size)
+- `scale`: uniform scaling factor (1.0 = 200px max-side source-aspect fit)
 - `rotation`: degrees (0-360)
 - `z`: z-order (higher = closer to camera)
 - `opacity`: 0.0 (transparent) to 1.0 (opaque)
+
+Visual-asset layers draw at the **source image aspect** (contain in the 200px box). They are not stretched to a square. Existing layers keep authored `scale`/`x`/`y`; stretching was a draw bug. To reset size to the default source fit without moving the layer:
+
+```bash
+forge layer update --shot <shotId> --id <layerId> --fit-source [--json]
+```
 
 ### Update Layer
 
@@ -1127,6 +1265,9 @@ forge layer update \
   --scale 1.5 \
   --rotation 15 \
   [--json]
+
+# Reset uniform scale to 1 (200px max-side, source aspect). Does not rewrite x/y/state.
+forge layer update --shot <shotId> --id <layerId> --fit-source [--json]
 ```
 
 ### Remove Layer
@@ -1137,6 +1278,23 @@ forge layer remove \
   --id <layerId> \
   [--json]
 ```
+
+### Timed pose/state keys (P4)
+
+Keys live on the **same layer** (`timedKeys`). They do not create duplicate layers and are not C.3c FX keys. Sampling is step/hold: the last key with `t <= playhead` holds until the next key. Before the first key, the authored starting pose/state is used. Event preview (P3) still wins while a hold is active; when the hold ends, the **current** timeline sample is used.
+
+```bash
+forge layer key add --shot <shotId> --layer <layerId> --time 1.0 --pose <poseId> [--json]
+forge layer key add --shot <shotId> --layer <layerId> --time 1.5 --state <stateId> [--json]
+forge layer key list --shot <shotId> [--layer <layerId>] [--json]
+forge layer key show --id <keyId> [--json]
+forge layer key update --id <keyId> [--time 2.0] [--pose <poseId>|--state <stateId>] [--json]
+forge layer key remove --id <keyId> [--json]
+forge layer key sample --shot <shotId> --layer <layerId> --time 1.2 \
+  [--event <eventId> --now-ms 0 --tick-ms 500] [--json]
+```
+
+Times must be `0..shot.durationSec`. Duplicate timestamps on the same layer (`|Δt| < 0.001s`) are rejected. Shrinking shot duration below an existing key is rejected. Pose/state must belong to that layer's character/asset.
 
 ---
 
@@ -1175,6 +1333,68 @@ forge camera key \
 - `zoom`: 1.0 = normal, 2.0 = 2x zoom
 - `framingRect` (optional): viewport window {x, y, width, height} in normalized coords
 
+**JSON Output:**
+```json
+{
+  "added": true,
+  "keyframe": {
+    "t": 2.5,
+    "target": {"x": 0.7, "y": 0.3},
+    "zoom": 1.5,
+    "framingRect": {"x": 0.6, "y": 0.2, "width": 0.4, "height": 0.6}
+  }
+}
+```
+
+### Update Camera Keyframe
+
+Update an existing camera keyframe's zoom or target without recreating it.
+
+```bash
+# Update zoom only
+forge camera update \
+  --shot <shotId> \
+  --time 2.5 \
+  --zoom 2.0 \
+  [--json]
+
+# Update target to layer
+forge camera update \
+  --shot <shotId> \
+  --time 2.5 \
+  --target-layer <layerId> \
+  [--json]
+
+# Update target to coordinates
+forge camera update \
+  --shot <shotId> \
+  --time 2.5 \
+  --target-x 0.8 \
+  --target-y 0.4 \
+  [--json]
+
+# Update both zoom and target
+forge camera update \
+  --shot <shotId> \
+  --time 2.5 \
+  --zoom 1.8 \
+  --target-x 0.5 \
+  --target-y 0.6 \
+  [--json]
+```
+
+**JSON Output:**
+```json
+{
+  "updated": true,
+  "keyframe": {
+    "t": 2.5,
+    "target": {"x": 0.5, "y": 0.6},
+    "zoom": 1.8
+  }
+}
+```
+
 ### Remove Camera Keyframe
 
 ```bash
@@ -1182,6 +1402,13 @@ forge camera remove \
   --shot <shotId> \
   --time 2.5 \
   [--json]
+```
+
+**JSON Output:**
+```json
+{
+  "removed": true
+}
 ```
 
 ---
@@ -1260,11 +1487,18 @@ forge layer add --shot $SHOT1 --z 10 \
   --x 0.7 --y 0.3 --scale 0.8 --json
 
 # 4. Add camera animation
+# Start wide at center
 forge camera key --shot $SHOT1 \
   --time 0.0 --target-x 0.5 --target-y 0.5 --zoom 1.0 --json
 
+# Zoom to drone at 2.0s
+DRONE_LAYER=$(forge shot show --id $SHOT1 --json | jq -r '.shot.layers[] | select(.clipId != null) | .id' | head -1)
 forge camera key --shot $SHOT1 \
-  --time 2.0 --target-x 0.7 --target-y 0.3 --zoom 1.5 --json
+  --time 2.0 --target-layer $DRONE_LAYER --zoom 1.8 --json
+
+# Adjust zoom at 2.0s if needed
+forge camera update --shot $SHOT1 \
+  --time 2.0 --zoom 2.2 --json
 
 # 5. Add effects
 SHAKE_PRESET=$(forge preset list --type shake --json | jq -r '.[0].id')
@@ -1282,6 +1516,118 @@ forge layer add --shot $SHOT2 --z 10 \
 # 7. View storyboard
 forge storyboard show --id $BOARD_ID --json
 ```
+
+---
+
+## Game Definition
+
+Game Definitions live in `studio.json` (`gameDefinitions`, **one per `gameId`**). The CLI and the Game Definitions UI share `gameDefinitionService` — the same file lock and validation — so an open app picks up CLI edits the same way it does for other `forge` writes.
+
+Alias: `forge gamedef` is the same group as `forge definition`.
+
+All commands take `--game <id>`. Global `--json` is the agent-friendly form (put it before the subcommand, or on the leaf):
+
+```bash
+forge --json definition show --game game-test
+# or
+node out/cli/forge.js --json definition show --game game-test
+```
+
+`--data-dir` / `FORGE_DATA_DIR` work as elsewhere. Do not point agents at a developer’s real studio when running tests; use `mktemp` + `FORGE_DATA_DIR`.
+
+### Commands
+
+| Command | Purpose |
+|---|---|
+| `definition show [--section <name>]` | Whole definition, or one section |
+| `definition export [--format json\|md] [--out <file>]` | JSON for agents, or generated Markdown for humans |
+| `definition create` | Create when the game has none |
+| `definition set` | Scalars: `--stage`, `--puzzle-core`, `--story-synopsis` |
+| `definition pillar add\|update\|remove\|list` | String list; `--index` is 0-based, `--id` is exact text |
+| `definition interaction add\|update\|remove\|list` | `--name`, `--description`, repeatable `--asset-ref`; update/remove by `--id` |
+| `definition tuning add\|update\|remove\|list` | `--name`, `--notes`, repeatable `--param key=value`, `--unset-param key` |
+| `definition theme-slot add\|update\|remove\|list` | `--name`, `--description`, `--reference` |
+| `definition mvp add\|update\|remove\|list` | `--item`, `--type` (`asset\|system\|content\|tuning`), `--status` (`needed\|partial\|done\|cut`), `--notes` |
+| `definition keep\|cut\|invent add\|remove\|list` | Keep/cut/invent string lists |
+| `definition cast add\|remove\|list` | Character IDs; must exist in the same game |
+| `definition link add\|remove\|list` | `--pose` / `--clip` / `--preset` IDs; must exist in the same game (presets: id exists) |
+| `definition apply --file <patch.json> [--dry-run]` | JSON merge patch; object arrays match by `id`; reports a diff |
+
+`--section` names (aliases in parentheses): `stage`, `pillars`, `puzzleCore` (`puzzle-core`), `storySynopsis` (`story-synopsis`), `cast`, `linkedAssets` (`linked-assets`), `themeSlots` (`theme-slots`), `interactions`, `tuningProfiles` (`tuning`), `keepCutInvent` (`keep-cut-invent`), `mvpBoard` (`mvp`), `markdownSource` (`markdown`).
+
+Long text: `--puzzle-core-file <path>` or `--puzzle-core -` (stdin). Same pattern for `--story-synopsis-file` / `--story-synopsis -`.
+
+`--param` values are inferred: `true`/`false` → bool, finite numbers → number, otherwise string.
+
+`definition apply` patch rules:
+
+- Scalars overwrite (`stage`, `puzzleCore`, `storySynopsis`, `markdownSource`).
+- Object arrays (`interactions`, `tuningProfiles`, `themeSlots`, `mvpBoard`) upsert by `id`. Omit `id` to add (UUID assigned). `{ "id": "…", "delete": true }` removes.
+- String lists (`pillars`, `cast`, keep/cut/invent) accept a replacement array **or** `{ "add": [...], "remove": [...] }`.
+- `linkedAssets` is `{ poses, clips, presets }` with the same string-list rules. Nested `tuningProfiles[].params` merge; JSON `null` unsets a key.
+- `id`, `gameId`, `createdAt`, `updatedAt` cannot be changed.
+- `--dry-run` computes the next definition and diff and **writes nothing**.
+
+Cast/pose/clip links are rejected unless the referenced record exists and belongs to `--game`. Scene presets have no `gameId`; link checks that the preset id exists.
+
+### Agent example — Gate Drone security-gate rule (docs only)
+
+This is the authored **3-lock pad** rule for Neon Recall’s Gate Drone encounter. It is an example for agents and for a later A4 portable export. **Do not write it into Matt’s live studio data** (the seeded definition still describes the older Simon Says / HP fight). Encode it in a scratch `FORGE_DATA_DIR` or a patch file you keep in the repo docs, not in `game-neon-recall` on a real machine.
+
+Rule:
+
+- The hero hacks the gate’s security pad over **3 rounds**.
+- The HUD shows **3 lock icons**.
+- Each round the hero wins unlocks **one** lock.
+- When all **3** locks are open, the gate opens, the drone is destroyed, and the **next level unlocks**.
+
+```bash
+# Isolated data only — never Matt's real studio
+export FORGE_DATA_DIR=$(mktemp -d)
+
+# After the game already has a definition:
+forge --json definition set --game game-neon-recall --stage MVP \
+  --puzzle-core "Gate Drone security-gate: the hero hacks the gate's security pad over 3 rounds. HUD shows 3 lock icons; each round won unlocks one lock. All 3 locks open the gate, destroy the drone, and unlock the next level."
+
+forge --json definition interaction add --game game-neon-recall \
+  --name "Security pad hack" \
+  --description "3-round pad hack. One lock icon unlocks per round won. Three unlocked locks open the gate, destroy the Gate Drone, and unlock the next level." \
+  --asset-ref "GateDrone" --asset-ref "SecurityPad" --asset-ref "LockHUD"
+
+forge --json definition tuning add --game game-neon-recall \
+  --name "Gate Drone Security Pad" \
+  --notes "3 locks / 3 rounds. Winning a round unlocks one lock; all 3 open the gate and destroy the drone." \
+  --param rounds=3 --param locks=3 --param unlocksNextLevel=true
+
+# Or one structured patch (dry-run first):
+cat > /tmp/gate-drone-pad.json << 'EOF'
+{
+  "puzzleCore": "Gate Drone security-gate: the hero hacks the gate's security pad over 3 rounds. HUD shows 3 lock icons; each round won unlocks one lock. All 3 locks open the gate, destroy the drone, and unlock the next level.",
+  "interactions": [
+    {
+      "name": "Security pad hack",
+      "description": "3-round pad hack. One lock icon unlocks per round won. Three unlocked locks open the gate, destroy the Gate Drone, and unlock the next level.",
+      "assetRefs": ["GateDrone", "SecurityPad", "LockHUD"]
+    }
+  ],
+  "tuningProfiles": [
+    {
+      "name": "Gate Drone Security Pad",
+      "params": { "rounds": 3, "locks": 3, "unlocksNextLevel": true },
+      "notes": "3 locks / 3 rounds. Winning a round unlocks one lock; all 3 open the gate and destroy the drone."
+    }
+  ]
+}
+EOF
+forge --json definition apply --game game-neon-recall --file /tmp/gate-drone-pad.json --dry-run
+forge --json definition apply --game game-neon-recall --file /tmp/gate-drone-pad.json
+forge --json definition show --game game-neon-recall --section puzzle-core
+forge --json definition export --game game-neon-recall --format md --out /tmp/game-def.md
+```
+
+### A4 portable export (later)
+
+When A4 portable export is implemented, the package should include the Game Definition JSON (and the generated Markdown view) for that `gameId`, including authored rules such as the Gate Drone 3-lock pad. Do not implement that export in this CLI group; `definition export` is the studio-local read path.
 
 ---
 

@@ -177,6 +177,16 @@ const api: IndieForgeAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.LAYER_UPDATE, projectId, shotId, layerId, updates),
     deleteLayer: (projectId, shotId, layerId) =>
       ipcRenderer.invoke(IPC_CHANNELS.LAYER_DELETE, projectId, shotId, layerId),
+    addLayerTimedKey: (projectId, shotId, layerId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.LAYER_KEY_ADD, projectId, shotId, layerId, input),
+    listLayerTimedKeys: (shotId, layerId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.LAYER_KEY_LIST, shotId, layerId),
+    getLayerTimedKey: (keyId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.LAYER_KEY_GET, keyId),
+    updateLayerTimedKey: (projectId, keyId, updates) =>
+      ipcRenderer.invoke(IPC_CHANNELS.LAYER_KEY_UPDATE, projectId, keyId, updates),
+    deleteLayerTimedKey: (projectId, keyId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.LAYER_KEY_DELETE, projectId, keyId),
     addCameraKeyframe: (projectId, shotId, keyframe) =>
       ipcRenderer.invoke(IPC_CHANNELS.CAMERA_KEYFRAME_ADD, projectId, shotId, keyframe),
     removeCameraKeyframe: (projectId, shotId, t) =>
@@ -184,7 +194,121 @@ const api: IndieForgeAPI = {
     addEffectMarker: (projectId, shotId, effect) =>
       ipcRenderer.invoke(IPC_CHANNELS.EFFECT_MARKER_ADD, projectId, shotId, effect),
     removeEffectMarker: (projectId, shotId, t) =>
-      ipcRenderer.invoke(IPC_CHANNELS.EFFECT_MARKER_REMOVE, projectId, shotId, t)
+      ipcRenderer.invoke(IPC_CHANNELS.EFFECT_MARKER_REMOVE, projectId, shotId, t),
+    addShotClipBlock: (projectId, shotId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_CLIP_ADD, projectId, shotId, input),
+    listShotClipBlocks: (shotId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_CLIP_LIST, shotId),
+    getShotClipBlock: (blockId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_CLIP_GET, blockId),
+    updateShotClipBlock: (projectId, blockId, updates) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_CLIP_UPDATE, projectId, blockId, updates),
+    deleteShotClipBlock: (projectId, blockId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_CLIP_DELETE, projectId, blockId),
+    addShotAudioBlock: (projectId, shotId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_AUDIO_ADD, projectId, shotId, input),
+    listShotAudioBlocks: (shotId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_AUDIO_LIST, shotId),
+    getShotAudioBlock: (blockId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_AUDIO_GET, blockId),
+    updateShotAudioBlock: (projectId, blockId, updates) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_AUDIO_UPDATE, projectId, blockId, updates),
+    deleteShotAudioBlock: (projectId, blockId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_AUDIO_DELETE, projectId, blockId),
+    addShotEventCue: (projectId, shotId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_EVENT_CUE_ADD, projectId, shotId, input),
+    listShotEventCues: (shotId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_EVENT_CUE_LIST, shotId),
+    getShotEventCue: (cueId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_EVENT_CUE_GET, cueId),
+    updateShotEventCue: (projectId, cueId, updates) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_EVENT_CUE_UPDATE, projectId, cueId, updates),
+    deleteShotEventCue: (projectId, cueId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_EVENT_CUE_DELETE, projectId, cueId),
+    addShotBackgroundKey: (projectId, shotId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_BACKGROUND_KEY_ADD, projectId, shotId, input),
+    listShotBackgroundKeys: (shotId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_BACKGROUND_KEY_LIST, shotId),
+    getShotBackgroundKey: (keyId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_BACKGROUND_KEY_GET, keyId),
+    updateShotBackgroundKey: (projectId, keyId, updates) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_BACKGROUND_KEY_UPDATE, projectId, keyId, updates),
+    deleteShotBackgroundKey: (projectId, keyId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_BACKGROUND_KEY_DELETE, projectId, keyId),
+    createScene: (gameId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SCENE_CREATE, gameId, input),
+    getScene: (sceneId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SCENE_GET, sceneId),
+    listScenes: (gameId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SCENE_LIST, gameId),
+    updateScene: (sceneId, updates) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SCENE_UPDATE, sceneId, updates),
+    deleteScene: (sceneId, removeStoryboard) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SCENE_DELETE, sceneId, removeStoryboard),
+    addCharacterToScene: (sceneId, characterId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SCENE_ADD_CHARACTER, sceneId, characterId),
+    removeCharacterFromScene: (sceneId, characterId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SCENE_REMOVE_CHARACTER, sceneId, characterId),
+    attachPresetToScene: (sceneId, presetId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SCENE_ATTACH_PRESET, sceneId, presetId),
+    detachPresetFromScene: (sceneId, presetId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SCENE_DETACH_PRESET, sceneId, presetId),
+    createSceneStoryboard: (sceneId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SCENE_CREATE_STORYBOARD, sceneId, input)
+  },
+  visualAssets: {
+    list: (gameId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.VISUAL_ASSET_LIST, gameId),
+    get: (assetId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.VISUAL_ASSET_GET, assetId),
+    create: (asset) =>
+      ipcRenderer.invoke(IPC_CHANNELS.VISUAL_ASSET_CREATE, asset),
+    update: (asset) =>
+      ipcRenderer.invoke(IPC_CHANNELS.VISUAL_ASSET_UPDATE, asset),
+    delete: (assetId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.VISUAL_ASSET_DELETE, assetId),
+    importImage: (assetId, sourcePath) =>
+      ipcRenderer.invoke(IPC_CHANNELS.VISUAL_ASSET_IMPORT_IMAGE, assetId, sourcePath)
+  },
+  assetStates: {
+    list: (assetId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.ASSET_STATE_LIST, assetId),
+    listForGame: (gameId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.ASSET_STATE_LIST_FOR_GAME, gameId),
+    get: (stateId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.ASSET_STATE_GET, stateId),
+    create: (assetId, name, sourcePath) =>
+      ipcRenderer.invoke(IPC_CHANNELS.ASSET_STATE_CREATE, assetId, name, sourcePath),
+    update: (state) =>
+      ipcRenderer.invoke(IPC_CHANNELS.ASSET_STATE_UPDATE, state),
+    delete: (stateId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.ASSET_STATE_DELETE, stateId),
+    setDefault: (assetId, stateId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.ASSET_STATE_SET_DEFAULT, assetId, stateId)
+  },
+  audioAssets: {
+    list: (gameId) => ipcRenderer.invoke(IPC_CHANNELS.AUDIO_ASSET_LIST, gameId),
+    get: (audioId) => ipcRenderer.invoke(IPC_CHANNELS.AUDIO_ASSET_GET, audioId),
+    importFile: (sourcePath, options) =>
+      ipcRenderer.invoke(IPC_CHANNELS.AUDIO_ASSET_IMPORT, sourcePath, options),
+    update: (audioId, gameId, patch) =>
+      ipcRenderer.invoke(IPC_CHANNELS.AUDIO_ASSET_UPDATE, audioId, gameId, patch),
+    remove: (audioId, gameId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.AUDIO_ASSET_DELETE, audioId, gameId)
+  },
+  events: {
+    list: (gameId) => ipcRenderer.invoke(IPC_CHANNELS.EVENT_LIST, gameId),
+    get: (eventId) => ipcRenderer.invoke(IPC_CHANNELS.EVENT_GET, eventId),
+    create: (input) => ipcRenderer.invoke(IPC_CHANNELS.EVENT_CREATE, input),
+    update: (eventId, patch) => ipcRenderer.invoke(IPC_CHANNELS.EVENT_UPDATE, eventId, patch),
+    remove: (eventId) => ipcRenderer.invoke(IPC_CHANNELS.EVENT_DELETE, eventId)
+  },
+  bindings: {
+    list: (shotId) => ipcRenderer.invoke(IPC_CHANNELS.BINDING_LIST, shotId),
+    get: (bindingId) => ipcRenderer.invoke(IPC_CHANNELS.BINDING_GET, bindingId),
+    create: (input) => ipcRenderer.invoke(IPC_CHANNELS.BINDING_CREATE, input),
+    update: (bindingId, patch) => ipcRenderer.invoke(IPC_CHANNELS.BINDING_UPDATE, bindingId, patch),
+    remove: (bindingId) => ipcRenderer.invoke(IPC_CHANNELS.BINDING_DELETE, bindingId)
   },
   gameDefinitions: {
     list: () =>

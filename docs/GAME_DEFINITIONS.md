@@ -109,17 +109,59 @@ Navigate to **Game Definitions** in the studio sidebar, then select a game. Two 
 
 Save structured changes auto-saves. Markdown must be explicitly saved via the "Save Markdown" button.
 
-## CLI Export (Future)
+## CLI
 
-Phase E will add `forge definition export <game-id>` for full package exports. Phase B provides manual markdown export only.
+`forge definition` (alias `forge gamedef`) reads and updates Game Definitions through the same service, lock, and validation as the UI. See **CLI.md → Game Definition** for the command list, JSON merge-patch rules, and a docs-only Gate Drone 3-lock pad example (do not write that example into live Neon Recall data).
+
+`forge definition export --format json|md` is the studio-local export. A later **A4 portable export** should include the Game Definition JSON/Markdown in the shipped package; that is not implemented here.
 
 ## Phase Dependencies
 
 - **Phase A** (Characters/Poses/Clips/Presets): Definitions link to these assets
 - **Phase 4.5** (Storyboards): Parallel; definitions do not depend on storyboards
-- **Phase C** (Scenes spine): Not implemented; definitions reference scenes conceptually
+- **Phase C** (Scenes spine): ✓ Implemented; scenes are narrative moments with attached storyboards and presets
 - **Phase D** (MVP board as separate product): Definitions include an embedded MVP board
 - **Phase E** (Full CLI package): Builds on Phase B definitions
+
+## Phase C — Scenes as the Spine
+
+**Scenes** provide the organizational spine for game content. Each scene represents a narrative or gameplay moment and owns:
+
+- **Name** and **Description**
+- **Background** (description or reference)
+- **Cast** (character IDs participating in this scene)
+- **Story/Dialogue Text** (key narrative content)
+- **Pose/Clip/Audio Refs** (linked assets for quick lookup)
+- **Interaction Hooks** (gameplay mechanic stubs)
+- **Attached Presets** (FX recipes: shake, flash, freeze, zoom_punch, versus)
+- **Storyboard** (optional attached shot-by-shot animatic)
+
+### Storyboard Attachment
+
+Previously storyboards were free-floating. In Phase C, storyboards attach to scenes via `sceneId`. This ensures:
+- Storyboards have narrative context
+- Scenes can have a visual planning layer
+- Export/CLI tools can package scene + storyboard together
+
+### UI Access
+
+Navigate to **Scenes** in the studio sidebar, then select a game. You can:
+- Create/edit/delete scenes
+- Add characters to the cast
+- Attach FX presets
+- Create or open the attached storyboard
+
+Storyboards opened from a scene show "Attached to Scene: [Scene Name]" in the sidebar.
+
+### FX Recipes (Behind-the-Scenes Library)
+
+Scene presets (camera/FX) are lightweight, reusable effect recipes managed behind the scenes. There is no separate "FX Presets" tab in the UI. Instead:
+- Create/edit FX recipes from the **Storyboard** timeline effect markers
+- Reference recipes from **Scenes** via attachedPresets
+- Effect markers on the timeline can use existing recipes or create quick ones (shake, flash, freeze, zoom_punch, versus)
+- Click an effect marker to inspect/edit its params in-context
+
+This keeps storyboards as the primary place for juice (effects in narrative context), not a standalone presets editor.
 
 ## No Cold Lock
 

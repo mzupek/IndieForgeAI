@@ -11,7 +11,7 @@ export type PoseStatus = 'draft' | 'polished' | 'approved'
 
 export type PoseSource = 'import' | 'ai'
 
-export type ClipMoment = 'intro' | 'hit' | 'finisher' | 'defeat' | 'story_beat'
+export type ClipMoment = 'intro' | 'hit' | 'finisher' | 'defeat' | 'miss' | 'story_beat'
 
 export type ScenePresetType = 'versus' | 'zoom_punch' | 'shake' | 'flash' | 'freeze'
 
@@ -219,6 +219,37 @@ export interface ScenePreset {
 }
 
 /**
+ * Scene - narrative/gameplay moment with story, cast, and attached storyboard
+ * Phase C: Scenes as the spine
+ */
+export interface Scene {
+  id: string
+  gameId: string
+  name: string
+  description?: string
+  /** Background description or image reference */
+  background?: string
+  /** Character IDs in this scene */
+  cast: string[]
+  /** Story/dialogue text */
+  storyText?: string
+  /** Pose IDs referenced (for quick lookup) */
+  poseRefs: string[]
+  /** Clip IDs referenced (for quick lookup) */
+  clipRefs: string[]
+  /** Audio cue descriptions or references */
+  audioRefs: string[]
+  /** Interaction hook descriptions */
+  interactionHooks: string[]
+  /** Attached preset IDs (FX recipes) */
+  attachedPresets: string[]
+  /** Optional attached storyboard ID */
+  storyboardId?: string
+  createdAt: string
+  updatedAt: string
+}
+
+/**
  * Export profile - defines how to export assets for a specific game
  */
 export interface ExportProfile {
@@ -250,6 +281,30 @@ export interface StoryboardLayer {
   clipId?: string
   imagePath?: string
   
+  /** P2: Visual asset references */
+  visualAssetId?: string
+  /** P2: Asset state ID (null = use asset's default state, undefined = no asset) */
+  assetStateId?: string | null
+  
+  /** P2: Text content */
+  text?: string
+  /** P2: Font reference (Font id, Game Definition themeSlot id, or "default") */
+  fontRef?: string
+  /** P2: Palette reference (Palette id, Game Definition themeSlot id, or "default") */
+  paletteRef?: string
+  
+  /** P2: Visibility flag (editor eye). Independent of timed presence. */
+  visible: boolean
+
+  /**
+   * Timed presence on the shot, half-open
+   * `[visibleFromSec ?? 0, visibleToSec ?? duration)`.
+   * Omit both = whole shot. Eye (`visible`) is editor hide; this is how long
+   * the asset is on stage during scrub/play.
+   */
+  visibleFromSec?: number
+  visibleToSec?: number
+  
   /** Transform in normalized stage coordinates [0,1] */
   x: number
   y: number
@@ -257,6 +312,102 @@ export interface StoryboardLayer {
   rotation: number
   flipX: boolean
   opacity: number
+  
+  /**
+   * P4: Timed pose/state keys on THIS layer (step/hold).
+   * Authored poseId/assetStateId remain the default; keys never write those fields.
+   * Not C.3c per-layer FX keys.
+   */
+  timedKeys?: LayerTimedKey[]
+
+  /** Layer effects (Phase C.2) */
+  fx?: {
+    dropShadow?: {
+      offsetX: number
+      offsetY: number
+      blur: number
+      color: string
+      alpha: number
+    }
+    outerGlow?: {
+      blur: number
+      color: string
+      alpha: number
+      strength?: number
+    }
+  }
+}
+
+/** P4: One pose or state change at a time on a layer timeline. */
+export type LayerTimedKeyAction =
+  | { type: 'setPose'; poseId: string }
+  | { type: 'setState'; stateId: string }
+
+/**
+ * P4: Timed pose/state key on a single shot layer.
+ * Step/hold: the latest key with t <= playhead holds until the next key.
+ */
+export interface LayerTimedKey {
+  id: string
+  t: number
+  action: LayerTimedKeyAction
+  schemaVersion: 1
+}
+
+/** P3: After a timed event action, return to authored default or hold the override. */
+export type EventReturnPolicy = 'default' | 'hold'
+
+export type EventBindingAction =
+  | { type: 'setPose'; poseId: string }
+  | { type: 'setState'; stateId: string }
+  | { type: 'setVisibility'; visible: boolean }
+  | { type: 'setText'; text: string }
+  | { type: 'playSfx'; audioId: string; volume?: number }
+
+export interface EventPayloadSchema {
+  type: 'object'
+  properties: Record<string, 'string' | 'number' | 'boolean'>
+}
+
+/**
+ * P3: Named game event the engine may fire (hit_received, etc.).
+ * Forge authors and preview-simulates responses; Unity/Godot detect real hits.
+ */
+export interface EventDefinition {
+  id: string
+  gameId: string
+  name: string
+  description?: string
+  payloadSchema?: EventPayloadSchema
+  schemaVersion: 1
+  createdAt: string
+  updatedAt: string
+}
+
+/**
+ * P3/A3: Shot binding: event → layer action and/or playSfx.
+ * Layer actions require targetLayerId. playSfx does not (not tied to timed keys).
+ * Authored defaults / audioTrack are never written by preview.
+ */
+export interface EventBinding {
+  id: string
+  shotId: string
+  eventId: string
+  /** Required for pose/state/text/visibility. Omit for playSfx. */
+  targetLayerId?: string
+  action: EventBindingAction
+  payloadFilter?: Record<string, string | number | boolean>
+  /**
+   * Layer holds: 0 = instant (until reset); >0 + default returns at expiry.
+   * playSfx: 0 = play file once to completion unless reset/stop/shot change;
+   * >0 + default stops the voice at expiry; hold plays until completion/reset/stop.
+   * Event SFX never loops.
+   */
+  durationSec: number
+  returnPolicy: EventReturnPolicy
+  schemaVersion: 1
+  createdAt: string
+  updatedAt: string
 }
 
 /**
@@ -271,6 +422,61 @@ export interface CameraKeyframe {
   zoom: number
   /** Framing rectangle in normalized coordinates */
   framingRect?: { x: number; y: number; width: number; height: number }
+}
+
+/**
+ * Timed clip block on a shot timeline (not an instantaneous key).
+ * Plays source [sourceInSec, sourceOutSec) at shot time [t, t+durationSec).
+ * durationSec must equal sourceOutSec - sourceInSec (1x, no stretch).
+ * Not C.3c FX keys. Engine importers are unchanged.
+ */
+export type ClipBlockRole = 'layer' | 'background'
+
+export interface ShotClipBlock {
+  id: string
+  clipId: string
+  role: ClipBlockRole
+  /** Required when role is layer: the clip layer that supplies transform/z-order */
+  layerId?: string | null
+  /** Shot time when the block starts */
+  t: number
+  /** Visible duration on the shot (seconds) */
+  durationSec: number
+  /** Inclusive source trim start (seconds) */
+  sourceInSec: number
+  /** Exclusive source trim end (seconds) */
+  sourceOutSec: number
+  schemaVersion: 1
+}
+
+/**
+ * Timed audio block on a shot timeline (A2).
+ * Half-open [t, t+duration). Non-loop 1x duration equals sourceOut-sourceIn.
+ * Loop wraps the trim window so authored duration may be longer than trim.
+ * Music overlap rejected (one bed). SFX overlap allowed.
+ * Fit-to-shot clamps this block to the current shot end; library media is unchanged.
+ * Shot duration is user-entered (no previous-length history).
+ */
+export type AudioBlockRole = 'music' | 'sfx'
+
+export interface ShotAudioBlock {
+  id: string
+  audioId: string
+  role: AudioBlockRole
+  /** Shot time when the block starts */
+  t: number
+  /** Audible duration on the shot (seconds) */
+  durationSec: number
+  /** Inclusive source trim start (seconds) */
+  sourceInSec: number
+  /** Exclusive source trim end (seconds) */
+  sourceOutSec: number
+  loop: boolean
+  /** Linear gain 0–1 */
+  volume: number
+  fadeInSec: number
+  fadeOutSec: number
+  schemaVersion: 1
 }
 
 /**
@@ -303,6 +509,28 @@ export interface StoryboardShot {
   /** Optional background */
   backgroundImage?: string
   backgroundClipId?: string
+  /**
+   * Library visual asset used as the static shot background (selected Game).
+   * Full-resolution `asset.image` / default or explicit `state.file` — not thumbnail.
+   */
+  backgroundVisualAssetId?: string
+  /** Explicit AssetState for `backgroundVisualAssetId`. Omit/null = default or static image. */
+  backgroundAssetStateId?: string | null
+
+  /**
+   * Timed still-background keys. Step/hold: last key with t <= playhead holds
+   * until the next. Before the first key, the static background fields apply.
+   * Clip-track background blocks still draw over stills while active.
+   */
+  backgroundKeys?: ShotBackgroundKey[]
+  
+  /** Stage treatment effects applied to background only (Phase C.1) */
+  stageTreatment?: {
+    /** Darken background: 0 = no effect, 1 = full black */
+    bgDim?: number
+    /** Vignette darkness toward edges: 0 = none, 1 = strong */
+    vignette?: number
+  }
   
   /** Layers composited on stage */
   layers: StoryboardLayer[]
@@ -312,6 +540,24 @@ export interface StoryboardShot {
   
   /** Effects timeline */
   effectsTrack: EffectMarker[]
+
+  /**
+   * Timed clip blocks (range bars). Legacy `backgroundClipId` and `layer.clipId`
+   * without a block still play as implicit [0, min(clip, shot)) during preview.
+   */
+  clipTrack?: ShotClipBlock[]
+
+  /**
+   * Timed audio blocks (A2). Music/SFX range bars on the shot.
+   * Playback uses HTMLAudioElement.play()/pause() (paused currentTime seeks stay silent).
+   */
+  audioTrack?: ShotAudioBlock[]
+
+  /**
+   * Authored one-shot event cues. Independent of P4 pose/state keys.
+   * Timeline Play fires each cue once per forward-play crossing of `t`.
+   */
+  eventCues?: ShotEventCue[]
   
   /** Notes for engineer */
   notes?: string
@@ -323,16 +569,149 @@ export interface StoryboardShot {
   updatedAt: string
 }
 
+export interface ShotEventCue {
+  id: string
+  /** Shot time (seconds) when Play should fire this named event */
+  t: number
+  eventId: string
+  schemaVersion: 1
+}
+
 /**
- * Storyboard (scene) - ordered sequence of shots
+ * One still-background cut on the shot. Complete still (Library asset+optional
+ * state, or direct image) — not a partial patch of the static fields.
+ * Hard cut; holds until the next key.
+ */
+export interface ShotBackgroundKey {
+  id: string
+  t: number
+  backgroundVisualAssetId?: string
+  backgroundAssetStateId?: string | null
+  backgroundImage?: string
+  schemaVersion: 1
+}
+
+/**
+ * Storyboard - ordered sequence of shots, attached to a Scene
+ * Phase C: Storyboards hang off scenes (not orphaned)
  */
 export interface Storyboard {
   id: string
   gameId: string
+  /** Scene this storyboard belongs to (Phase C) */
+  sceneId?: string
   name: string
   description?: string
   /** Ordered list of shot IDs */
   shotIds: string[]
+  createdAt: string
+  updatedAt: string
+}
+
+/**
+ * P2: Font definition
+ */
+export interface Font {
+  id: string
+  /** Game this font belongs to (required for selected-Game scoping) */
+  gameId: string
+  name: string
+  family: string
+  /** System fallback family when `family` is unavailable */
+  fallback?: string
+  weight?: string
+  style?: string
+  source: 'system' | 'custom'
+  file?: string
+  schemaVersion: 1
+  createdAt: string
+  updatedAt: string
+}
+
+/**
+ * P2: Color palette definition
+ */
+export interface Palette {
+  id: string
+  /** Game this palette belongs to (required for selected-Game scoping) */
+  gameId: string
+  name: string
+  colors: {
+    primary: string
+    secondary: string
+    accent: string
+    background: string
+    text: string
+  }
+  schemaVersion: 1
+  createdAt: string
+  updatedAt: string
+}
+
+/**
+ * Game-scoped imported audio (A1 catalog).
+ * Playback mixer is A2 (must use HTMLAudioElement.play()/pause() or AudioContext;
+ * paused currentTime seeks do not produce sound). Event SFX is A3.
+ */
+export type AudioKind = 'music' | 'sfx'
+
+export interface AudioAsset {
+  id: string
+  gameId: string
+  name: string
+  kind: AudioKind
+  tags: string[]
+  /** Studio-owned copy of the imported file (not the original source path). */
+  file: string
+  /** Probed duration in seconds. */
+  durationSec: number
+  /** Optional mapping note for existing engine clips. Not a playable substitute. */
+  engineNotes?: string
+  schemaVersion: 1
+  createdAt: string
+  updatedAt: string
+}
+
+/**
+ * Visual asset - generic reusable art asset with optional states
+ * Distinct from character poses (which remain import-only 1024 PNGs)
+ * P1: Generic visual assets (logos, symbols, items, weapons, props)
+ */
+export interface VisualAsset {
+  id: string
+  gameId: string
+  name: string
+  /** Asset category for organization */
+  category: 'logo' | 'symbol' | 'item' | 'weapon' | 'prop'
+  /** Tags for library search */
+  tags: string[]
+  /** Default state ID (null if single-state / static asset) */
+  defaultStateId: string | null
+  /** Full-size static image path (single-state assets; no dummy AssetState required) */
+  image?: string
+  /** Thumbnail path for library preview */
+  thumbnail?: string
+  /** Full-resolution source pixels (not the 256² library thumbnail). */
+  pixelSize?: { width: number; height: number }
+  schemaVersion: number
+  createdAt: string
+  updatedAt: string
+}
+
+/**
+ * Asset state - named variation of a visual asset
+ * Examples: crate "open"/"closed", weapon "ready"/"firing"
+ * P1: Multi-state asset support
+ */
+export interface AssetState {
+  id: string
+  assetId: string
+  name: string
+  /** Path to image file (PNG with transparency) */
+  file: string
+  /** Full-resolution source pixels (not the 256² library thumbnail). */
+  boundingBox?: { width: number; height: number }
+  schemaVersion: number
   createdAt: string
   updatedAt: string
 }
@@ -351,10 +730,25 @@ export interface AssetPipelineProject {
   poses: Pose[]
   clips: Clip[]
   scenePresets: ScenePreset[]
+  scenes: Scene[]
   storyboards: Storyboard[]
   storyboardShots: StoryboardShot[]
   exportProfiles: ExportProfile[]
   gameDefinitions: GameDefinition[]
+  /** P1: Generic visual assets */
+  visualAssets: VisualAsset[]
+  /** P1: Asset states for multi-state assets */
+  assetStates: AssetState[]
+  /** P2: Fonts for text layers */
+  fonts: Font[]
+  /** P2: Color palettes for text layers */
+  palettes: Palette[]
+  /** P3: Game-scoped event definitions */
+  eventDefinitions: EventDefinition[]
+  /** P3: Shot-scoped event → layer bindings */
+  eventBindings: EventBinding[]
+  /** A1: Game-scoped imported audio catalog */
+  audioAssets: AudioAsset[]
   createdAt: string
   updatedAt: string
 }

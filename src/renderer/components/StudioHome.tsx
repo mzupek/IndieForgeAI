@@ -71,9 +71,27 @@ export function StudioHome() {
 
   const handleGameChange = (gameId: string) => {
     setSelectedGameId(gameId)
-    // Navigate to characters for the selected game
-    if (location.pathname === '/' || location.pathname === '/studio') {
+    // Navigate to the current view but with the new game
+    const path = location.pathname
+    if (path === '/' || path === '/studio') {
       navigate(`/studio/characters/${gameId}`)
+    } else if (path.startsWith('/studio/characters/')) {
+      navigate(`/studio/characters/${gameId}`)
+    } else if (path.startsWith('/studio/poses/')) {
+      navigate(`/studio/poses/${gameId}`)
+    } else if (path.startsWith('/studio/clips/')) {
+      navigate(`/studio/clips/${gameId}`)
+    } else if (path.startsWith('/studio/library/') || path.startsWith('/studio/assets/')) {
+      const tab = new URLSearchParams(location.search).get('tab')
+      navigate(tab ? `/studio/library/${gameId}?tab=${encodeURIComponent(tab)}` : `/studio/library/${gameId}`)
+    } else if (path.startsWith('/studio/scenes/')) {
+      navigate(`/studio/scenes/${gameId}`)
+    } else if (path.startsWith('/studio/storyboards/')) {
+      navigate(`/studio/storyboards/${gameId}`)
+    } else if (path.startsWith('/studio/definitions/')) {
+      navigate(`/studio/definitions/${gameId}`)
+    } else if (path.startsWith('/studio/export/')) {
+      navigate(`/studio/export/${gameId}`)
     }
   }
 

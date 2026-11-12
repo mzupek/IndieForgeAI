@@ -39,6 +39,7 @@ function testShotStructure() {
     zOrder: 10,
     characterId: 'char-1',
     poseId: 'pose-1',
+    visible: true,
     x: 0.5,
     y: 0.5,
     scale: 1.0,
@@ -68,6 +69,7 @@ function testShotStructure() {
     layers: [layer],
     cameraTrack: [cameraKeyframe],
     effectsTrack: [effectMarker],
+    eventCues: [{ id: 'cue-1', t: 1.2, eventId: 'evt-touch', schemaVersion: 1 }],
     notes: 'Test notes',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
@@ -79,6 +81,7 @@ function testShotStructure() {
   assert(shot.layers[0].opacity >= 0 && shot.layers[0].opacity <= 1, 'Layer opacity normalized')
   assert(shot.cameraTrack.length === 1, 'Camera keyframe count')
   assert(shot.effectsTrack.length === 1, 'Effect marker count')
+  assert(shot.eventCues?.length === 1, 'Event cue count')
   assert(shot.aspectRatio.width === 16, 'Aspect ratio width')
   assert(shot.aspectRatio.height === 9, 'Aspect ratio height')
   console.log('✓ Shot structure with layers, camera, effects')
@@ -90,6 +93,7 @@ function testLayerTypes() {
     zOrder: 10,
     characterId: 'char-1',
     poseId: 'pose-ready',
+    visible: true,
     x: 0.3,
     y: 0.5,
     scale: 1.2,
@@ -102,6 +106,7 @@ function testLayerTypes() {
     id: 'layer-clip',
     zOrder: 5,
     clipId: 'clip-intro',
+    visible: true,
     x: 0.7,
     y: 0.4,
     scale: 0.8,
@@ -114,6 +119,7 @@ function testLayerTypes() {
     id: 'layer-bg',
     zOrder: 1,
     imagePath: './backgrounds/city.png',
+    visible: true,
     x: 0.5,
     y: 0.5,
     scale: 1.0,
