@@ -16,6 +16,7 @@ import { registerStoryboardCommands } from './commands/storyboard'
 import { registerSceneCommands } from './commands/scene'
 import { registerEventCommands } from './commands/event'
 import { registerAudioCommands } from './commands/audio'
+import { registerDefinitionCommands } from './commands/definition'
 import * as asset from './commands/asset'
 import * as assetState from './commands/asset-state'
 
@@ -387,5 +388,8 @@ registerSceneCommands(program)
 
 // A1: Game-scoped audio library
 registerAudioCommands(program)
+
+// Game Definitions (shared with the app UI)
+registerDefinitionCommands(program)
 
 program.parse()

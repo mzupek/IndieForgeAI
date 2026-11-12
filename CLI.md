@@ -27,6 +27,8 @@ npm run forge -- <command>
 
 ## Commands
 
+Game Definitions (`forge definition`, alias `gamedef`) are documented in [Game Definition](#game-definition). Agents should use `--json` and isolated `FORGE_DATA_DIR` when experimenting.
+
 ### `forge games list`
 
 List all games across all projects.
@@ -1514,6 +1516,118 @@ forge layer add --shot $SHOT2 --z 10 \
 # 7. View storyboard
 forge storyboard show --id $BOARD_ID --json
 ```
+
+---
+
+## Game Definition
+
+Game Definitions live in `studio.json` (`gameDefinitions`, **one per `gameId`**). The CLI and the Game Definitions UI share `gameDefinitionService` — the same file lock and validation — so an open app picks up CLI edits the same way it does for other `forge` writes.
+
+Alias: `forge gamedef` is the same group as `forge definition`.
+
+All commands take `--game <id>`. Global `--json` is the agent-friendly form (put it before the subcommand, or on the leaf):
+
+```bash
+forge --json definition show --game game-test
+# or
+node out/cli/forge.js --json definition show --game game-test
+```
+
+`--data-dir` / `FORGE_DATA_DIR` work as elsewhere. Do not point agents at a developer’s real studio when running tests; use `mktemp` + `FORGE_DATA_DIR`.
+
+### Commands
+
+| Command | Purpose |
+|---|---|
+| `definition show [--section <name>]` | Whole definition, or one section |
+| `definition export [--format json\|md] [--out <file>]` | JSON for agents, or generated Markdown for humans |
+| `definition create` | Create when the game has none |
+| `definition set` | Scalars: `--stage`, `--puzzle-core`, `--story-synopsis` |
+| `definition pillar add\|update\|remove\|list` | String list; `--index` is 0-based, `--id` is exact text |
+| `definition interaction add\|update\|remove\|list` | `--name`, `--description`, repeatable `--asset-ref`; update/remove by `--id` |
+| `definition tuning add\|update\|remove\|list` | `--name`, `--notes`, repeatable `--param key=value`, `--unset-param key` |
+| `definition theme-slot add\|update\|remove\|list` | `--name`, `--description`, `--reference` |
+| `definition mvp add\|update\|remove\|list` | `--item`, `--type` (`asset\|system\|content\|tuning`), `--status` (`needed\|partial\|done\|cut`), `--notes` |
+| `definition keep\|cut\|invent add\|remove\|list` | Keep/cut/invent string lists |
+| `definition cast add\|remove\|list` | Character IDs; must exist in the same game |
+| `definition link add\|remove\|list` | `--pose` / `--clip` / `--preset` IDs; must exist in the same game (presets: id exists) |
+| `definition apply --file <patch.json> [--dry-run]` | JSON merge patch; object arrays match by `id`; reports a diff |
+
+`--section` names (aliases in parentheses): `stage`, `pillars`, `puzzleCore` (`puzzle-core`), `storySynopsis` (`story-synopsis`), `cast`, `linkedAssets` (`linked-assets`), `themeSlots` (`theme-slots`), `interactions`, `tuningProfiles` (`tuning`), `keepCutInvent` (`keep-cut-invent`), `mvpBoard` (`mvp`), `markdownSource` (`markdown`).
+
+Long text: `--puzzle-core-file <path>` or `--puzzle-core -` (stdin). Same pattern for `--story-synopsis-file` / `--story-synopsis -`.
+
+`--param` values are inferred: `true`/`false` → bool, finite numbers → number, otherwise string.
+
+`definition apply` patch rules:
+
+- Scalars overwrite (`stage`, `puzzleCore`, `storySynopsis`, `markdownSource`).
+- Object arrays (`interactions`, `tuningProfiles`, `themeSlots`, `mvpBoard`) upsert by `id`. Omit `id` to add (UUID assigned). `{ "id": "…", "delete": true }` removes.
+- String lists (`pillars`, `cast`, keep/cut/invent) accept a replacement array **or** `{ "add": [...], "remove": [...] }`.
+- `linkedAssets` is `{ poses, clips, presets }` with the same string-list rules. Nested `tuningProfiles[].params` merge; JSON `null` unsets a key.
+- `id`, `gameId`, `createdAt`, `updatedAt` cannot be changed.
+- `--dry-run` computes the next definition and diff and **writes nothing**.
+
+Cast/pose/clip links are rejected unless the referenced record exists and belongs to `--game`. Scene presets have no `gameId`; link checks that the preset id exists.
+
+### Agent example — Gate Drone security-gate rule (docs only)
+
+This is the authored **3-lock pad** rule for Neon Recall’s Gate Drone encounter. It is an example for agents and for a later A4 portable export. **Do not write it into Matt’s live studio data** (the seeded definition still describes the older Simon Says / HP fight). Encode it in a scratch `FORGE_DATA_DIR` or a patch file you keep in the repo docs, not in `game-neon-recall` on a real machine.
+
+Rule:
+
+- The hero hacks the gate’s security pad over **3 rounds**.
+- The HUD shows **3 lock icons**.
+- Each round the hero wins unlocks **one** lock.
+- When all **3** locks are open, the gate opens, the drone is destroyed, and the **next level unlocks**.
+
+```bash
+# Isolated data only — never Matt's real studio
+export FORGE_DATA_DIR=$(mktemp -d)
+
+# After the game already has a definition:
+forge --json definition set --game game-neon-recall --stage MVP \
+  --puzzle-core "Gate Drone security-gate: the hero hacks the gate's security pad over 3 rounds. HUD shows 3 lock icons; each round won unlocks one lock. All 3 locks open the gate, destroy the drone, and unlock the next level."
+
+forge --json definition interaction add --game game-neon-recall \
+  --name "Security pad hack" \
+  --description "3-round pad hack. One lock icon unlocks per round won. Three unlocked locks open the gate, destroy the Gate Drone, and unlock the next level." \
+  --asset-ref "GateDrone" --asset-ref "SecurityPad" --asset-ref "LockHUD"
+
+forge --json definition tuning add --game game-neon-recall \
+  --name "Gate Drone Security Pad" \
+  --notes "3 locks / 3 rounds. Winning a round unlocks one lock; all 3 open the gate and destroy the drone." \
+  --param rounds=3 --param locks=3 --param unlocksNextLevel=true
+
+# Or one structured patch (dry-run first):
+cat > /tmp/gate-drone-pad.json << 'EOF'
+{
+  "puzzleCore": "Gate Drone security-gate: the hero hacks the gate's security pad over 3 rounds. HUD shows 3 lock icons; each round won unlocks one lock. All 3 locks open the gate, destroy the drone, and unlock the next level.",
+  "interactions": [
+    {
+      "name": "Security pad hack",
+      "description": "3-round pad hack. One lock icon unlocks per round won. Three unlocked locks open the gate, destroy the Gate Drone, and unlock the next level.",
+      "assetRefs": ["GateDrone", "SecurityPad", "LockHUD"]
+    }
+  ],
+  "tuningProfiles": [
+    {
+      "name": "Gate Drone Security Pad",
+      "params": { "rounds": 3, "locks": 3, "unlocksNextLevel": true },
+      "notes": "3 locks / 3 rounds. Winning a round unlocks one lock; all 3 open the gate and destroy the drone."
+    }
+  ]
+}
+EOF
+forge --json definition apply --game game-neon-recall --file /tmp/gate-drone-pad.json --dry-run
+forge --json definition apply --game game-neon-recall --file /tmp/gate-drone-pad.json
+forge --json definition show --game game-neon-recall --section puzzle-core
+forge --json definition export --game game-neon-recall --format md --out /tmp/game-def.md
+```
+
+### A4 portable export (later)
+
+When A4 portable export is implemented, the package should include the Game Definition JSON (and the generated Markdown view) for that `gameId`, including authored rules such as the Gate Drone 3-lock pad. Do not implement that export in this CLI group; `definition export` is the studio-local read path.
 
 ---
 

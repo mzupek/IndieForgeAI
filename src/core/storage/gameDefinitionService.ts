@@ -6,10 +6,15 @@ import { randomUUID } from 'crypto'
 import { readFile } from 'fs/promises'
 import { join } from 'path'
 import { existsSync } from 'fs'
-import { app } from 'electron'
-import type { GameDefinition, GameDefinitionStage } from '@shared/types/assetPipeline'
+import type { GameDefinition } from '@shared/types/assetPipeline'
 import { getAssetPipeline, updateAssetPipeline } from './studioStorage'
 import { seedNeonRecallDefinition } from './seedGameDefinition'
+import {
+  applyDefinitionMergePatch,
+  type DefinitionDiff,
+  updatesFromDefinition,
+  validateGameDefinition
+} from '../../shared/gameDefinition/definitionPatch'
 
 /**
  * Get all game definitions
@@ -42,14 +47,23 @@ export async function getGameDefinitionByGameId(
 }
 
 /**
- * Load seed markdown for Neon Recall
+ * Load seed markdown for Neon Recall.
+ * Lazy-require electron so the CLI bundle does not hard-depend on it.
  */
 async function loadNeonRecallSeedMarkdown(): Promise<string | null> {
-  const candidates = [
-    join(app.getAppPath(), 'seed', 'neon_recall_current_state.md'),
+  const candidates: string[] = [
     join(__dirname, '../../seed', 'neon_recall_current_state.md'),
     join(process.cwd(), 'seed', 'neon_recall_current_state.md')
   ]
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const electron = require('electron') as { app?: { getAppPath?: () => string } }
+    if (electron?.app?.getAppPath) {
+      candidates.unshift(join(electron.app.getAppPath(), 'seed', 'neon_recall_current_state.md'))
+    }
+  } catch {
+    // CLI / tests: electron is external and may not load
+  }
   
   for (const seedPath of candidates) {
     if (existsSync(seedPath)) {
@@ -68,12 +82,37 @@ async function loadNeonRecallSeedMarkdown(): Promise<string | null> {
  * Create a new game definition
  * For game-neon-recall, seeds from the current-state markdown if available
  */
+export async function requireGameDefinitionByGameId(
+  gameId: string,
+  dataDirOverride?: string
+): Promise<GameDefinition> {
+  const pipeline = await getAssetPipeline(dataDirOverride)
+  if (!pipeline.games.some((g) => g.id === gameId)) {
+    throw new Error(`Game not found: ${gameId}`)
+  }
+  const definition = pipeline.gameDefinitions?.find((def) => def.gameId === gameId)
+  if (!definition) {
+    throw new Error(
+      `No game definition for '${gameId}'. Create one with: forge definition create --game ${gameId}`
+    )
+  }
+  return definition
+}
+
 export async function createGameDefinition(
   gameId: string,
   dataDirOverride?: string
 ): Promise<GameDefinition> {
   const pipeline = await getAssetPipeline(dataDirOverride)
-  
+  if (!pipeline.games.some((g) => g.id === gameId)) {
+    throw new Error(`Game not found: ${gameId}`)
+  }
+  if (pipeline.gameDefinitions?.some((def) => def.gameId === gameId)) {
+    throw new Error(
+      `Game '${gameId}' already has a definition. Use forge definition show --game ${gameId}`
+    )
+  }
+
   const now = new Date().toISOString()
   let newDefinition: GameDefinition
   
@@ -151,12 +190,16 @@ export async function updateGameDefinition(
   }
   
   const definition = pipeline.gameDefinitions[index]
-  const updated = {
+  const updated: GameDefinition = {
     ...definition,
     ...updates,
+    id: definition.id,
+    gameId: definition.gameId,
+    createdAt: definition.createdAt,
     updatedAt: new Date().toISOString()
   }
-  
+  validateGameDefinition(updated, pipeline)
+
   pipeline.gameDefinitions[index] = updated
   await updateAssetPipeline(pipeline, dataDirOverride)
   
@@ -178,6 +221,29 @@ export async function deleteGameDefinition(
   
   pipeline.gameDefinitions = pipeline.gameDefinitions.filter((def) => def.id !== id)
   await updateAssetPipeline(pipeline, dataDirOverride)
+}
+
+/**
+ * Apply a structured JSON merge patch (id-matched arrays). Used by CLI `definition apply`.
+ * `--dry-run` computes next + diff and writes nothing.
+ */
+export async function applyGameDefinitionPatch(
+  gameId: string,
+  patch: Record<string, unknown>,
+  options: { dryRun?: boolean; dataDirOverride?: string } = {}
+): Promise<{ current: GameDefinition; next: GameDefinition; diff: DefinitionDiff; written: boolean }> {
+  const pipeline = await getAssetPipeline(options.dataDirOverride)
+  const current = await requireGameDefinitionByGameId(gameId, options.dataDirOverride)
+  const { next, diff } = applyDefinitionMergePatch(current, patch, pipeline)
+  if (options.dryRun || diff.entries.length === 0) {
+    return { current, next, diff, written: false }
+  }
+  const saved = await updateGameDefinition(
+    current.id,
+    updatesFromDefinition(next),
+    options.dataDirOverride
+  )
+  return { current, next: saved, diff, written: true }
 }
 
 /**

@@ -109,9 +109,11 @@ Navigate to **Game Definitions** in the studio sidebar, then select a game. Two 
 
 Save structured changes auto-saves. Markdown must be explicitly saved via the "Save Markdown" button.
 
-## CLI Export (Future)
+## CLI
 
-Phase E will add `forge definition export <game-id>` for full package exports. Phase B provides manual markdown export only.
+`forge definition` (alias `forge gamedef`) reads and updates Game Definitions through the same service, lock, and validation as the UI. See **CLI.md → Game Definition** for the command list, JSON merge-patch rules, and a docs-only Gate Drone 3-lock pad example (do not write that example into live Neon Recall data).
+
+`forge definition export --format json|md` is the studio-local export. A later **A4 portable export** should include the Game Definition JSON/Markdown in the shipped package; that is not implemented here.
 
 ## Phase Dependencies
 
