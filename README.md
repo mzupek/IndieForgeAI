@@ -50,6 +50,8 @@ cp .env.example .env
 npm run dev
 ```
 
+`npm run dev` serves the renderer on **port 5180** (not Vite’s default 5173) so it does not collide with other Electron/Vite apps on the same Mac. If 5180 is already taken, the process **fails** instead of silently moving. Override with `INDIE_FORGE_DEV_PORT=5181 npm run dev`. Electron loads `ELECTRON_RENDERER_URL` from electron-vite (not a hardcoded localhost port).
+
 ## CLI Agent Scaffold Path
 
 Engineering agents can scaffold MVP scenes + storyboards via CLI; humans polish assets in UI:
