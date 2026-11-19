@@ -338,7 +338,43 @@ const api: IndieForgeAPI = {
     removeCharacterPoseSlot: (projectId, characterId, gameId, key) =>
       ipcRenderer.invoke(IPC_CHANNELS.CHARACTER_POSE_SLOT_REMOVE, projectId, characterId, gameId, key),
     setCharacterCorePosesRequired: (projectId, characterId, gameId, required) =>
-      ipcRenderer.invoke(IPC_CHANNELS.CHARACTER_CORE_POSES_REQUIRED, projectId, characterId, gameId, required)
+      ipcRenderer.invoke(IPC_CHANNELS.CHARACTER_CORE_POSES_REQUIRED, projectId, characterId, gameId, required),
+    addEncounterType: (projectId, gameId, typeId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.GAME_SETTINGS_ADD_ENCOUNTER_TYPE, projectId, gameId, typeId),
+    removeEncounterType: (projectId, gameId, typeId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.GAME_SETTINGS_REMOVE_ENCOUNTER_TYPE, projectId, gameId, typeId),
+    addModule: (projectId, gameId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.GAME_SETTINGS_ADD_MODULE, projectId, gameId, input),
+    updateModule: (projectId, gameId, moduleId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.GAME_SETTINGS_UPDATE_MODULE, projectId, gameId, moduleId, input),
+    removeModule: (projectId, gameId, moduleId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.GAME_SETTINGS_REMOVE_MODULE, projectId, gameId, moduleId)
+  },
+  worldContent: {
+    createWorld: (projectId, gameId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.WORLD_CREATE, projectId, gameId, input),
+    updateWorld: (projectId, gameId, id, patch) =>
+      ipcRenderer.invoke(IPC_CHANNELS.WORLD_UPDATE, projectId, gameId, id, patch),
+    removeWorld: (projectId, gameId, id) =>
+      ipcRenderer.invoke(IPC_CHANNELS.WORLD_REMOVE, projectId, gameId, id),
+    createStage: (projectId, gameId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.STAGE_CREATE, projectId, gameId, input),
+    updateStage: (projectId, gameId, id, patch) =>
+      ipcRenderer.invoke(IPC_CHANNELS.STAGE_UPDATE, projectId, gameId, id, patch),
+    removeStage: (projectId, gameId, id) =>
+      ipcRenderer.invoke(IPC_CHANNELS.STAGE_REMOVE, projectId, gameId, id),
+    createEncounter: (projectId, gameId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.ENCOUNTER_CREATE, projectId, gameId, input),
+    updateEncounter: (projectId, gameId, id, patch) =>
+      ipcRenderer.invoke(IPC_CHANNELS.ENCOUNTER_UPDATE, projectId, gameId, id, patch),
+    removeEncounter: (projectId, gameId, id) =>
+      ipcRenderer.invoke(IPC_CHANNELS.ENCOUNTER_REMOVE, projectId, gameId, id),
+    createRegion: (projectId, gameId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.REGION_CREATE, projectId, gameId, input),
+    updateRegion: (projectId, gameId, id, patch) =>
+      ipcRenderer.invoke(IPC_CHANNELS.REGION_UPDATE, projectId, gameId, id, patch),
+    removeRegion: (projectId, gameId, id) =>
+      ipcRenderer.invoke(IPC_CHANNELS.REGION_REMOVE, projectId, gameId, id)
   }
 }
 

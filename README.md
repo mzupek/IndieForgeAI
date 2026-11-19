@@ -99,7 +99,17 @@ forge effect add --shot $SHOT_ID --time 1.2 --moment hit --preset shake-impact-0
 - **Stage Treatment** (Phase C.1) - `--bg-dim 0.35 --vignette 0.4` darkens background (0-1) without affecting character layers
 - **Layer Effects** (Phase C.2) - `--glow-blur 12 --glow-alpha 0.8 --glow-color '#00ffff'` for outer glow; `--shadow-x 4 --shadow-y 6 --shadow-blur 10 --shadow-alpha 0.5` for drop shadow
 
-See `forge scene --help`, `forge storyboard --help`, `forge shot --help`, `forge shot clip --help`, `forge layer --help`, `forge layer key --help` for full CLI.
+World structure (1c):
+
+```bash
+forge game module add --game <id> --id pad --label Pad --type-ids battle --star-kinds win,noMisses
+forge world create --game <id> --name "World 1" --key world-1 --json
+forge stage create --game <id> --world @world-1 --name "The Gate" --key stage-gate --json
+forge content apply --game <id> --file docs/samples/gate-drone-content.json --dry-run --json
+forge content export --game <id> --out ./export-content --json
+```
+
+See `forge scene --help`, `forge world --help`, `forge content --help`, `forge storyboard --help`, `forge shot --help`, `forge shot clip --help`, `forge layer --help`, `forge layer key --help` for full CLI.
 
 ## Workflow
 

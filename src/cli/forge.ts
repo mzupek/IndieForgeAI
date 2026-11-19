@@ -19,6 +19,7 @@ import { registerAudioCommands } from './commands/audio'
 import { registerDefinitionCommands } from './commands/definition'
 import { registerMigrateCommand } from './commands/migrate'
 import { registerGameSettingsCommands } from './commands/gameSettings'
+import { registerWorldContentCommands } from './commands/worldContent'
 import * as asset from './commands/asset'
 import * as assetState from './commands/asset-state'
 
@@ -400,5 +401,8 @@ registerDefinitionCommands(program)
 
 // Explicit studio.json schema migrate (app never auto-migrates)
 registerMigrateCommand(program)
+
+// 1c World / Stage / Encounter / Region + content apply/export
+registerWorldContentCommands(program)
 
 program.parse()

@@ -766,6 +766,34 @@ export interface IndieForgeAPI {
       gameId: string,
       required: boolean
     ) => Promise<IndieForgeProject>
+    addEncounterType: (projectId: string, gameId: string, typeId: string) => Promise<IndieForgeProject>
+    removeEncounterType: (projectId: string, gameId: string, typeId: string) => Promise<IndieForgeProject>
+    addModule: (
+      projectId: string,
+      gameId: string,
+      input: { id: string; label: string; typeIds: string[]; starKinds?: string[] }
+    ) => Promise<IndieForgeProject>
+    updateModule: (
+      projectId: string,
+      gameId: string,
+      moduleId: string,
+      input: { label?: string; typeIds?: string[]; starKinds?: string[] }
+    ) => Promise<IndieForgeProject>
+    removeModule: (projectId: string, gameId: string, moduleId: string) => Promise<IndieForgeProject>
+  }
+  worldContent: {
+    createWorld: (projectId: string, gameId: string, input: any) => Promise<IndieForgeProject>
+    updateWorld: (projectId: string, gameId: string, id: string, patch: any) => Promise<IndieForgeProject>
+    removeWorld: (projectId: string, gameId: string, id: string) => Promise<IndieForgeProject>
+    createStage: (projectId: string, gameId: string, input: any) => Promise<IndieForgeProject>
+    updateStage: (projectId: string, gameId: string, id: string, patch: any) => Promise<IndieForgeProject>
+    removeStage: (projectId: string, gameId: string, id: string) => Promise<IndieForgeProject>
+    createEncounter: (projectId: string, gameId: string, input: any) => Promise<IndieForgeProject>
+    updateEncounter: (projectId: string, gameId: string, id: string, patch: any) => Promise<IndieForgeProject>
+    removeEncounter: (projectId: string, gameId: string, id: string) => Promise<IndieForgeProject>
+    createRegion: (projectId: string, gameId: string, input: any) => Promise<IndieForgeProject>
+    updateRegion: (projectId: string, gameId: string, id: string, patch: any) => Promise<IndieForgeProject>
+    removeRegion: (projectId: string, gameId: string, id: string) => Promise<IndieForgeProject>
   }
 }
 

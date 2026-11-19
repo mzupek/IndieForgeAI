@@ -8,7 +8,7 @@ import { useOutletContext } from 'react-router-dom'
 import { useProjectStore } from '../state/indieForgeStore'
 import { CORE_POSE_SLOTS } from '@shared/gameSettings/poseSlots'
 import { CORE_ASSET_CATEGORIES } from '@shared/gameSettings/assetCategories'
-import type { GameAssetCategoryDef, GamePoseSlotDef } from '@shared/types/assetPipeline'
+import type { GameAssetCategoryDef, GameEncounterModule, GamePoseSlotDef } from '@shared/types/assetPipeline'
 
 export function GameSettingsView() {
   const { projectId, gameId } = useOutletContext<{ projectId: string; gameId: string }>()
@@ -24,6 +24,12 @@ export function GameSettingsView() {
   const [catLabel, setCatLabel] = useState('')
   const [catBase, setCatBase] = useState('')
 
+  const [typeId, setTypeId] = useState('')
+  const [modId, setModId] = useState('')
+  const [modLabel, setModLabel] = useState('')
+  const [modTypeIds, setModTypeIds] = useState('battle')
+  const [modStarKinds, setModStarKinds] = useState('')
+
   if (!activeProject || !gameId) {
     return <p style={{ color: 'var(--muted)' }}>Loading...</p>
   }
@@ -35,6 +41,8 @@ export function GameSettingsView() {
 
   const gameSlots: GamePoseSlotDef[] = game.settings?.poseSlots || []
   const gameCats: GameAssetCategoryDef[] = game.settings?.assetCategories || []
+  const encounterTypes: string[] = game.settings?.encounterTypes || []
+  const modules: GameEncounterModule[] = game.settings?.modules || []
 
   async function refreshAfter(mutator: () => Promise<typeof activeProject>) {
     setBusy(true)
@@ -55,7 +63,7 @@ export function GameSettingsView() {
         <div>
           <h2>Game Settings</h2>
           <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>
-            {game.name} • pose slots and asset categories
+            {game.name} • pose slots, asset categories, encounter types, modules
           </p>
         </div>
       </div>
@@ -258,6 +266,137 @@ export function GameSettingsView() {
           />
           <button type="submit" disabled={busy || !catKey.trim() || !catLabel.trim()}>
             Add category
+          </button>
+        </form>
+      </div>
+
+      <div className="panel-section" style={{ marginTop: '2rem' }}>
+        <h3>Encounter types</h3>
+        <p style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>
+          Used by Encounter.typeId. Defaults are battle, puzzle, minigame, story. Removal is refused while an
+          encounter uses the value.
+        </p>
+        <ul style={{ listStyle: 'none', padding: 0 }}>
+          {encounterTypes.map((t) => (
+            <li key={t} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.3rem 0' }}>
+              <code>{t}</code>
+              <button
+                type="button"
+                className="ghost"
+                disabled={busy}
+                style={{ color: 'var(--error)' }}
+                onClick={() =>
+                  refreshAfter(() => window.indieForge.gameSettings.removeEncounterType(projectId, gameId, t))
+                }
+              >
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
+        <form
+          style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (!typeId.trim()) return
+            void refreshAfter(async () => {
+              const updated = await window.indieForge.gameSettings.addEncounterType(projectId, gameId, typeId.trim())
+              setTypeId('')
+              return updated
+            })
+          }}
+        >
+          <input placeholder="type slug" value={typeId} onChange={(e) => setTypeId(e.target.value)} disabled={busy} />
+          <button type="submit" disabled={busy || !typeId.trim()}>
+            Add type
+          </button>
+        </form>
+      </div>
+
+      <div className="panel-section" style={{ marginTop: '2rem' }}>
+        <h3>Encounter modules</h3>
+        <p style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>
+          Each module lists the types it supports and optional star kinds. Removal is refused while an encounter uses it.
+        </p>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
+          <thead>
+            <tr style={{ textAlign: 'left', color: 'var(--muted)' }}>
+              <th style={{ padding: '0.35rem 0' }}>Id</th>
+              <th>Label</th>
+              <th>Types</th>
+              <th>Star kinds</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {modules.map((m) => (
+              <tr key={m.id}>
+                <td style={{ padding: '0.35rem 0' }}>
+                  <code>{m.id}</code>
+                </td>
+                <td>{m.label}</td>
+                <td>{m.typeIds.join(', ')}</td>
+                <td>{(m.starKinds || []).join(', ') || '(any)'}</td>
+                <td>
+                  <button
+                    type="button"
+                    className="ghost"
+                    disabled={busy}
+                    style={{ color: 'var(--error)' }}
+                    onClick={() =>
+                      refreshAfter(() => window.indieForge.gameSettings.removeModule(projectId, gameId, m.id))
+                    }
+                  >
+                    Remove
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <form
+          style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.75rem', alignItems: 'center' }}
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (!modId.trim() || !modLabel.trim()) return
+            const typeIds = modTypeIds
+              .split(',')
+              .map((s) => s.trim())
+              .filter(Boolean)
+            const starKinds = modStarKinds
+              .split(',')
+              .map((s) => s.trim())
+              .filter(Boolean)
+            void refreshAfter(async () => {
+              const updated = await window.indieForge.gameSettings.addModule(projectId, gameId, {
+                id: modId.trim(),
+                label: modLabel.trim(),
+                typeIds,
+                starKinds: starKinds.length ? starKinds : undefined
+              })
+              setModId('')
+              setModLabel('')
+              setModStarKinds('')
+              return updated
+            })
+          }}
+        >
+          <input placeholder="id" value={modId} onChange={(e) => setModId(e.target.value)} disabled={busy} />
+          <input placeholder="Label" value={modLabel} onChange={(e) => setModLabel(e.target.value)} disabled={busy} />
+          <input
+            placeholder="type ids (comma)"
+            value={modTypeIds}
+            onChange={(e) => setModTypeIds(e.target.value)}
+            disabled={busy}
+          />
+          <input
+            placeholder="star kinds (optional)"
+            value={modStarKinds}
+            onChange={(e) => setModStarKinds(e.target.value)}
+            disabled={busy}
+          />
+          <button type="submit" disabled={busy || !modId.trim() || !modLabel.trim()}>
+            Add module
           </button>
         </form>
       </div>

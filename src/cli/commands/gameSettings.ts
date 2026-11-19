@@ -4,17 +4,26 @@
  */
 
 import { Command } from 'commander'
+import { readFileSync } from 'fs'
 import {
   addCharacterPoseSlot,
+  addEncounterModule,
+  addEncounterType,
   addGameAssetCategory,
   addGamePoseSlot,
   listCharacterPoseSlots,
+  listEncounterModules,
+  listEncounterTypes,
   listGameAssetCategories,
   listGamePoseSlots,
   removeCharacterPoseSlot,
+  removeEncounterModule,
+  removeEncounterType,
   removeGameAssetCategory,
   removeGamePoseSlot,
-  setCharacterCorePosesRequired
+  setCharacterCorePosesRequired,
+  updateEncounterModule,
+  updateGameSettingsFromFile
 } from '@core/storage/gameSettingsService'
 import { getAssetPipeline } from '@core/storage/studioStorage'
 import { requireGame } from '@core/storage/gameSettingsService'
@@ -73,11 +82,21 @@ async function showGameSettings(opts: CommonOpts): Promise<void> {
     for (const cat of settings.assetCategories) {
       console.log(`    ${cat.key}  ${cat.label}${cat.base ? `  (base: ${cat.base})` : ''}`)
     }
+    console.log('  Encounter types:')
+    if (settings.encounterTypes.length === 0) console.log('    (none)')
+    for (const t of settings.encounterTypes) console.log(`    ${t}`)
+    console.log('  Modules:')
+    if (settings.modules.length === 0) console.log('    (none)')
+    for (const m of settings.modules) {
+      console.log(
+        `    ${m.id}  ${m.label}  types=${m.typeIds.join(',')}  stars=${(m.starKinds || []).join(',') || '(any)'}`
+      )
+    }
   })
 }
 
 export function registerGameSettingsCommands(gamesCmd: Command, characterCmd: Command, program: Command): void {
-  const settingsCmd = gamesCmd.command('settings').description('Show per-game settings (pose slots, asset categories)')
+  const settingsCmd = gamesCmd.command('settings').description('Show or update per-game settings')
   settingsCmd
     .command('show')
     .description('Show game.settings (read-only)')
@@ -86,6 +105,29 @@ export function registerGameSettingsCommands(gamesCmd: Command, characterCmd: Co
       const opts = { ...program.opts(), ...collectOpts(cmd, options) }
       try {
         await showGameSettings(opts)
+      } catch (err) {
+        outputError(err, opts)
+        process.exit(1)
+      }
+    })
+
+  settingsCmd
+    .command('update')
+    .description('Merge a settings JSON file (encounterTypes, modules, poseSlots, assetCategories)')
+    .requiredOption('--game <id>', 'Game ID')
+    .requiredOption('--file <path>', 'JSON file')
+    .option('--dry-run', 'Validate without writing')
+    .action(async (options, cmd) => {
+      const opts = { ...program.opts(), ...collectOpts(cmd, options) }
+      try {
+        const parsed = JSON.parse(readFileSync(String(options.file), 'utf-8'))
+        const settings = await updateGameSettingsFromFile(opts.game!, parsed, {
+          dataDirOverride: dir(opts),
+          dryRun: Boolean(opts.dryRun)
+        })
+        printOrJson({ settings, dryRun: Boolean(opts.dryRun) }, opts, () => {
+          console.log(`${opts.dryRun ? 'Would update' : 'Updated'} game settings for ${opts.game}`)
+        })
       } catch (err) {
         outputError(err, opts)
         process.exit(1)
@@ -344,6 +386,183 @@ export function registerGameSettingsCommands(gamesCmd: Command, characterCmd: Co
         })
         printOrJson({ ...result, dryRun: Boolean(opts.dryRun) }, opts, () => {
           console.log(`${opts.dryRun ? 'Would remove' : 'Removed'} character pose slot: ${result.removed}`)
+        })
+      } catch (err) {
+        outputError(err, opts)
+        process.exit(1)
+      }
+    })
+
+  const typeCmd = gamesCmd.command('type').description('Manage game encounter types')
+  typeCmd
+    .command('list')
+    .description('List encounter types')
+    .requiredOption('--game <id>', 'Game ID')
+    .action(async (options, cmd) => {
+      const opts = { ...program.opts(), ...collectOpts(cmd, options) }
+      try {
+        const types = await listEncounterTypes(opts.game!, dir(opts))
+        printOrJson({ encounterTypes: types }, opts, () => {
+          console.log('\nEncounter types:')
+          for (const t of types) console.log(`  ${t}`)
+        })
+      } catch (err) {
+        outputError(err, opts)
+        process.exit(1)
+      }
+    })
+  typeCmd
+    .command('add')
+    .description('Add an encounter type')
+    .requiredOption('--game <id>', 'Game ID')
+    .requiredOption('--id <id>', 'Type slug (e.g. battle)')
+    .option('--dry-run', 'Validate without writing')
+    .action(async (options, cmd) => {
+      const opts = { ...program.opts(), ...collectOpts(cmd, options) }
+      try {
+        const typeId = await addEncounterType(opts.game!, String(options.id), {
+          dataDirOverride: dir(opts),
+          dryRun: Boolean(opts.dryRun)
+        })
+        printOrJson({ typeId, dryRun: Boolean(opts.dryRun) }, opts, () => {
+          console.log(`${opts.dryRun ? 'Would add' : 'Added'} encounter type: ${typeId}`)
+        })
+      } catch (err) {
+        outputError(err, opts)
+        process.exit(1)
+      }
+    })
+  typeCmd
+    .command('remove')
+    .description('Remove an encounter type (refused if an encounter uses it)')
+    .requiredOption('--game <id>', 'Game ID')
+    .requiredOption('--id <id>', 'Type slug')
+    .option('--dry-run', 'Validate without writing')
+    .action(async (options, cmd) => {
+      const opts = { ...program.opts(), ...collectOpts(cmd, options) }
+      try {
+        const result = await removeEncounterType(opts.game!, String(options.id), {
+          dataDirOverride: dir(opts),
+          dryRun: Boolean(opts.dryRun)
+        })
+        printOrJson({ ...result, dryRun: Boolean(opts.dryRun) }, opts, () => {
+          console.log(`${opts.dryRun ? 'Would remove' : 'Removed'} encounter type: ${result.removed}`)
+        })
+      } catch (err) {
+        outputError(err, opts)
+        process.exit(1)
+      }
+    })
+
+  const moduleCmd = gamesCmd.command('module').description('Manage game encounter modules')
+  moduleCmd
+    .command('list')
+    .description('List encounter modules')
+    .requiredOption('--game <id>', 'Game ID')
+    .action(async (options, cmd) => {
+      const opts = { ...program.opts(), ...collectOpts(cmd, options) }
+      try {
+        const modules = await listEncounterModules(opts.game!, dir(opts))
+        printOrJson({ modules }, opts, () => {
+          console.log('\nModules:')
+          if (modules.length === 0) console.log('  (none)')
+          for (const m of modules) {
+            console.log(`  ${m.id}  ${m.label}  types=${m.typeIds.join(',')}`)
+          }
+        })
+      } catch (err) {
+        outputError(err, opts)
+        process.exit(1)
+      }
+    })
+  moduleCmd
+    .command('add')
+    .description('Add an encounter module')
+    .requiredOption('--game <id>', 'Game ID')
+    .requiredOption('--id <id>', 'Module slug')
+    .requiredOption('--label <label>', 'Display label')
+    .requiredOption('--type-ids <ids>', 'Comma-separated type ids this module supports')
+    .option('--star-kinds <kinds>', 'Comma-separated star kinds (optional; omit = any)')
+    .option('--dry-run', 'Validate without writing')
+    .action(async (options, cmd) => {
+      const opts = { ...program.opts(), ...collectOpts(cmd, options) }
+      try {
+        const typeIds = String(options.typeIds)
+          .split(',')
+          .map((s: string) => s.trim())
+          .filter(Boolean)
+        const starKinds = options.starKinds
+          ? String(options.starKinds)
+              .split(',')
+              .map((s: string) => s.trim())
+              .filter(Boolean)
+          : undefined
+        const def = await addEncounterModule(
+          opts.game!,
+          { id: String(options.id), label: String(options.label), typeIds, starKinds },
+          { dataDirOverride: dir(opts), dryRun: Boolean(opts.dryRun) }
+        )
+        printOrJson({ module: def, dryRun: Boolean(opts.dryRun) }, opts, () => {
+          console.log(`${opts.dryRun ? 'Would add' : 'Added'} module: ${def.id} (${def.label})`)
+        })
+      } catch (err) {
+        outputError(err, opts)
+        process.exit(1)
+      }
+    })
+  moduleCmd
+    .command('update')
+    .description('Update an encounter module')
+    .requiredOption('--game <id>', 'Game ID')
+    .requiredOption('--id <id>', 'Module slug')
+    .option('--label <label>', 'Display label')
+    .option('--type-ids <ids>', 'Comma-separated type ids')
+    .option('--star-kinds <kinds>', 'Comma-separated star kinds (empty string clears the list)')
+    .option('--dry-run', 'Validate without writing')
+    .action(async (options, cmd) => {
+      const opts = { ...program.opts(), ...collectOpts(cmd, options) }
+      try {
+        const patch: { label?: string; typeIds?: string[]; starKinds?: string[] } = {}
+        if (options.label !== undefined) patch.label = String(options.label)
+        if (options.typeIds !== undefined) {
+          patch.typeIds = String(options.typeIds)
+            .split(',')
+            .map((s: string) => s.trim())
+            .filter(Boolean)
+        }
+        if (options.starKinds !== undefined) {
+          patch.starKinds = String(options.starKinds)
+            .split(',')
+            .map((s: string) => s.trim())
+            .filter(Boolean)
+        }
+        const def = await updateEncounterModule(opts.game!, String(options.id), patch, {
+          dataDirOverride: dir(opts),
+          dryRun: Boolean(opts.dryRun)
+        })
+        printOrJson({ module: def, dryRun: Boolean(opts.dryRun) }, opts, () => {
+          console.log(`${opts.dryRun ? 'Would update' : 'Updated'} module: ${def.id}`)
+        })
+      } catch (err) {
+        outputError(err, opts)
+        process.exit(1)
+      }
+    })
+  moduleCmd
+    .command('remove')
+    .description('Remove an encounter module (refused if an encounter uses it)')
+    .requiredOption('--game <id>', 'Game ID')
+    .requiredOption('--id <id>', 'Module slug')
+    .option('--dry-run', 'Validate without writing')
+    .action(async (options, cmd) => {
+      const opts = { ...program.opts(), ...collectOpts(cmd, options) }
+      try {
+        const result = await removeEncounterModule(opts.game!, String(options.id), {
+          dataDirOverride: dir(opts),
+          dryRun: Boolean(opts.dryRun)
+        })
+        printOrJson({ ...result, dryRun: Boolean(opts.dryRun) }, opts, () => {
+          console.log(`${opts.dryRun ? 'Would remove' : 'Removed'} module: ${result.removed}`)
         })
       } catch (err) {
         outputError(err, opts)

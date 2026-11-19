@@ -175,13 +175,32 @@ import {
 } from '../../core/storage/gameDefinitionService'
 import {
   addCharacterPoseSlot,
+  addEncounterModule,
+  addEncounterType,
   addGameAssetCategory,
   addGamePoseSlot,
   removeCharacterPoseSlot,
+  removeEncounterModule,
+  removeEncounterType,
   removeGameAssetCategory,
   removeGamePoseSlot,
-  setCharacterCorePosesRequired
+  setCharacterCorePosesRequired,
+  updateEncounterModule
 } from '../../core/storage/gameSettingsService'
+import {
+  createEncounter,
+  createRegion,
+  createStage,
+  createWorld,
+  removeEncounter,
+  removeRegion,
+  removeStage,
+  removeWorld,
+  updateEncounter,
+  updateRegion,
+  updateStage,
+  updateWorld
+} from '../../core/storage/worldContentService'
 import {
   applyDesignerAssetPrompt,
   applyDesignerStyleGuide,
@@ -1522,6 +1541,103 @@ export function registerIpcHandlers(): void {
       return await loadProject(projectId)
     }
   )
+  ipcMain.handle(
+    IPC_CHANNELS.GAME_SETTINGS_ADD_ENCOUNTER_TYPE,
+    async (_e, projectId: string, gameId: string, typeId: string) => {
+      await addEncounterType(gameId, typeId)
+      return await loadProject(projectId)
+    }
+  )
+  ipcMain.handle(
+    IPC_CHANNELS.GAME_SETTINGS_REMOVE_ENCOUNTER_TYPE,
+    async (_e, projectId: string, gameId: string, typeId: string) => {
+      await removeEncounterType(gameId, typeId)
+      return await loadProject(projectId)
+    }
+  )
+  ipcMain.handle(
+    IPC_CHANNELS.GAME_SETTINGS_ADD_MODULE,
+    async (
+      _e,
+      projectId: string,
+      gameId: string,
+      input: { id: string; label: string; typeIds: string[]; starKinds?: string[] }
+    ) => {
+      await addEncounterModule(gameId, input)
+      return await loadProject(projectId)
+    }
+  )
+  ipcMain.handle(
+    IPC_CHANNELS.GAME_SETTINGS_UPDATE_MODULE,
+    async (
+      _e,
+      projectId: string,
+      gameId: string,
+      moduleId: string,
+      input: { label?: string; typeIds?: string[]; starKinds?: string[] }
+    ) => {
+      await updateEncounterModule(gameId, moduleId, input)
+      return await loadProject(projectId)
+    }
+  )
+  ipcMain.handle(
+    IPC_CHANNELS.GAME_SETTINGS_REMOVE_MODULE,
+    async (_e, projectId: string, gameId: string, moduleId: string) => {
+      await removeEncounterModule(gameId, moduleId)
+      return await loadProject(projectId)
+    }
+  )
+  ipcMain.handle(IPC_CHANNELS.WORLD_CREATE, async (_e, projectId: string, gameId: string, input: any) => {
+    await createWorld(gameId, input)
+    return await loadProject(projectId)
+  })
+  ipcMain.handle(IPC_CHANNELS.WORLD_UPDATE, async (_e, projectId: string, gameId: string, id: string, patch: any) => {
+    await updateWorld(gameId, id, patch)
+    return await loadProject(projectId)
+  })
+  ipcMain.handle(IPC_CHANNELS.WORLD_REMOVE, async (_e, projectId: string, gameId: string, id: string) => {
+    await removeWorld(gameId, id)
+    return await loadProject(projectId)
+  })
+  ipcMain.handle(IPC_CHANNELS.STAGE_CREATE, async (_e, projectId: string, gameId: string, input: any) => {
+    await createStage(gameId, input)
+    return await loadProject(projectId)
+  })
+  ipcMain.handle(IPC_CHANNELS.STAGE_UPDATE, async (_e, projectId: string, gameId: string, id: string, patch: any) => {
+    await updateStage(gameId, id, patch)
+    return await loadProject(projectId)
+  })
+  ipcMain.handle(IPC_CHANNELS.STAGE_REMOVE, async (_e, projectId: string, gameId: string, id: string) => {
+    await removeStage(gameId, id)
+    return await loadProject(projectId)
+  })
+  ipcMain.handle(IPC_CHANNELS.ENCOUNTER_CREATE, async (_e, projectId: string, gameId: string, input: any) => {
+    await createEncounter(gameId, input)
+    return await loadProject(projectId)
+  })
+  ipcMain.handle(
+    IPC_CHANNELS.ENCOUNTER_UPDATE,
+    async (_e, projectId: string, gameId: string, id: string, patch: any) => {
+      await updateEncounter(gameId, id, patch)
+      return await loadProject(projectId)
+    }
+  )
+  ipcMain.handle(IPC_CHANNELS.ENCOUNTER_REMOVE, async (_e, projectId: string, gameId: string, id: string) => {
+    await removeEncounter(gameId, id)
+    return await loadProject(projectId)
+  })
+  ipcMain.handle(IPC_CHANNELS.REGION_CREATE, async (_e, projectId: string, gameId: string, input: any) => {
+    await createRegion(gameId, input)
+    return await loadProject(projectId)
+  })
+  ipcMain.handle(IPC_CHANNELS.REGION_UPDATE, async (_e, projectId: string, gameId: string, id: string, patch: any) => {
+    await updateRegion(gameId, id, patch)
+    return await loadProject(projectId)
+  })
+  ipcMain.handle(IPC_CHANNELS.REGION_REMOVE, async (_e, projectId: string, gameId: string, id: string) => {
+    await removeRegion(gameId, id)
+    return await loadProject(projectId)
+  })
 }
 
 export async function ensureAppDataDirs(): Promise<void> {

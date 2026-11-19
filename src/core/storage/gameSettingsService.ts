@@ -13,7 +13,6 @@ import type {
   Pose,
   VisualAsset
 } from '@shared/types/assetPipeline'
-import { emptyGameSettings } from '@shared/studio/schema'
 import {
   CORE_POSE_SLOTS,
   assertAddablePoseSlotKey,
@@ -30,6 +29,17 @@ import {
   normalizeAssetCategoryDef,
   occupiedAssetCategoryKeys
 } from '@shared/gameSettings/assetCategories'
+import {
+  assertCanRemoveEncounterType,
+  assertCanRemoveModule,
+  assertModuleUpdateCompatible,
+  ensureGameSettings,
+  gameEncounterTypes,
+  gameModules,
+  normalizeEncounterType,
+  normalizeModule
+} from '@shared/gameSettings/encounterSettings'
+import type { GameEncounterModule } from '@shared/types/assetPipeline'
 import { getAssetPipeline, updateAssetPipeline } from './studioStorage'
 
 export interface NamedUser {
@@ -43,14 +53,7 @@ export interface SlotCategoryWriteOptions {
 }
 
 function ensureSettings(game: Game): GameSettings {
-  if (!game.settings) {
-    game.settings = emptyGameSettings()
-  }
-  if (!Array.isArray(game.settings.poseSlots)) game.settings.poseSlots = []
-  if (!Array.isArray(game.settings.assetCategories)) game.settings.assetCategories = []
-  if (!Array.isArray(game.settings.encounterTypes)) game.settings.encounterTypes = emptyGameSettings().encounterTypes
-  if (!Array.isArray(game.settings.modules)) game.settings.modules = []
-  return game.settings
+  return ensureGameSettings(game)
 }
 
 export function requireGame(pipeline: AssetPipelineProject, gameId: string): Game {
@@ -378,4 +381,178 @@ export function assertVisualAssetCategory(
   pipeline: AssetPipelineProject
 ): void {
   validateAssetCategoryForWrite(pipeline, asset.gameId, asset.category)
+}
+
+export async function listEncounterTypes(
+  gameId: string,
+  dataDirOverride?: string
+): Promise<string[]> {
+  const pipeline = await getAssetPipeline(dataDirOverride)
+  const game = requireGame(pipeline, gameId)
+  return gameEncounterTypes(game)
+}
+
+export async function addEncounterType(
+  gameId: string,
+  typeId: string,
+  options?: SlotCategoryWriteOptions
+): Promise<string> {
+  const pipeline = await getAssetPipeline(options?.dataDirOverride)
+  const game = requireGame(pipeline, gameId)
+  const settings = ensureSettings(game)
+  const key = normalizeEncounterType(typeId)
+  if (settings.encounterTypes.includes(key)) {
+    throw new Error(`Encounter type '${key}' already exists`)
+  }
+  if (options?.dryRun) return key
+  settings.encounterTypes.push(key)
+  touch(game)
+  await updateAssetPipeline(pipeline, options?.dataDirOverride)
+  return key
+}
+
+export async function removeEncounterType(
+  gameId: string,
+  typeId: string,
+  options?: SlotCategoryWriteOptions
+): Promise<{ removed: string }> {
+  const pipeline = await getAssetPipeline(options?.dataDirOverride)
+  const game = requireGame(pipeline, gameId)
+  const settings = ensureSettings(game)
+  const key = assertCanRemoveEncounterType(pipeline, typeId, gameId)
+  const index = settings.encounterTypes.findIndex((t) => t === key)
+  if (index < 0) {
+    throw new Error(`Encounter type not found: ${key}`)
+  }
+  if (options?.dryRun) return { removed: key }
+  settings.encounterTypes.splice(index, 1)
+  touch(game)
+  await updateAssetPipeline(pipeline, options?.dataDirOverride)
+  return { removed: key }
+}
+
+export async function listEncounterModules(
+  gameId: string,
+  dataDirOverride?: string
+): Promise<GameEncounterModule[]> {
+  const pipeline = await getAssetPipeline(dataDirOverride)
+  const game = requireGame(pipeline, gameId)
+  return gameModules(game).map((m) => ({ ...m, typeIds: [...m.typeIds], starKinds: m.starKinds ? [...m.starKinds] : undefined }))
+}
+
+export async function addEncounterModule(
+  gameId: string,
+  input: { id: string; label: string; typeIds: string[]; starKinds?: string[] },
+  options?: SlotCategoryWriteOptions
+): Promise<GameEncounterModule> {
+  const pipeline = await getAssetPipeline(options?.dataDirOverride)
+  const game = requireGame(pipeline, gameId)
+  const settings = ensureSettings(game)
+  const def = normalizeModule(input)
+  if (settings.modules.some((m) => m.id === def.id)) {
+    throw new Error(`Module '${def.id}' already exists`)
+  }
+  for (const t of def.typeIds) {
+    if (!settings.encounterTypes.includes(t)) {
+      throw new Error(`Module typeId '${t}' is not in this game's encounterTypes`)
+    }
+  }
+  if (options?.dryRun) return def
+  settings.modules.push(def)
+  touch(game)
+  await updateAssetPipeline(pipeline, options?.dataDirOverride)
+  return def
+}
+
+export async function updateEncounterModule(
+  gameId: string,
+  moduleId: string,
+  input: { label?: string; typeIds?: string[]; starKinds?: string[] },
+  options?: SlotCategoryWriteOptions
+): Promise<GameEncounterModule> {
+  const pipeline = await getAssetPipeline(options?.dataDirOverride)
+  const game = requireGame(pipeline, gameId)
+  const settings = ensureSettings(game)
+  const index = settings.modules.findIndex((m) => m.id === moduleId.trim().toLowerCase() || m.id === moduleId)
+  if (index < 0) throw new Error(`Module not found: ${moduleId}`)
+  const previous = settings.modules[index]
+  const next = normalizeModule({
+    id: previous.id,
+    label: input.label ?? previous.label,
+    typeIds: input.typeIds ?? previous.typeIds,
+    starKinds: input.starKinds !== undefined ? input.starKinds : previous.starKinds
+  })
+  for (const t of next.typeIds) {
+    if (!settings.encounterTypes.includes(t)) {
+      throw new Error(`Module typeId '${t}' is not in this game's encounterTypes`)
+    }
+  }
+  assertModuleUpdateCompatible(pipeline, gameId, previous, next)
+  if (options?.dryRun) return next
+  settings.modules[index] = next
+  touch(game)
+  await updateAssetPipeline(pipeline, options?.dataDirOverride)
+  return next
+}
+
+export async function removeEncounterModule(
+  gameId: string,
+  moduleId: string,
+  options?: SlotCategoryWriteOptions
+): Promise<{ removed: string }> {
+  const pipeline = await getAssetPipeline(options?.dataDirOverride)
+  const game = requireGame(pipeline, gameId)
+  const settings = ensureSettings(game)
+  const key = assertCanRemoveModule(pipeline, moduleId, gameId)
+  const index = settings.modules.findIndex((m) => m.id === key)
+  if (index < 0) throw new Error(`Module not found: ${key}`)
+  if (options?.dryRun) return { removed: key }
+  settings.modules.splice(index, 1)
+  touch(game)
+  await updateAssetPipeline(pipeline, options?.dataDirOverride)
+  return { removed: key }
+}
+
+export async function updateGameSettingsFromFile(
+  gameId: string,
+  patch: {
+    encounterTypes?: string[]
+    modules?: GameEncounterModule[]
+    poseSlots?: GameSettings['poseSlots']
+    assetCategories?: GameSettings['assetCategories']
+  },
+  options?: SlotCategoryWriteOptions
+): Promise<GameSettings> {
+  const pipeline = await getAssetPipeline(options?.dataDirOverride)
+  const game = requireGame(pipeline, gameId)
+  const settings = ensureSettings(game)
+  if (patch.encounterTypes) {
+    const next = patch.encounterTypes.map((t) => normalizeEncounterType(t))
+    const removed = settings.encounterTypes.filter((t) => !next.includes(t))
+    for (const t of removed) assertCanRemoveEncounterType(pipeline, t, gameId)
+    settings.encounterTypes = next
+  }
+  if (patch.modules) {
+    const next = patch.modules.map((m) => normalizeModule(m))
+    const nextIds = new Set(next.map((m) => m.id))
+    for (const prev of settings.modules) {
+      if (!nextIds.has(prev.id)) assertCanRemoveModule(pipeline, prev.id, gameId)
+    }
+    for (const n of next) {
+      const prev = settings.modules.find((m) => m.id === n.id)
+      if (prev) assertModuleUpdateCompatible(pipeline, gameId, prev, n)
+      for (const t of n.typeIds) {
+        if (!settings.encounterTypes.includes(t)) {
+          throw new Error(`Module typeId '${t}' is not in this game's encounterTypes`)
+        }
+      }
+    }
+    settings.modules = next
+  }
+  if (patch.poseSlots) settings.poseSlots = patch.poseSlots
+  if (patch.assetCategories) settings.assetCategories = patch.assetCategories
+  if (options?.dryRun) return settings
+  touch(game)
+  await updateAssetPipeline(pipeline, options?.dataDirOverride)
+  return settings
 }

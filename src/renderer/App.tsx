@@ -12,6 +12,7 @@ import { GameDefinitionView } from './components/GameDefinitionView'
 import { ExportView } from './components/ExportView'
 import { LibraryView } from './components/LibraryView'
 import { GameSettingsView } from './components/GameSettingsView'
+import { WorldsView } from './components/WorldsView'
 import { useProjectStore, useUIStore } from './state/indieForgeStore'
 import {
   STUDIO_SCHEMA_VERSION,
@@ -47,6 +48,7 @@ function StudioLayout({ children }: { children: React.ReactNode }) {
     { path: '/studio/poses', label: 'Poses' },
     { path: '/studio/clips', label: 'Clips' },
     { path: '/studio/library', label: 'Library' },
+    { path: '/studio/world', label: 'Worlds' },
     { path: '/studio/scenes', label: 'Scenes' },
     { path: '/studio/storyboards', label: 'Storyboards' },
     { path: '/studio/definitions', label: 'Game Definitions' },
@@ -118,6 +120,8 @@ function AppRoutes() {
           <Route path="clips/:gameId" element={<ClipsView />} />
           <Route path="library" element={<GameDefaultRedirect section="library" />} />
           <Route path="library/:gameId" element={<LibraryView />} />
+          <Route path="world" element={<GameDefaultRedirect section="world" />} />
+          <Route path="world/:gameId" element={<WorldsView />} />
           <Route path="assets" element={<GameDefaultRedirect section="library" />} />
           <Route path="assets/:gameId" element={<AssetsRedirect />} />
           <Route path="scenes" element={<GameDefaultRedirect section="scenes" />} />

@@ -168,7 +168,7 @@ export function planStudioV2Migration(studio: StudioFile): StudioMigrationPlan {
   if (!Array.isArray(p.worlds) || !Array.isArray(p.stages) || !Array.isArray(p.encounters) || !Array.isArray(p.regions)) {
     changes.push({
       path: 'assetPipeline.worlds|stages|encounters|regions',
-      detail: 'Add empty worlds, stages, encounters, regions arrays (1c records; unused until 1c)'
+      detail: 'Add empty worlds, stages, encounters, regions arrays (1c records)'
     })
   }
   if (gamesNeedingSettings.length > 0) {

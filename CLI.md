@@ -33,7 +33,7 @@ npm run forge -- <command>
 
 v2 groundwork (1a) is a version bump plus empty arrays — it does **not** rewrite poses, storyboards, audio, or Game Definitions:
 
-- `assetPipeline.worlds|stages|encounters|regions` = `[]` (records land in 1c)
+- `assetPipeline.worlds|stages|encounters|regions` = `[]` after migrate; 1c fills them
 - each game gets `settings: { poseSlots: [], assetCategories: [], encounterTypes: ["battle","puzzle","minigame","story"], modules: [] }` (slots/categories in 1b)
 - optional `key` slugs may be set later; existing records are not backfilled
 - export **manifest** stays schema v2 (Unity) — unrelated to studio.json v2
@@ -58,6 +58,8 @@ See `docs/STUDIO_SCHEMA.md`.
 Game Definitions (`forge definition`, alias `gamedef`) are documented in [Game Definition](#game-definition). Agents should use `--json` and isolated `FORGE_DATA_DIR` when experimenting.
 
 Pose slots and asset categories (1b) are documented in [Game pose slots and asset categories](#game-pose-slots-and-asset-categories).
+
+World / Stage / Encounter / Region (1c) are documented in [World structure](#world-structure).
 
 ### `forge games list`
 
@@ -126,6 +128,33 @@ forge asset create --game game-id --name "District Map" --category map
 ```
 
 Filename auto-map uses the character's effective slots, **longest key first** (`hero_ride_boost.png` → `ride_boost`, not `ride`).
+
+---
+
+### World structure
+
+World, Stage, Encounter, and Region records are per-game. Types and modules come from `game.settings` (no title-specific unions). `show` / `update` / `remove` accept a uuid or `@key`. Optional `key` slugs are unique per game and record type.
+
+```bash
+forge world     list|show|create|update|remove|apply --game <id> --json
+forge stage     list|show|create|update|remove|apply --game <id> --json [--world <id|@key>]
+forge encounter list|show|create|update|remove|apply --game <id> --json [--stage <id|@key>]
+forge region    list|show|create|update|remove|apply --game <id> --json [--stage <id|@key>]
+forge content   apply  --game <id> --file bundle.json [--dry-run] --json
+forge content   export --game <id> --out <dir> [--dry-run] --json   # writes <dir>/content.json
+
+forge game type list|add|remove --game <id>
+forge game module list|add|update|remove --game <id>
+forge game settings update --game <id> --file settings.json [--dry-run] --json
+```
+
+`content apply` is all-or-nothing and matches by key (create if new, update if found). Dry-run writes nothing. Re-apply reports 0 changes. Any validation failure writes nothing. JSON includes `aliasMap`, `creates`, `updates`, `unchanged`, `issues`.
+
+Removal is refused while other records reference the target. Removing an encounter type or module is refused while an encounter uses it.
+
+`content export` is read-only (`contentSchemaVersion: 1` sidecar). Export manifest v2 is unchanged.
+
+Example bundle: `docs/samples/gate-drone-content.json`.
 
 ---
 

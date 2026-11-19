@@ -771,8 +771,7 @@ export interface AssetState {
 }
 
 /**
- * World / Stage / Encounter / Region — schema v2 groundwork (1a).
- * Empty arrays after migrate. CRUD, screens, and apply land in 1c.
+ * World / Stage / Encounter / Region — schema v2 (1c).
  */
 export interface World {
   id: string
@@ -898,7 +897,7 @@ export interface AssetPipelineProject {
   eventBindings: EventBinding[]
   /** A1: Game-scoped imported audio catalog */
   audioAssets: AudioAsset[]
-  /** Schema v2: worlds / stages / encounters / regions (empty until 1c). Optional on v1 disk. */
+  /** Schema v2: worlds / stages / encounters / regions. Optional on v1 disk. */
   worlds?: World[]
   stages?: Stage[]
   encounters?: Encounter[]

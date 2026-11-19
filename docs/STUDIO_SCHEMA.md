@@ -57,9 +57,24 @@ Optional fields only. Missing means empty / core-five required:
 - `Pose.slot` and `VisualAsset.category` are free-form strings validated against the effective lists
 - built-in asset category `background` is code, not a schema bump
 
-## Out of 1a / 1b
+## 1c (same schema v2 — no bump)
 
-- World / Stage / Encounter / Region CRUD, screens, `content apply` (1c)
+The empty `worlds` / `stages` / `encounters` / `regions` arrays from 1a now hold records. Optional `key` slugs (unique per game and record type) accept `@key` aliases. Validation is game-agnostic: types and modules come from `game.settings`.
+
+- **World:** name, description?, order. No refs.
+- **Stage:** worldId in the same game.
+- **Encounter:** typeId in `settings.encounterTypes`; moduleId in `settings.modules` and supports that type; sceneId in the same game (uuid, `@key`, or exact name); tuningProfileId is a Game Definition tuning row (uuid or name); difficultyProfileId stored, not checked; at most 3 stars; star kind must be in the module's `starKinds` when that list is present.
+- **Region:** background asset must be a background-based category; unique anchor ids; pos in 0..1; edges/spawn/hotspots/exits reference real anchors; exits target a region in the same game. Edges are `[a,b]` or `{from,to,requires?,hint?}`. `requires` is stored with a warning and ignored until vehicles.
+- Removing a record is refused while other records reference it. Removing an encounter type or module is refused while encounters use it.
+
+`forge content export --game <id> --out <dir>` writes `<dir>/content.json` with `contentSchemaVersion: 1`. Export **manifest v2 is unchanged**.
+
+Sample Gate Drone bundle (docs only, not app code): `docs/samples/gate-drone-content.json`.
+
+## Out of 1a / 1b / 1c
+
+- Enemies and attack tables (step 2)
 - A4 portable export package
 - `seedDefaultGames` and the Neon Recall Game Definition markdown special case (flagged only)
 - ScenesView / StoryboardEditor store-refresh bug (deferred)
+- Visual map editor (step 6)
