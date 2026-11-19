@@ -3,12 +3,21 @@
  * Games, characters, and poses are stored at studio level, not per-project
  */
 
-import { mkdir, readFile, writeFile } from 'fs/promises'
+import { mkdir, readFile } from 'fs/promises'
 import { join } from 'path'
 import type { AssetPipelineProject, Font, Palette } from '@shared/types/assetPipeline'
 import { getDataDir } from './dataDir'
 import { withLock, atomicWriteFile } from './fileLock'
 import { listProjects as listLegacyProjects } from './projectStorage'
+import {
+  STUDIO_SCHEMA_VERSION,
+  type StudioFile,
+  assertSupportedStudioSchema,
+  effectiveSchemaVersion,
+  emptyGameSettings,
+  normalizeStudioInMemory,
+  v1ReadOnlyMessage
+} from '../../shared/studio/schema'
 import {
   collectAssetLayerUsage,
   collectAssetStateLayerUsage,
@@ -25,17 +34,12 @@ import {
   formatTimedKeyInUseError
 } from '../../shared/storyboard/timedKeys'
 
-interface StudioData {
-  schemaVersion: number
-  assetPipeline: AssetPipelineProject
-  createdAt: string
-  updatedAt: string
-}
+export type StudioData = StudioFile
 
 /**
- * Get studio file path
+ * Get studio file path (same directory as schema v1 backups)
  */
-function getStudioFilePath(dataDirOverride?: string): string {
+export function getStudioFilePath(dataDirOverride?: string): string {
   return join(getDataDir(dataDirOverride), 'studio.json')
 }
 
@@ -45,9 +49,9 @@ function getStudioFilePath(dataDirOverride?: string): string {
 function createEmptyStudioData(): StudioData {
   const now = new Date().toISOString()
   return {
-    schemaVersion: 1,
+    schemaVersion: STUDIO_SCHEMA_VERSION,
     assetPipeline: {
-      schemaVersion: 1,
+      schemaVersion: STUDIO_SCHEMA_VERSION,
       id: 'studio',
       name: 'Studio',
       description: '',
@@ -68,6 +72,10 @@ function createEmptyStudioData(): StudioData {
       eventDefinitions: [],
       eventBindings: [],
       audioAssets: [],
+      worlds: [],
+      stages: [],
+      encounters: [],
+      regions: [],
       createdAt: now,
       updatedAt: now
     },
@@ -77,7 +85,9 @@ function createEmptyStudioData(): StudioData {
 }
 
 /**
- * Seed default games for a brand new studio
+ * Seed default games for a brand new studio.
+ * GAME-SPECIFIC (flag): Neon Recall + Ring'Em Up. Keep as-is for step 1;
+ * move to a seed file later. Do not add more titles here.
  */
 function seedDefaultGames(studio: StudioData): void {
   const now = new Date().toISOString()
@@ -87,6 +97,7 @@ function seedDefaultGames(studio: StudioData): void {
       name: 'Neon Recall',
       engine: 'unity',
       exportRoot: './exports/neon-recall',
+      settings: emptyGameSettings(),
       createdAt: now,
       updatedAt: now
     },
@@ -95,6 +106,7 @@ function seedDefaultGames(studio: StudioData): void {
       name: "Ring'Em Up",
       engine: 'godot',
       exportRoot: './exports/ring-em-up',
+      settings: emptyGameSettings(),
       createdAt: now,
       updatedAt: now
     }
@@ -164,158 +176,120 @@ async function migrateFromProjects(dataDirOverride?: string): Promise<StudioData
   return studio
 }
 
+function parseStudioJson(raw: string, filePath: string): StudioData {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch (err) {
+    throw new Error(
+      `studio.json is not valid JSON (${filePath}): ${err instanceof Error ? err.message : String(err)}`
+    )
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`studio.json must be an object: ${filePath}`)
+  }
+  const studio = parsed as StudioData
+  assertSupportedStudioSchema(studio)
+  return normalizeStudioInMemory(studio)
+}
+
+async function studioFromMissingFile(dataDirOverride?: string): Promise<StudioData> {
+  const studio = await migrateFromProjects(dataDirOverride)
+  if (studio.assetPipeline.games.length === 0) {
+    seedDefaultGames(studio)
+  }
+  return normalizeStudioInMemory(studio)
+}
+
 /**
- * Load studio data (migrates from projects if needed)
+ * Read-only load. Never creates a lock, never mkdir, never writes.
+ * In-memory backfill only (missing arrays, layer defaults). Use for list/show/export dry-run/migrate --dry-run.
+ */
+export async function readStudio(dataDirOverride?: string): Promise<StudioData> {
+  const filePath = getStudioFilePath(dataDirOverride)
+  try {
+    const data = await readFile(filePath, 'utf-8')
+    return parseStudioJson(data, filePath)
+  } catch (err: unknown) {
+    const code = (err as { code?: string }).code
+    if (code === 'ENOENT') {
+      return studioFromMissingFile(dataDirOverride)
+    }
+    throw err
+  }
+}
+
+/**
+ * Copy absolute shot background paths into studio storage. Write-path only
+ * (runs during loadStudio / first write, not during readStudio).
+ */
+async function copyAbsoluteBackgrounds(studio: StudioData, dataDirOverride?: string): Promise<boolean> {
+  let needsSave = false
+  if (!studio.assetPipeline.storyboardShots) return false
+  const { existsSync } = await import('fs')
+  const { copyFile, mkdir: mkdirAsync } = await import('fs/promises')
+  const { join: joinPath, basename: getBasename } = await import('path')
+
+  for (const shot of studio.assetPipeline.storyboardShots) {
+    if (shot.backgroundImage && typeof shot.backgroundImage === 'string') {
+      const bgPath = shot.backgroundImage
+      if (bgPath.startsWith('/') || /^[A-Za-z]:/.test(bgPath)) {
+        try {
+          if (existsSync(bgPath)) {
+            const dataDir = getDataDir(dataDirOverride)
+            const backgroundsDir = joinPath(dataDir, 'backgrounds')
+            await mkdirAsync(backgroundsDir, { recursive: true })
+            const filename = `${Date.now()}-${getBasename(bgPath)}`
+            const destPath = joinPath(backgroundsDir, filename)
+            await copyFile(bgPath, destPath)
+            shot.backgroundImage = `backgrounds/${filename}`
+            needsSave = true
+          } else {
+            shot.backgroundImage = undefined
+            needsSave = true
+          }
+        } catch {
+          shot.backgroundImage = undefined
+          needsSave = true
+        }
+      }
+    }
+  }
+  return needsSave
+}
+
+function assertAppCanWrite(studio: StudioData): void {
+  assertSupportedStudioSchema(studio)
+  const electron = typeof process.versions?.electron === 'string'
+  const cli = process.env.FORGE_CLI === '1'
+  if (electron && !cli && effectiveSchemaVersion(studio) < STUDIO_SCHEMA_VERSION) {
+    throw new Error(v1ReadOnlyMessage())
+  }
+}
+
+/**
+ * Write-capable load. May create studio.json on first use and may persist
+ * background-path copies. Does not bump schemaVersion (Matt runs `forge migrate`).
  */
 export async function loadStudio(dataDirOverride?: string): Promise<StudioData> {
   const filePath = getStudioFilePath(dataDirOverride)
   const lockPath = `${filePath}.lock`
-  
-  // Ensure data directory exists before trying to acquire lock
+
   await mkdir(getDataDir(dataDirOverride), { recursive: true })
-  
+
   return withLock(lockPath, async () => {
     try {
       const data = await readFile(filePath, 'utf-8')
-      const studio = JSON.parse(data) as StudioData
-      
-      // Migrate: ensure storyboard fields exist
-      if (!studio.assetPipeline.storyboards) {
-        studio.assetPipeline.storyboards = []
-      }
-      if (!studio.assetPipeline.storyboardShots) {
-        studio.assetPipeline.storyboardShots = []
-      }
-      
-      // Migrate: ensure gameDefinitions field exists
-      if (!studio.assetPipeline.gameDefinitions) {
-        studio.assetPipeline.gameDefinitions = []
-      }
-      
-      // Migrate: ensure visualAssets and assetStates exist (P1)
-      if (!studio.assetPipeline.visualAssets) {
-        studio.assetPipeline.visualAssets = []
-      }
-      if (!studio.assetPipeline.assetStates) {
-        studio.assetPipeline.assetStates = []
-      }
-      
-      // Migrate: ensure fonts and palettes exist (P2)
-      if (!studio.assetPipeline.fonts) {
-        studio.assetPipeline.fonts = []
-      }
-      if (!studio.assetPipeline.palettes) {
-        studio.assetPipeline.palettes = []
-      }
-
-      // Migrate: ensure event definitions/bindings exist (P3)
-      if (!studio.assetPipeline.eventDefinitions) {
-        studio.assetPipeline.eventDefinitions = []
-      }
-      if (!studio.assetPipeline.eventBindings) {
-        studio.assetPipeline.eventBindings = []
-      }
-
-      // Migrate: ensure audioAssets exist (A1)
-      if (!studio.assetPipeline.audioAssets) {
-        studio.assetPipeline.audioAssets = []
-      }
-      
-      // Migrate: ensure StoryboardLayer.visible exists (P2)
-      if (studio.assetPipeline.storyboardShots) {
-        for (const shot of studio.assetPipeline.storyboardShots) {
-          if (shot.layers) {
-            for (const layer of shot.layers) {
-              if (layer.visible === undefined) {
-                layer.visible = true
-              }
-              if (!layer.timedKeys) {
-                layer.timedKeys = []
-              }
-            }
-          }
-          if (!shot.clipTrack) {
-            shot.clipTrack = []
-          }
-          if (!shot.audioTrack) {
-            shot.audioTrack = []
-          }
-          if (!shot.eventCues) {
-            shot.eventCues = []
-          }
-          if (!shot.backgroundKeys) {
-            shot.backgroundKeys = []
-          }
-        }
-      }
-      
-      // Migrate: ensure scenes field exists (Phase C)
-      if (!studio.assetPipeline.scenes) {
-        studio.assetPipeline.scenes = []
-        // Persist the migration
-        await saveStudioInternal(studio, dataDirOverride)
-      }
-      
-      // Migrate: copy absolute background image paths into studio storage
-      let needsSave = false
-      if (studio.assetPipeline.storyboardShots) {
-        const { existsSync } = await import('fs')
-        const { copyFile, mkdir: mkdirAsync } = await import('fs/promises')
-        const { join: joinPath, basename: getBasename } = await import('path')
-        
-        for (const shot of studio.assetPipeline.storyboardShots) {
-          if (shot.backgroundImage && typeof shot.backgroundImage === 'string') {
-            const bgPath = shot.backgroundImage
-            
-            // Check if it's an absolute path (not a relative studio path)
-            if (bgPath.startsWith('/') || /^[A-Za-z]:/.test(bgPath)) {
-              try {
-                // Only migrate if file exists
-                if (existsSync(bgPath)) {
-                  const dataDir = getDataDir(dataDirOverride)
-                  const backgroundsDir = joinPath(dataDir, 'backgrounds')
-                  await mkdirAsync(backgroundsDir, { recursive: true })
-                  
-                  const filename = `${Date.now()}-${getBasename(bgPath)}`
-                  const destPath = joinPath(backgroundsDir, filename)
-                  
-                  await copyFile(bgPath, destPath)
-                  console.log(`[Migration] Copied background from ${bgPath} to ${destPath}`)
-                  
-                  // Update to relative path: backgrounds/filename
-                  shot.backgroundImage = `backgrounds/${filename}`
-                  needsSave = true
-                } else {
-                  console.warn(`[Migration] Background image not found, clearing: ${bgPath}`)
-                  shot.backgroundImage = undefined
-                  needsSave = true
-                }
-              } catch (err) {
-                console.error(`[Migration] Failed to copy background image ${bgPath}:`, err)
-                // Clear the path if copy fails
-                shot.backgroundImage = undefined
-                needsSave = true
-              }
-            }
-          }
-        }
-      }
-      
+      const studio = parseStudioJson(data, filePath)
+      const needsSave = await copyAbsoluteBackgrounds(studio, dataDirOverride)
       if (needsSave) {
         await saveStudioInternal(studio, dataDirOverride)
       }
-      
       return studio
-    } catch (err: any) {
-      if (err.code === 'ENOENT') {
-        // Studio file doesn't exist - migrate from projects or create new
-        const studio = await migrateFromProjects(dataDirOverride)
-        
-        // If no games were migrated, seed default games
-        if (studio.assetPipeline.games.length === 0) {
-          seedDefaultGames(studio)
-        }
-        
+    } catch (err: unknown) {
+      const code = (err as { code?: string }).code
+      if (code === 'ENOENT') {
+        const studio = await studioFromMissingFile(dataDirOverride)
         await saveStudioInternal(studio, dataDirOverride)
         return studio
       }
@@ -325,18 +299,13 @@ export async function loadStudio(dataDirOverride?: string): Promise<StudioData> 
 }
 
 /**
- * Internal save without lock (used by load when migrating)
+ * Internal save without lock (used by load when creating a new studio)
  */
 async function saveStudioInternal(studio: StudioData, dataDirOverride?: string): Promise<void> {
+  assertSupportedStudioSchema(studio)
   const filePath = getStudioFilePath(dataDirOverride)
-  
-  // Ensure data directory exists
   await mkdir(getDataDir(dataDirOverride), { recursive: true })
-  
-  // Update timestamp
   studio.updatedAt = new Date().toISOString()
-  
-  // Atomic write
   const data = JSON.stringify(studio, null, 2)
   await atomicWriteFile(filePath, data)
 }
@@ -345,19 +314,20 @@ async function saveStudioInternal(studio: StudioData, dataDirOverride?: string):
  * Save studio data
  */
 export async function saveStudio(studio: StudioData, dataDirOverride?: string): Promise<void> {
+  assertAppCanWrite(studio)
   const filePath = getStudioFilePath(dataDirOverride)
   const lockPath = `${filePath}.lock`
-  
+
   await withLock(lockPath, async () => {
     await saveStudioInternal(studio, dataDirOverride)
   })
 }
 
 /**
- * Get asset pipeline data
+ * Get asset pipeline (read-only: never writes studio.json).
  */
 export async function getAssetPipeline(dataDirOverride?: string): Promise<AssetPipelineProject> {
-  const studio = await loadStudio(dataDirOverride)
+  const studio = await readStudio(dataDirOverride)
   return studio.assetPipeline
 }
 

@@ -128,16 +128,53 @@ export interface CharacterReferenceSheet {
 }
 
 /**
+ * Per-game lists (schema v2). Same shape for every game; values are data, not code.
+ * Step 1a groundwork: migration fills empty lists. Pose slots / categories land in 1b;
+ * encounter modules in 1c. Default encounterTypes are the generic four.
+ */
+export interface GamePoseSlotDef {
+  key: string
+  label: string
+  group?: string
+  required?: boolean
+}
+
+export interface GameAssetCategoryDef {
+  key: string
+  label: string
+  /** Built-in this custom category behaves like (e.g. background). */
+  base?: string
+}
+
+export interface GameEncounterModule {
+  id: string
+  label: string
+  typeIds: string[]
+  starKinds?: string[]
+}
+
+export interface GameSettings {
+  poseSlots: GamePoseSlotDef[]
+  assetCategories: GameAssetCategoryDef[]
+  encounterTypes: string[]
+  modules: GameEncounterModule[]
+}
+
+/**
  * Game project - top-level entity for a Unity or Godot game
  */
 export interface Game {
   id: string
+  /** Optional slug, unique per studio games list. Never backfilled. */
+  key?: string
   name: string
   engine: GameEngine
   /** Root directory for exports (relative or absolute) */
   exportRoot: string
   /** Target path for exports (e.g., Unity project path or Godot project path) */
   exportTarget?: string
+  /** Per-game lists. Present after schema v2 migrate; optional on v1 disk. */
+  settings?: GameSettings
   createdAt: string
   updatedAt: string
 }
@@ -148,6 +185,8 @@ export interface Game {
 export interface Character {
   id: string
   gameId: string
+  /** Optional slug, unique per game. Never backfilled. */
+  key?: string
   name: string
   /** Character role (e.g. 'player', 'boss', 'npc') */
   role: string
@@ -225,6 +264,8 @@ export interface ScenePreset {
 export interface Scene {
   id: string
   gameId: string
+  /** Optional slug, unique per game. Never backfilled. */
+  key?: string
   name: string
   description?: string
   /** Background description or image reference */
@@ -376,6 +417,8 @@ export interface EventPayloadSchema {
 export interface EventDefinition {
   id: string
   gameId: string
+  /** Optional slug, unique per game. Never backfilled. */
+  key?: string
   name: string
   description?: string
   payloadSchema?: EventPayloadSchema
@@ -680,6 +723,8 @@ export interface AudioAsset {
 export interface VisualAsset {
   id: string
   gameId: string
+  /** Optional slug, unique per game. Never backfilled. */
+  key?: string
   name: string
   /** Asset category for organization */
   category: 'logo' | 'symbol' | 'item' | 'weapon' | 'prop'
@@ -717,11 +762,106 @@ export interface AssetState {
 }
 
 /**
+ * World / Stage / Encounter / Region — schema v2 groundwork (1a).
+ * Empty arrays after migrate. CRUD, screens, and apply land in 1c.
+ */
+export interface World {
+  id: string
+  gameId: string
+  key?: string
+  name: string
+  description?: string
+  order: number
+  schemaVersion: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface Stage {
+  id: string
+  gameId: string
+  worldId: string
+  key?: string
+  name: string
+  order: number
+  recommendedLevel?: number
+  optional?: boolean
+  schemaVersion: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface EncounterStar {
+  id: string
+  label: string
+  kind: string
+  params?: Record<string, string | number | boolean>
+}
+
+export interface Encounter {
+  id: string
+  gameId: string
+  stageId: string
+  key?: string
+  name: string
+  typeId: string
+  moduleId: string
+  sceneId?: string
+  tuningProfileId?: string
+  difficultyProfileId?: string
+  recommendedLevel?: number
+  stars: EncounterStar[]
+  order: number
+  schemaVersion: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface RegionAnchor {
+  id: string
+  pos: [number, number]
+}
+
+export interface RegionHotspot {
+  id: string
+  anchor: string
+  prompt: string
+  triggerId?: string
+}
+
+export interface RegionExit {
+  id: string
+  anchor: string
+  toRegionId: string
+  toAnchor?: string
+}
+
+export type RegionEdge = [string, string] | { from: string; to: string; requires?: string; hint?: string }
+
+export interface Region {
+  id: string
+  gameId: string
+  stageId?: string
+  key?: string
+  name: string
+  backgroundAssetId: string
+  anchors: RegionAnchor[]
+  edges: RegionEdge[]
+  spawn: string
+  hotspots: RegionHotspot[]
+  exits: RegionExit[]
+  schemaVersion: number
+  createdAt: string
+  updatedAt: string
+}
+
+/**
  * Main project structure for Adventure Lens Games pipeline
  * This extends/replaces the old IndieForgeProject structure
  */
 export interface AssetPipelineProject {
-  schemaVersion: 1
+  /** Studio pipeline schema. 1 = current disk until migrate; 2 = Step 1a+. */
+  schemaVersion: number
   id: string
   name: string
   description: string
@@ -749,6 +889,11 @@ export interface AssetPipelineProject {
   eventBindings: EventBinding[]
   /** A1: Game-scoped imported audio catalog */
   audioAssets: AudioAsset[]
+  /** Schema v2: worlds / stages / encounters / regions (empty until 1c). Optional on v1 disk. */
+  worlds?: World[]
+  stages?: Stage[]
+  encounters?: Encounter[]
+  regions?: Region[]
   createdAt: string
   updatedAt: string
 }

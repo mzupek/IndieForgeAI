@@ -353,7 +353,7 @@ async function testExportMigration() {
     
     await writeFile(studioPath, JSON.stringify(studioData, null, 2))
     
-    // Run export dry-run which should trigger migration
+    // Dry-run must compute an absolute target without writing studio.json
     const result = runForgeCommand('export game-neon-recall --dry-run --json', testDir)
     
     assertEqual(result.exitCode, 0, 'Export should exit with code 0')
@@ -395,17 +395,16 @@ async function testExportMigration() {
     
     console.log(`  ✓ Godot path correct: ${godotOutput.targetDir}`)
     
-    // Verify migration was saved
+    // Dry-run must not persist exportTarget (1a)
     const updatedStudio = JSON.parse(await readFile(studioPath, 'utf-8'))
     const neonRecall = updatedStudio.assetPipeline.games.find((g: any) => g.id === 'game-neon-recall')
-    assert(neonRecall.exportTarget, 'exportTarget should be set after migration')
     assert(
-      neonRecall.exportTarget.startsWith('/') || neonRecall.exportTarget.startsWith('~'),
-      `exportTarget should be absolute, got: ${neonRecall.exportTarget}`
+      !neonRecall.exportTarget,
+      `export --dry-run must not persist exportTarget, got: ${neonRecall.exportTarget}`
     )
-    
-    console.log('  ✓ Migration saved to studio.json')
-    console.log('✓ Export migration test passed')
+
+    console.log('  ✓ Dry-run did not write exportTarget')
+    console.log('✓ Export dry-run path test passed')
   } finally {
     await cleanupTestDataDir(testDir)
   }

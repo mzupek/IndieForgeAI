@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useProjectStore } from '../state/indieForgeStore'
 
@@ -9,8 +9,7 @@ import { useProjectStore } from '../state/indieForgeStore'
 export function StudioHome() {
   const navigate = useNavigate()
   const location = useLocation()
-  const { activeProject, openProject } = useProjectStore()
-  const [selectedGameId, setSelectedGameId] = useState<string>('')
+  const { activeProject, openProject, selectedGameId, setSelectedGameId } = useProjectStore()
 
   // Load the first available project (or create one if none exists)
   useEffect(() => {
@@ -52,11 +51,12 @@ export function StudioHome() {
   }, [activeProject, openProject])
 
   useEffect(() => {
-    if (activeProject?.assetPipeline?.games.length && !selectedGameId) {
-      // Select first game by default
-      setSelectedGameId(activeProject.assetPipeline.games[0].id)
+    const games = activeProject?.assetPipeline?.games ?? []
+    if (!games.length) return
+    if (!selectedGameId || !games.some((g) => g.id === selectedGameId)) {
+      setSelectedGameId(games[0].id)
     }
-  }, [activeProject, selectedGameId])
+  }, [activeProject, selectedGameId, setSelectedGameId])
 
   if (!activeProject) {
     return (
@@ -118,7 +118,7 @@ export function StudioHome() {
               </label>
               <select
                 id="game-switcher"
-                value={selectedGameId}
+                value={selectedGameId || ''}
                 onChange={(e) => handleGameChange(e.target.value)}
                 style={{
                   padding: '0.375rem 0.75rem',

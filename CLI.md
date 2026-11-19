@@ -25,6 +25,34 @@ npm run forge -- <command>
 
 - `FORGE_DATA_DIR` - Override data directory (lower priority than `--data-dir`)
 
+## Studio schema migrate (v1 → v2)
+
+`studio.json` has two `schemaVersion` fields (wrapper + `assetPipeline`). This build **supports up to 2**. A file with a **newer** version is refused (load and save) with a clear error so an older Forge cannot damage newer data.
+
+**The app never auto-migrates.** On schema v1 it opens read-only and shows the command below. Quit the app, migrate, reopen.
+
+v2 groundwork (1a) is a version bump plus empty arrays — it does **not** rewrite poses, storyboards, audio, or Game Definitions:
+
+- `assetPipeline.worlds|stages|encounters|regions` = `[]` (records land in 1c)
+- each game gets `settings: { poseSlots: [], assetCategories: [], encounterTypes: ["battle","puzzle","minigame","story"], modules: [] }` (slots/categories in 1b)
+- optional `key` slugs may be set later; existing records are not backfilled
+- export **manifest** stays schema v2 (Unity) — unrelated to studio.json v2
+
+```bash
+# Always dry-run first. Writes nothing (no lock file, no backup, studio.json hash/mtime unchanged).
+forge migrate --dry-run --json
+
+# Then migrate. Copies studio.json → studio.v1-backup-<timestamp>.json in the same data dir,
+# verifies the copy, then atomically writes schemaVersion 2.
+forge migrate --json
+```
+
+Backup path is printed (and in JSON as `backupPath`). Default data dir is OS userData; with `FORGE_DATA_DIR` / `--data-dir` the backup is that folder. Running `forge migrate` again reports already at v2 and writes nothing.
+
+`forge export --dry-run` no longer persists `exportTarget`. List/show commands use a read-only load path that never writes.
+
+See `docs/STUDIO_SCHEMA.md`.
+
 ## Commands
 
 Game Definitions (`forge definition`, alias `gamedef`) are documented in [Game Definition](#game-definition). Agents should use `--json` and isolated `FORGE_DATA_DIR` when experimenting.

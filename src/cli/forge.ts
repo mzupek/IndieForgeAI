@@ -17,8 +17,11 @@ import { registerSceneCommands } from './commands/scene'
 import { registerEventCommands } from './commands/event'
 import { registerAudioCommands } from './commands/audio'
 import { registerDefinitionCommands } from './commands/definition'
+import { registerMigrateCommand } from './commands/migrate'
 import * as asset from './commands/asset'
 import * as assetState from './commands/asset-state'
+
+process.env.FORGE_CLI = '1'
 
 const program = new Command()
 
@@ -391,5 +394,8 @@ registerAudioCommands(program)
 
 // Game Definitions (shared with the app UI)
 registerDefinitionCommands(program)
+
+// Explicit studio.json schema migrate (app never auto-migrates)
+registerMigrateCommand(program)
 
 program.parse()

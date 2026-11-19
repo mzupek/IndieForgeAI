@@ -115,7 +115,9 @@ export async function createGameDefinition(
 
   const now = new Date().toISOString()
   let newDefinition: GameDefinition
-  
+
+  // GAME-SPECIFIC (flag): Neon Recall seed markdown lookup.
+  // Do not add more game ids here. Replace with a per-game seed file lookup later.
   if (gameId === 'game-neon-recall') {
     const seedMarkdown = await loadNeonRecallSeedMarkdown()
     if (seedMarkdown) {

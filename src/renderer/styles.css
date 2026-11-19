@@ -498,6 +498,15 @@ tr:hover td { background: rgba(255,255,255,0.02); }
   margin-bottom: 1rem;
 }
 
+.info-banner {
+  background: rgba(201, 162, 39, 0.15);
+  border: 1px solid var(--forge-gold);
+  color: var(--forge-gold);
+  padding: 0.65rem 0.85rem;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+}
+
 .asset-thumb {
   display: flex;
   flex-direction: column;
