@@ -228,27 +228,83 @@ function WorldStagePanel({
   onSelectWorld: (id: string) => void
   refreshAfter: (m: () => Promise<any>) => Promise<void>
 }) {
-  const [wName, setWName] = useState('')
-  const [wKey, setWKey] = useState('')
-  const [wDesc, setWDesc] = useState('')
-  const [wOrder, setWOrder] = useState('1')
-  const [sName, setSName] = useState('')
-  const [sKey, setSKey] = useState('')
-  const [sOrder, setSOrder] = useState('1')
-  const [sLevel, setSLevel] = useState('')
-  const [sOptional, setSOptional] = useState(false)
-  const [selectedStageId, setSelectedStageId] = useState<string | null>(focusStageId)
-  const [entryRegionId, setEntryRegionId] = useState('')
-  const [entryAnchor, setEntryAnchor] = useState('')
-  const [returnToNode, setReturnToNode] = useState('')
-  const [clearedBy, setClearedBy] = useState<string[]>([])
-
   const selectedWorld = worlds.find((w) => w.id === selectedWorldId) || null
   const worldStages = stages.filter((s) => s.worldId === selectedWorldId)
+  const initialStage = worldStages.find((s) => s.id === focusStageId) || null
+
+  const [worldFormMode, setWorldFormMode] = useState<'edit' | 'new'>(selectedWorld ? 'edit' : 'new')
+  const [wName, setWName] = useState(selectedWorld?.name || '')
+  const [wKey, setWKey] = useState(selectedWorld?.key || '')
+  const [wDesc, setWDesc] = useState(selectedWorld?.description || '')
+  const [wOrder, setWOrder] = useState(String(selectedWorld?.order ?? 1))
+  const [selectedStageId, setSelectedStageId] = useState<string | null>(initialStage?.id || null)
+  const [sName, setSName] = useState(initialStage?.name || '')
+  const [sKey, setSKey] = useState(initialStage?.key || '')
+  const [sOrder, setSOrder] = useState(
+    initialStage
+      ? String(initialStage.order)
+      : String(worldStages.reduce((max, s) => Math.max(max, s.order), 0) + 1)
+  )
+  const [sLevel, setSLevel] = useState(
+    initialStage?.recommendedLevel !== undefined ? String(initialStage.recommendedLevel) : ''
+  )
+  const [sOptional, setSOptional] = useState(Boolean(initialStage?.optional))
+  const [entryRegionId, setEntryRegionId] = useState(initialStage?.entryRegionId || '')
+  const [entryAnchor, setEntryAnchor] = useState(initialStage?.entryAnchor || '')
+  const [returnToNode, setReturnToNode] = useState(initialStage?.returnToNode || '')
+  const [clearedBy, setClearedBy] = useState<string[]>(initialStage?.clearedBy || [])
+
+  const editingWorld = worldFormMode === 'edit' ? selectedWorld : null
   const selectedStage = worldStages.find((s) => s.id === selectedStageId) || null
   const stageRegions = regions.filter((r) => r.stageId === selectedStage?.id)
   const stageEncounters = encounters.filter((e) => e.stageId === selectedStage?.id)
   const mapNodes = selectedWorld?.map?.nodes || []
+
+  function nextWorldOrder() {
+    return worlds.reduce((max, w) => Math.max(max, w.order), 0) + 1
+  }
+
+  function nextStageOrder(list = worldStages) {
+    return list.reduce((max, s) => Math.max(max, s.order), 0) + 1
+  }
+
+  function createdRecord<T extends { id: string }>(
+    updated: unknown,
+    collection: 'worlds' | 'stages',
+    knownIds: Set<string>,
+    match: (row: T) => boolean
+  ): T | undefined {
+    const rows = ((updated as { assetPipeline?: AssetPipelineProject } | null)?.assetPipeline?.[collection] ||
+      []) as T[]
+    return rows.find((row) => !knownIds.has(row.id) && match(row))
+  }
+
+  function fillWorld(w: World) {
+    setWName(w.name)
+    setWKey(w.key || '')
+    setWDesc(w.description || '')
+    setWOrder(String(w.order))
+  }
+
+  function beginNewWorld() {
+    setWorldFormMode('new')
+    setWName('')
+    setWKey('')
+    setWDesc('')
+    setWOrder(String(nextWorldOrder()))
+  }
+
+  function selectWorldRow(w: World) {
+    if (worldFormMode === 'edit' && w.id === selectedWorldId) {
+      beginNewWorld()
+      return
+    }
+    const switching = w.id !== selectedWorldId
+    onSelectWorld(w.id)
+    setWorldFormMode('edit')
+    fillWorld(w)
+    if (switching) beginNewStage()
+  }
 
   function loadStage(s: Stage) {
     setSelectedStageId(s.id)
@@ -263,54 +319,89 @@ function WorldStagePanel({
     setClearedBy(s.clearedBy || [])
   }
 
+  function beginNewStage(list = worldStages) {
+    setSelectedStageId(null)
+    setSName('')
+    setSKey('')
+    setSOrder(String(nextStageOrder(list)))
+    setSLevel('')
+    setSOptional(false)
+    setEntryRegionId('')
+    setEntryAnchor('')
+    setReturnToNode('')
+    setClearedBy([])
+  }
+
+  function selectStageRow(s: Stage) {
+    if (s.id === selectedStageId) {
+      beginNewStage()
+      return
+    }
+    loadStage(s)
+  }
+
   useEffect(() => {
     if (!focusStageId) return
     const s = stages.find((st) => st.id === focusStageId)
     if (s) loadStage(s)
   }, [focusStageId])
 
+  useEffect(() => {
+    const still = worldStages.find((s) => s.id === selectedStageId)
+    if (!still) beginNewStage()
+  }, [selectedWorldId])
+
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
       <div className="panel-section">
-        <h3>Worlds</h3>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
+          <h3 style={{ margin: 0 }}>Worlds</h3>
+          <button type="button" className="ghost" disabled={busy} onClick={beginNewWorld}>
+            + New world
+          </button>
+        </div>
         <ul style={{ listStyle: 'none', padding: 0 }}>
-          {worlds.map((w) => (
-            <li
-              key={w.id}
-              style={{
-                padding: '0.4rem 0.5rem',
-                cursor: 'pointer',
-                background: w.id === selectedWorldId ? 'var(--bg-secondary)' : 'transparent',
-                display: 'flex',
-                justifyContent: 'space-between',
-                gap: '0.5rem'
-              }}
-              onClick={() => {
-                onSelectWorld(w.id)
-                setWName(w.name)
-                setWKey(w.key || '')
-                setWDesc(w.description || '')
-                setWOrder(String(w.order))
-              }}
-            >
-              <span>
-                {w.order}. {w.name}
-                {w.key ? <code style={{ marginLeft: '0.5rem' }}>@{w.key}</code> : null}
-              </span>
-              <button
-                type="button"
-                className="ghost"
-                disabled={busy}
-                style={{ color: 'var(--error)' }}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  void refreshAfter(() => window.indieForge.worldContent.removeWorld(projectId, gameId, w.id))
+          {worlds.map((w) => {
+            const selected = Boolean(editingWorld && w.id === editingWorld.id)
+            return (
+              <li
+                key={w.id}
+                style={{
+                  padding: '0.4rem 0.5rem',
+                  cursor: 'pointer',
+                  background: selected ? 'var(--bg-secondary)' : 'transparent',
+                  boxShadow: selected ? 'inset 3px 0 0 var(--forge-gold)' : 'none',
+                  borderRadius: 4,
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  gap: '0.5rem'
                 }}
+                onClick={() => selectWorldRow(w)}
               >
-                Remove
-              </button>
-            </li>
-          ))}
+                <span>
+                  {w.order}. {w.name}
+                  {w.key ? <code style={{ marginLeft: '0.5rem' }}>@{w.key}</code> : null}
+                </span>
+                <button
+                  type="button"
+                  className="ghost"
+                  disabled={busy}
+                  style={{ color: 'var(--error)' }}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    const removingSelected = w.id === selectedWorldId
+                    void refreshAfter(async () => {
+                      const updated = await window.indieForge.worldContent.removeWorld(projectId, gameId, w.id)
+                      if (removingSelected) beginNewWorld()
+                      return updated
+                    })
+                  }}
+                >
+                  Remove
+                </button>
+              </li>
+            )
+          })}
           {worlds.length === 0 && <li style={{ color: 'var(--muted)' }}>No worlds yet</li>}
         </ul>
         <form
@@ -318,90 +409,114 @@ function WorldStagePanel({
             e.preventDefault()
             if (!wName.trim()) return
             void refreshAfter(async () => {
-              if (selectedWorld) {
-                return window.indieForge.worldContent.updateWorld(projectId, gameId, selectedWorld.id, {
+              if (editingWorld) {
+                return window.indieForge.worldContent.updateWorld(projectId, gameId, editingWorld.id, {
                   name: wName.trim(),
                   key: wKey.trim() || undefined,
                   description: wDesc.trim() || undefined,
                   order: Number(wOrder) || 1
                 })
               }
+              const knownIds = new Set(worlds.map((w) => w.id))
               const updated = await window.indieForge.worldContent.createWorld(projectId, gameId, {
                 name: wName.trim(),
                 key: wKey.trim() || undefined,
                 description: wDesc.trim() || undefined,
                 order: Number(wOrder) || undefined
               })
-              setWName('')
-              setWKey('')
-              setWDesc('')
+              const created = createdRecord<World>(updated, 'worlds', knownIds, (w) => w.gameId === gameId)
+              if (created) {
+                onSelectWorld(created.id)
+                setWorldFormMode('edit')
+                fillWorld(created)
+              }
               return updated
             })
           }}
           style={{ display: 'grid', gap: '0.4rem', marginTop: '0.75rem' }}
         >
-          <input placeholder="Name" value={wName} onChange={(e) => setWName(e.target.value)} disabled={busy} />
-          <input placeholder="key (optional)" value={wKey} onChange={(e) => setWKey(e.target.value)} disabled={busy} />
-          <input placeholder="Description" value={wDesc} onChange={(e) => setWDesc(e.target.value)} disabled={busy} />
-          <input placeholder="Order" value={wOrder} onChange={(e) => setWOrder(e.target.value)} disabled={busy} />
+          <h4 style={{ margin: 0 }}>{editingWorld ? 'Edit world' : 'New world'}</h4>
+          <label>
+            Name
+            <input value={wName} onChange={(e) => setWName(e.target.value)} disabled={busy} />
+          </label>
+          <label>
+            Key
+            <input value={wKey} onChange={(e) => setWKey(e.target.value)} disabled={busy} />
+          </label>
+          <label>
+            Description
+            <input value={wDesc} onChange={(e) => setWDesc(e.target.value)} disabled={busy} />
+          </label>
+          <label>
+            Order
+            <input value={wOrder} onChange={(e) => setWOrder(e.target.value)} disabled={busy} />
+          </label>
           <div style={{ display: 'flex', gap: '0.5rem' }}>
             <button type="submit" disabled={busy || !wName.trim()}>
-              {selectedWorld ? 'Save world' : 'Add world'}
+              {editingWorld ? 'Save world' : 'Create world'}
             </button>
-            <button
-              type="button"
-              className="ghost"
-              disabled={busy}
-              onClick={() => {
-                onSelectWorld('')
-                setWName('')
-                setWKey('')
-                setWDesc('')
-                setWOrder('1')
-              }}
-            >
-              New
+            <button type="button" className="ghost" disabled={busy} onClick={beginNewWorld}>
+              Cancel
             </button>
           </div>
         </form>
       </div>
 
       <div className="panel-section">
-        <h3>Stages {selectedWorld ? `in ${selectedWorld.name}` : ''}</h3>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
+          <h3 style={{ margin: 0 }}>Stages {selectedWorld ? `in ${selectedWorld.name}` : ''}</h3>
+          {selectedWorld && (
+            <button type="button" className="ghost" disabled={busy} onClick={() => beginNewStage()}>
+              + New stage
+            </button>
+          )}
+        </div>
         {!selectedWorld && <p style={{ color: 'var(--muted)' }}>Select a world first</p>}
         {selectedWorld && (
           <>
             <ul style={{ listStyle: 'none', padding: 0 }}>
-              {worldStages.map((s) => (
-                <li
-                  key={s.id}
-                  style={{
-                    padding: '0.35rem 0',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    cursor: 'pointer',
-                    background: s.id === selectedStageId ? 'var(--bg-secondary)' : 'transparent'
-                  }}
-                  onClick={() => loadStage(s)}
-                >
-                  <span>
-                    {s.order}. {s.name}
-                    {s.key ? <code style={{ marginLeft: '0.5rem' }}>@{s.key}</code> : null}
-                    {s.optional ? ' (optional)' : ''}
-                  </span>
-                  <button
-                    type="button"
-                    className="ghost"
-                    disabled={busy}
-                    style={{ color: 'var(--error)' }}
-                    onClick={() =>
-                      refreshAfter(() => window.indieForge.worldContent.removeStage(projectId, gameId, s.id))
-                    }
+              {worldStages.map((s) => {
+                const selected = s.id === selectedStageId
+                return (
+                  <li
+                    key={s.id}
+                    style={{
+                      padding: '0.35rem 0.5rem',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      cursor: 'pointer',
+                      background: selected ? 'var(--bg-secondary)' : 'transparent',
+                      boxShadow: selected ? 'inset 3px 0 0 var(--forge-gold)' : 'none',
+                      borderRadius: 4
+                    }}
+                    onClick={() => selectStageRow(s)}
                   >
-                    Remove
-                  </button>
-                </li>
-              ))}
+                    <span>
+                      {s.order}. {s.name}
+                      {s.key ? <code style={{ marginLeft: '0.5rem' }}>@{s.key}</code> : null}
+                      {s.optional ? ' (optional)' : ''}
+                    </span>
+                    <button
+                      type="button"
+                      className="ghost"
+                      disabled={busy}
+                      style={{ color: 'var(--error)' }}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        const removingSelected = s.id === selectedStageId
+                        void refreshAfter(async () => {
+                          const updated = await window.indieForge.worldContent.removeStage(projectId, gameId, s.id)
+                          if (removingSelected) beginNewStage(worldStages.filter((row) => row.id !== s.id))
+                          return updated
+                        })
+                      }}
+                    >
+                      Remove
+                    </button>
+                  </li>
+                )
+              })}
               {worldStages.length === 0 && <li style={{ color: 'var(--muted)' }}>No stages</li>}
             </ul>
             <form
@@ -409,45 +524,8 @@ function WorldStagePanel({
                 e.preventDefault()
                 if (!sName.trim() || !selectedWorld) return
                 void refreshAfter(async () => {
-                  const updated = await window.indieForge.worldContent.createStage(projectId, gameId, {
-                    worldId: selectedWorld.id,
-                    name: sName.trim(),
-                    key: sKey.trim() || undefined,
-                    order: Number(sOrder) || undefined,
-                    recommendedLevel: sLevel ? Number(sLevel) : undefined,
-                    optional: sOptional
-                  })
-                  setSName('')
-                  setSKey('')
-                  setSOptional(false)
-                  return updated
-                })
-              }}
-              style={{ display: 'grid', gap: '0.4rem', marginTop: '0.75rem' }}
-            >
-              <input placeholder="Stage name" value={sName} onChange={(e) => setSName(e.target.value)} disabled={busy} />
-              <input placeholder="key (optional)" value={sKey} onChange={(e) => setSKey(e.target.value)} disabled={busy} />
-              <input placeholder="Order" value={sOrder} onChange={(e) => setSOrder(e.target.value)} disabled={busy} />
-              <input
-                placeholder="Recommended level"
-                value={sLevel}
-                onChange={(e) => setSLevel(e.target.value)}
-                disabled={busy}
-              />
-              <label style={{ fontSize: '0.85rem' }}>
-                <input type="checkbox" checked={sOptional} onChange={(e) => setSOptional(e.target.checked)} /> Optional
-              </label>
-              <button type="submit" disabled={busy || !sName.trim()}>
-                Add stage
-              </button>
-            </form>
-            {selectedStage && (
-              <form
-                style={{ display: 'grid', gap: '0.4rem', marginTop: '1rem' }}
-                onSubmit={(e) => {
-                  e.preventDefault()
-                  void refreshAfter(() =>
-                    window.indieForge.worldContent.updateStage(projectId, gameId, selectedStage.id, {
+                  if (selectedStage) {
+                    return window.indieForge.worldContent.updateStage(projectId, gameId, selectedStage.id, {
                       name: sName.trim() || selectedStage.name,
                       key: sKey.trim() || undefined,
                       order: Number(sOrder) || selectedStage.order,
@@ -458,70 +536,123 @@ function WorldStagePanel({
                       returnToNode: returnToNode || null,
                       clearedBy
                     })
+                  }
+                  const knownIds = new Set(worldStages.map((s) => s.id))
+                  const updated = await window.indieForge.worldContent.createStage(projectId, gameId, {
+                    worldId: selectedWorld.id,
+                    name: sName.trim(),
+                    key: sKey.trim() || undefined,
+                    order: Number(sOrder) || undefined,
+                    recommendedLevel: sLevel ? Number(sLevel) : undefined,
+                    optional: sOptional
+                  })
+                  const created = createdRecord<Stage>(
+                    updated,
+                    'stages',
+                    knownIds,
+                    (s) => s.gameId === gameId && s.worldId === selectedWorld.id
                   )
-                }}
-              >
-                <h4>Stage entry / clear</h4>
-                <label>
-                  Entry region
-                  <select value={entryRegionId} onChange={(e) => setEntryRegionId(e.target.value)} disabled={busy}>
-                    <option value="">(none)</option>
-                    {stageRegions.map((r) => (
-                      <option key={r.id} value={r.id}>
-                        {r.name}
-                      </option>
+                  if (created) loadStage(created)
+                  return updated
+                })
+              }}
+              style={{ display: 'grid', gap: '0.4rem', marginTop: '0.75rem' }}
+            >
+              <h4 style={{ margin: 0 }}>{selectedStage ? 'Edit stage' : 'New stage'}</h4>
+              <label>
+                Name
+                <input value={sName} onChange={(e) => setSName(e.target.value)} disabled={busy} />
+              </label>
+              <label>
+                Key
+                <input value={sKey} onChange={(e) => setSKey(e.target.value)} disabled={busy} />
+              </label>
+              <label>
+                Order
+                <input value={sOrder} onChange={(e) => setSOrder(e.target.value)} disabled={busy} />
+              </label>
+              <label>
+                Recommended level
+                <input value={sLevel} onChange={(e) => setSLevel(e.target.value)} disabled={busy} />
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.85rem' }}>
+                <input
+                  type="checkbox"
+                  checked={sOptional}
+                  onChange={(e) => setSOptional(e.target.checked)}
+                  disabled={busy}
+                />
+                Optional
+              </label>
+              {selectedStage && (
+                <>
+                  <h4>Stage entry / clear</h4>
+                  <label>
+                    Entry region
+                    <select value={entryRegionId} onChange={(e) => setEntryRegionId(e.target.value)} disabled={busy}>
+                      <option value="">(none)</option>
+                      {stageRegions.map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Entry anchor
+                    <select value={entryAnchor} onChange={(e) => setEntryAnchor(e.target.value)} disabled={busy}>
+                      <option value="">(spawn default)</option>
+                      {(stageRegions.find((r) => r.id === entryRegionId)?.anchors || []).map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.id}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Return to node
+                    <select value={returnToNode} onChange={(e) => setReturnToNode(e.target.value)} disabled={busy}>
+                      <option value="">(this stage&apos;s node)</option>
+                      {mapNodes.map((n) => (
+                        <option key={n.id} value={n.id}>
+                          {n.label || n.id}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <fieldset style={{ border: '1px solid var(--border)', padding: '0.5rem' }}>
+                    <legend>Cleared by</legend>
+                    {stageEncounters.length === 0 && (
+                      <p style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>
+                        Default: every hotspot-linked encounter
+                      </p>
+                    )}
+                    {stageEncounters.map((enc) => (
+                      <label key={enc.id} style={{ display: 'flex', gap: '0.35rem', fontSize: '0.85rem' }}>
+                        <input
+                          type="checkbox"
+                          checked={clearedBy.includes(enc.id)}
+                          onChange={(e) => {
+                            setClearedBy(
+                              e.target.checked ? [...clearedBy, enc.id] : clearedBy.filter((id) => id !== enc.id)
+                            )
+                          }}
+                        />
+                        {enc.name}
+                      </label>
                     ))}
-                  </select>
-                </label>
-                <label>
-                  Entry anchor
-                  <select value={entryAnchor} onChange={(e) => setEntryAnchor(e.target.value)} disabled={busy}>
-                    <option value="">(spawn default)</option>
-                    {(stageRegions.find((r) => r.id === entryRegionId)?.anchors || []).map((a) => (
-                      <option key={a.id} value={a.id}>
-                        {a.id}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  Return to node
-                  <select value={returnToNode} onChange={(e) => setReturnToNode(e.target.value)} disabled={busy}>
-                    <option value="">(this stage&apos;s node)</option>
-                    {mapNodes.map((n) => (
-                      <option key={n.id} value={n.id}>
-                        {n.label || n.id}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <fieldset style={{ border: '1px solid var(--border)', padding: '0.5rem' }}>
-                  <legend>Cleared by</legend>
-                  {stageEncounters.length === 0 && (
-                    <p style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>
-                      Default: every hotspot-linked encounter
-                    </p>
-                  )}
-                  {stageEncounters.map((enc) => (
-                    <label key={enc.id} style={{ display: 'flex', gap: '0.35rem', fontSize: '0.85rem' }}>
-                      <input
-                        type="checkbox"
-                        checked={clearedBy.includes(enc.id)}
-                        onChange={(e) => {
-                          setClearedBy(
-                            e.target.checked ? [...clearedBy, enc.id] : clearedBy.filter((id) => id !== enc.id)
-                          )
-                        }}
-                      />
-                      {enc.name}
-                    </label>
-                  ))}
-                </fieldset>
-                <button type="submit" disabled={busy}>
-                  Save stage
+                  </fieldset>
+                </>
+              )}
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <button type="submit" disabled={busy || !sName.trim()}>
+                  {selectedStage ? 'Save stage' : 'Create stage'}
                 </button>
-              </form>
-            )}
+                <button type="button" className="ghost" disabled={busy} onClick={() => beginNewStage()}>
+                  Cancel
+                </button>
+              </div>
+            </form>
           </>
         )}
       </div>
