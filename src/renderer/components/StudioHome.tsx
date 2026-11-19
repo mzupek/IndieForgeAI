@@ -90,6 +90,8 @@ export function StudioHome() {
       navigate(`/studio/storyboards/${gameId}`)
     } else if (path.startsWith('/studio/definitions/')) {
       navigate(`/studio/definitions/${gameId}`)
+    } else if (path.startsWith('/studio/settings/')) {
+      navigate(`/studio/settings/${gameId}`)
     } else if (path.startsWith('/studio/export/')) {
       navigate(`/studio/export/${gameId}`)
     }

@@ -74,8 +74,7 @@
               "properties": {
                 "slot": {
                   "type": "string",
-                  "enum": ["ready", "success", "hurt", "win", "defeat"],
-                  "description": "Pose slot"
+                  "description": "Pose slot key. Built-in values remain ready, success, hurt, win, defeat. Custom game/character slots appear as additional pose entries with the same fields."
                 },
                 "file": {
                   "type": "string",

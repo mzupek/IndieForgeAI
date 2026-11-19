@@ -10,6 +10,8 @@ import type { AssetState, VisualAsset } from '@shared/types/assetPipeline'
 import { CreateAssetModal } from './CreateAssetModal'
 import { ConfirmModal } from './ConfirmModal'
 import { AssetThumbnail } from './AssetThumbnail'
+import { useProjectStore } from '../state/indieForgeStore'
+import { effectiveAssetCategories } from '@shared/gameSettings/assetCategories'
 
 interface AssetLibraryProps {
   gameId: string
@@ -28,8 +30,12 @@ export function AssetLibrary({ gameId, reloadEpoch = 0, onAssetSelect, onAssetEd
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null)
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState<VisualAsset | null>(null)
-
-  const categories = ['all', 'logo', 'symbol', 'item', 'weapon', 'prop']
+  const game = useProjectStore((s) => s.activeProject?.assetPipeline?.games.find((g) => g.id === gameId))
+  const categoryDefs = effectiveAssetCategories(game)
+  const extraFromAssets = Array.from(
+    new Set(assets.map((a) => a.category).filter((c) => !categoryDefs.some((d) => d.key === c)))
+  )
+  const categories = ['all', ...categoryDefs.map((c) => c.key), ...extraFromAssets]
 
   // Load assets + Game-scoped states together; ignore stale responses after Game switch
   const loadGenRef = useRef(0)
@@ -149,7 +155,9 @@ export function AssetLibrary({ gameId, reloadEpoch = 0, onAssetSelect, onAssetEd
           >
             {categories.map(cat => (
               <option key={cat} value={cat}>
-                {cat === 'all' ? 'All Categories' : cat.charAt(0).toUpperCase() + cat.slice(1)}
+                {cat === 'all'
+                  ? 'All Categories'
+                  : categoryDefs.find((d) => d.key === cat)?.label || cat.charAt(0).toUpperCase() + cat.slice(1)}
               </option>
             ))}
           </select>

@@ -33,6 +33,7 @@ import {
   collectStateTimedKeyUsage,
   formatTimedKeyInUseError
 } from '../../shared/storyboard/timedKeys'
+import { assertKnownAssetCategory } from '../../shared/gameSettings/assetCategories'
 
 export type StudioData = StudioFile
 
@@ -368,6 +369,11 @@ export async function getVisualAsset(assetId: string, dataDirOverride?: string):
  */
 export async function addVisualAsset(asset: import('@shared/types/assetPipeline').VisualAsset, dataDirOverride?: string): Promise<void> {
   const pipeline = await getAssetPipeline(dataDirOverride)
+  const game = pipeline.games.find((g) => g.id === asset.gameId)
+  if (!game) {
+    throw new Error(`Game not found: ${asset.gameId}`)
+  }
+  asset.category = assertKnownAssetCategory(asset.category, game)
   if (!pipeline.visualAssets) pipeline.visualAssets = []
   pipeline.visualAssets.push(asset)
   await updateAssetPipeline(pipeline, dataDirOverride)
@@ -389,6 +395,12 @@ export async function updateVisualAsset(asset: import('@shared/types/assetPipeli
   if (existing.gameId !== asset.gameId) {
     throw new Error(`Cannot change gameId of asset '${asset.name}'. Cross-game moves are not allowed.`)
   }
+
+  const game = pipeline.games.find((g) => g.id === asset.gameId)
+  if (!game) {
+    throw new Error(`Game not found: ${asset.gameId}`)
+  }
+  asset.category = assertKnownAssetCategory(asset.category, game)
   
   pipeline.visualAssets[index] = asset
   await updateAssetPipeline(pipeline, dataDirOverride)

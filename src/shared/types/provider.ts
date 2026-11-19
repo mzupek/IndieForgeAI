@@ -735,6 +735,38 @@ export interface IndieForgeAPI {
     update: (id: string, updates: any) => Promise<any>
     delete: (id: string) => Promise<{ ok: true }>
   }
+  gameSettings: {
+    addPoseSlot: (
+      projectId: string,
+      gameId: string,
+      input: { key: string; label: string; group?: string; required?: boolean }
+    ) => Promise<IndieForgeProject>
+    removePoseSlot: (projectId: string, gameId: string, key: string) => Promise<IndieForgeProject>
+    addAssetCategory: (
+      projectId: string,
+      gameId: string,
+      input: { key: string; label: string; base?: string }
+    ) => Promise<IndieForgeProject>
+    removeAssetCategory: (projectId: string, gameId: string, key: string) => Promise<IndieForgeProject>
+    addCharacterPoseSlot: (
+      projectId: string,
+      characterId: string,
+      gameId: string,
+      input: { key: string; label: string; group?: string; required?: boolean }
+    ) => Promise<IndieForgeProject>
+    removeCharacterPoseSlot: (
+      projectId: string,
+      characterId: string,
+      gameId: string,
+      key: string
+    ) => Promise<IndieForgeProject>
+    setCharacterCorePosesRequired: (
+      projectId: string,
+      characterId: string,
+      gameId: string,
+      required: boolean
+    ) => Promise<IndieForgeProject>
+  }
 }
 
 declare global {

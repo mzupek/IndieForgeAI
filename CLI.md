@@ -57,6 +57,8 @@ See `docs/STUDIO_SCHEMA.md`.
 
 Game Definitions (`forge definition`, alias `gamedef`) are documented in [Game Definition](#game-definition). Agents should use `--json` and isolated `FORGE_DATA_DIR` when experimenting.
 
+Pose slots and asset categories (1b) are documented in [Game pose slots and asset categories](#game-pose-slots-and-asset-categories).
+
 ### `forge games list`
 
 List all games across all projects.
@@ -81,6 +83,49 @@ forge games list [--json]
   }
 ]
 ```
+
+---
+
+### Game pose slots and asset categories
+
+Built-in pose slots stay `ready`, `success`, `hurt`, `win`, `defeat`. A game may add more in `game.settings.poseSlots`; a character may add more in `character.poseSlots`. Effective slots = built-in + game + character. Keys are lowercase slugs, unique across those layers.
+
+Built-in asset categories are `logo`, `symbol`, `item`, `weapon`, `prop`, plus `background`. A game may add more in `game.settings.assetCategories`. `background` is a full-frame category (no transparency check). Custom categories may set `--base background` (Region picker lands in 1c).
+
+`ride` / `ride_boost` below are **examples only** — do not hardcode title-specific names in app code.
+
+```bash
+# Game-level pose slots
+forge game slot list --game game-id [--json]
+forge game slot add --game game-id --key ride --label Ride [--required] [--dry-run]
+forge game slot remove --game game-id --key ride [--dry-run]
+
+# Game-level asset categories
+forge game category list --game game-id [--json]
+forge game category add --game game-id --key map --label Map [--base background] [--dry-run]
+forge game category remove --game game-id --key map [--dry-run]
+
+# Character-level pose slots
+forge character slots list <character-id> --game game-id [--json]
+forge character slots add <character-id> --game game-id --key ride_boost --label "Ride Boost" [--required]
+forge character slots remove <character-id> --game game-id --key ride_boost
+forge character slots core-required <character-id> --game game-id --value false
+
+# Dump game.settings
+forge game settings show --game game-id [--json]
+```
+
+Removing a slot or category that is in use is refused and lists the pose/asset ids. List commands are read-only (no studio.json write).
+
+Existing pose/asset commands accept custom keys:
+
+```bash
+forge pose import <character-id> hero_ride.png --slot ride [--json]
+forge asset create --game game-id --name "Alley" --category background --image ./alley.png
+forge asset create --game game-id --name "District Map" --category map
+```
+
+Filename auto-map uses the character's effective slots, **longest key first** (`hero_ride_boost.png` → `ride_boost`, not `ride`).
 
 ---
 
@@ -217,7 +262,7 @@ Import pose(s) for a character. Files are auto-mapped by filename to pose slots.
 
 **Important:** CLI-imported poses default to `status: "draft"`. Only the UI can approve poses.
 
-**Pose Slots:** `ready`, `success`, `hurt`, `win`, `defeat`
+**Pose Slots:** built-in `ready`, `success`, `hurt`, `win`, `defeat`, plus any game/character custom slots. Unknown `--slot` values are refused.
 
 **Filename Auto-Mapping:**
 - `hero_ready.png` → `ready`

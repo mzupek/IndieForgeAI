@@ -121,8 +121,8 @@ Each character includes:
 **Only APPROVED poses** (status = "approved") are exported.
 
 Each pose includes:
-- `slot`: Pose slot (ready, success, hurt, win, defeat)
-- `file`: Relative path to pose image (e.g., `poses/char-uuid_ready.png`)
+- `slot`: Pose slot key. Built-in values remain `ready`, `success`, `hurt`, `win`, `defeat`. Custom game/character slots (for example `ride`) appear as **additional** pose entries with the same fields — no rename or removal of existing keys. Manifest schema stays **v2**.
+- `file`: Relative path to pose image (e.g., `poses/char-uuid_ready.png`; a custom slot exports as `poses/char-uuid_<slot>.png`)
 - `width`: Image width (always 1024 for approved poses)
 - `height`: Image height (always 1024 for approved poses)
 - `status`: Always "approved" in exports
@@ -159,6 +159,7 @@ Each preset includes:
 │   ├── char1_hurt.png
 │   ├── char1_win.png
 │   ├── char1_defeat.png
+│   ├── char1_ride.png    # optional: custom slot, additive only
 │   └── char2_ready.png
 └── clips/
     ├── clip1_clip.mp4    # Video files

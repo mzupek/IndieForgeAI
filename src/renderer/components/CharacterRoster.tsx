@@ -2,14 +2,13 @@ import { useEffect, useState, useRef } from 'react'
 import { useOutletContext, useNavigate } from 'react-router-dom'
 import { useProjectStore } from '../state/indieForgeStore'
 import { useLocalFilePreview } from '../hooks/useLocalFilePreview'
-import type { Character, Pose } from '@shared/types/assetPipeline'
+import type { Character, Game, Pose } from '@shared/types/assetPipeline'
 import type { PoseMetadata } from '@shared/poseValidation'
 import { PoseSlotStrip } from './PoseSlotStrip'
 
-const POSE_SLOTS = ['ready', 'success', 'hurt', 'win', 'defeat'] as const
-
 function CharacterCard({
   character,
+  game,
   poses,
   poseMetadata,
   onEdit,
@@ -17,6 +16,7 @@ function CharacterCard({
   onManagePoses
 }: {
   character: Character
+  game?: Game | null
   poses: Pose[]
   poseMetadata?: Record<string, PoseMetadata>
   onEdit: () => void
@@ -98,10 +98,11 @@ function CharacterCard({
 
       <div style={{ marginBottom: '0.75rem' }}>
         <p style={{ fontSize: '0.85rem', color: 'var(--muted)', marginBottom: '0.5rem' }}>
-          Five-Pose Set:
+          Pose set:
         </p>
         <PoseSlotStrip
           character={character}
+          game={game}
           poses={poses}
           poseMetadata={poseMetadata}
           size="small"
@@ -143,10 +144,17 @@ function CharacterEditDialog({
   onClose: () => void
   onSaved: () => void
 }) {
+  const setActiveProject = useProjectStore((s) => s.setActiveProject)
+  const liveCharacter = useProjectStore((s) => {
+    if (!character) return character
+    return s.activeProject?.assetPipeline?.characters.find((c) => c.id === character.id) ?? character
+  })
   const [name, setName] = useState(character?.name ?? '')
   const [role, setRole] = useState(character?.role ?? '')
   const [styleNotes, setStyleNotes] = useState(character?.styleNotes ?? '')
   const [tags, setTags] = useState(character?.tags.join(', ') ?? '')
+  const [slotKey, setSlotKey] = useState('')
+  const [slotLabel, setSlotLabel] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [dragActive, setDragActive] = useState(false)
@@ -259,7 +267,7 @@ function CharacterEditDialog({
           borderRadius: '8px',
           padding: '1.5rem',
           width: '90%',
-          maxWidth: '500px',
+          maxWidth: '560px',
           maxHeight: '90vh',
           overflow: 'auto'
         }}
@@ -320,6 +328,113 @@ function CharacterEditDialog({
               disabled={saving}
             />
           </label>
+
+          {liveCharacter && (
+            <div style={{ marginTop: '1rem' }}>
+              <p style={{ fontSize: '0.9rem', marginBottom: '0.35rem' }}>Pose slots</p>
+              <label style={{ display: 'flex', gap: '0.35rem', alignItems: 'center', fontSize: '0.85rem', marginBottom: '0.5rem' }}>
+                <input
+                  type="checkbox"
+                  checked={liveCharacter.corePosesRequired !== false}
+                  disabled={saving}
+                  onChange={async (e) => {
+                    setSaving(true)
+                    setError(null)
+                    try {
+                      const updated = await window.indieForge.gameSettings.setCharacterCorePosesRequired(
+                        projectId,
+                        liveCharacter.id,
+                        gameId,
+                        e.target.checked
+                      )
+                      setActiveProject(updated)
+                    } catch (err) {
+                      setError(err instanceof Error ? err.message : 'Failed to update core poses')
+                    } finally {
+                      setSaving(false)
+                    }
+                  }}
+                />
+                Built-in five required
+              </label>
+              <ul style={{ margin: '0 0 0.5rem 0', paddingLeft: '1.25rem', fontSize: '0.85rem' }}>
+                {(liveCharacter.poseSlots || []).length === 0 && (
+                  <li style={{ color: 'var(--muted)' }}>No extra character slots</li>
+                )}
+                {(liveCharacter.poseSlots || []).map((slot) => (
+                  <li key={slot.key} style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                    <code>{slot.key}</code> {slot.label}
+                    <button
+                      type="button"
+                      className="ghost"
+                      disabled={saving}
+                      style={{ color: 'var(--error)', fontSize: '0.8rem' }}
+                      onClick={async () => {
+                        setSaving(true)
+                        setError(null)
+                        try {
+                          const updated = await window.indieForge.gameSettings.removeCharacterPoseSlot(
+                            projectId,
+                            liveCharacter.id,
+                            gameId,
+                            slot.key
+                          )
+                          setActiveProject(updated)
+                        } catch (err) {
+                          setError(err instanceof Error ? err.message : 'Failed to remove slot')
+                        } finally {
+                          setSaving(false)
+                        }
+                      }}
+                    >
+                      Remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+                <input
+                  placeholder="key"
+                  value={slotKey}
+                  onChange={(e) => setSlotKey(e.target.value)}
+                  disabled={saving}
+                  style={{ flex: '1 1 80px' }}
+                />
+                <input
+                  placeholder="Label"
+                  value={slotLabel}
+                  onChange={(e) => setSlotLabel(e.target.value)}
+                  disabled={saving}
+                  style={{ flex: '1 1 100px' }}
+                />
+                <button
+                  type="button"
+                  disabled={saving || !slotKey.trim() || !slotLabel.trim()}
+                  onClick={async () => {
+                    setSaving(true)
+                    setError(null)
+                    try {
+                      const updated = await window.indieForge.gameSettings.addCharacterPoseSlot(
+                        projectId,
+                        liveCharacter.id,
+                        gameId,
+                        { key: slotKey.trim(), label: slotLabel.trim() }
+                      )
+                      setActiveProject(updated)
+                      setSlotKey('')
+                      setSlotLabel('')
+                    } catch (err) {
+                      setError(err instanceof Error ? err.message : 'Failed to add slot')
+                    } finally {
+                      setSaving(false)
+                    }
+                  }}
+                >
+                  Add slot
+                </button>
+              </div>
+            </div>
+          )}
 
           {character && (
             <div style={{ marginTop: '1rem' }}>
@@ -455,6 +570,7 @@ export function CharacterRoster() {
               <CharacterCard
                 key={character.id}
                 character={character}
+                game={game}
                 poses={poses}
                 poseMetadata={poseMetadataCache[character.id]}
                 onEdit={() => setEditingCharacter(character)}

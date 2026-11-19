@@ -323,6 +323,22 @@ const api: IndieForgeAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.GAME_DEFINITION_UPDATE, id, updates),
     delete: (id) =>
       ipcRenderer.invoke(IPC_CHANNELS.GAME_DEFINITION_DELETE, id)
+  },
+  gameSettings: {
+    addPoseSlot: (projectId, gameId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.GAME_SETTINGS_ADD_POSE_SLOT, projectId, gameId, input),
+    removePoseSlot: (projectId, gameId, key) =>
+      ipcRenderer.invoke(IPC_CHANNELS.GAME_SETTINGS_REMOVE_POSE_SLOT, projectId, gameId, key),
+    addAssetCategory: (projectId, gameId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.GAME_SETTINGS_ADD_ASSET_CATEGORY, projectId, gameId, input),
+    removeAssetCategory: (projectId, gameId, key) =>
+      ipcRenderer.invoke(IPC_CHANNELS.GAME_SETTINGS_REMOVE_ASSET_CATEGORY, projectId, gameId, key),
+    addCharacterPoseSlot: (projectId, characterId, gameId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.CHARACTER_POSE_SLOT_ADD, projectId, characterId, gameId, input),
+    removeCharacterPoseSlot: (projectId, characterId, gameId, key) =>
+      ipcRenderer.invoke(IPC_CHANNELS.CHARACTER_POSE_SLOT_REMOVE, projectId, characterId, gameId, key),
+    setCharacterCorePosesRequired: (projectId, characterId, gameId, required) =>
+      ipcRenderer.invoke(IPC_CHANNELS.CHARACTER_CORE_POSES_REQUIRED, projectId, characterId, gameId, required)
   }
 }
 

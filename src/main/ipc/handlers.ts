@@ -174,6 +174,15 @@ import {
   deleteGameDefinition
 } from '../../core/storage/gameDefinitionService'
 import {
+  addCharacterPoseSlot,
+  addGameAssetCategory,
+  addGamePoseSlot,
+  removeCharacterPoseSlot,
+  removeGameAssetCategory,
+  removeGamePoseSlot,
+  setCharacterCorePosesRequired
+} from '../../core/storage/gameSettingsService'
+import {
   applyDesignerAssetPrompt,
   applyDesignerStyleGuide,
   clearDesignerChat,
@@ -767,7 +776,7 @@ export function registerIpcHandlers(): void {
       slot: string,
       sourcePath: string,
       options?: any
-    ) => importPose(projectId, characterId, slot as any, sourcePath, options)
+    ) => importPose(projectId, characterId, slot, sourcePath, options)
   )
 
   ipcMain.handle(
@@ -1457,6 +1466,62 @@ export function registerIpcHandlers(): void {
     await removeAudio(audioId, { gameId })
     return { ok: true as const }
   })
+
+  ipcMain.handle(
+    IPC_CHANNELS.GAME_SETTINGS_ADD_POSE_SLOT,
+    async (_e, projectId: string, gameId: string, input: { key: string; label: string; group?: string; required?: boolean }) => {
+      await addGamePoseSlot(gameId, input)
+      return await loadProject(projectId)
+    }
+  )
+  ipcMain.handle(
+    IPC_CHANNELS.GAME_SETTINGS_REMOVE_POSE_SLOT,
+    async (_e, projectId: string, gameId: string, key: string) => {
+      await removeGamePoseSlot(gameId, key)
+      return await loadProject(projectId)
+    }
+  )
+  ipcMain.handle(
+    IPC_CHANNELS.GAME_SETTINGS_ADD_ASSET_CATEGORY,
+    async (_e, projectId: string, gameId: string, input: { key: string; label: string; base?: string }) => {
+      await addGameAssetCategory(gameId, input)
+      return await loadProject(projectId)
+    }
+  )
+  ipcMain.handle(
+    IPC_CHANNELS.GAME_SETTINGS_REMOVE_ASSET_CATEGORY,
+    async (_e, projectId: string, gameId: string, key: string) => {
+      await removeGameAssetCategory(gameId, key)
+      return await loadProject(projectId)
+    }
+  )
+  ipcMain.handle(
+    IPC_CHANNELS.CHARACTER_POSE_SLOT_ADD,
+    async (
+      _e,
+      projectId: string,
+      characterId: string,
+      gameId: string,
+      input: { key: string; label: string; group?: string; required?: boolean }
+    ) => {
+      await addCharacterPoseSlot(characterId, gameId, input)
+      return await loadProject(projectId)
+    }
+  )
+  ipcMain.handle(
+    IPC_CHANNELS.CHARACTER_POSE_SLOT_REMOVE,
+    async (_e, projectId: string, characterId: string, gameId: string, key: string) => {
+      await removeCharacterPoseSlot(characterId, gameId, key)
+      return await loadProject(projectId)
+    }
+  )
+  ipcMain.handle(
+    IPC_CHANNELS.CHARACTER_CORE_POSES_REQUIRED,
+    async (_e, projectId: string, characterId: string, gameId: string, required: boolean) => {
+      await setCharacterCorePosesRequired(characterId, gameId, required)
+      return await loadProject(projectId)
+    }
+  )
 }
 
 export async function ensureAppDataDirs(): Promise<void> {

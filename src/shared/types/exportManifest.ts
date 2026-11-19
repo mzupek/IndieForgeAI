@@ -6,7 +6,7 @@
 export const EXPORT_MANIFEST_SCHEMA_VERSION = 2
 
 export interface ExportManifestPose {
-  /** Pose slot (ready, success, hurt, win, defeat) */
+  /** Pose slot key: built-in ready/success/hurt/win/defeat, plus any game/character custom slots. */
   slot: string
   /** Relative path to pose image file in export directory */
   file: string

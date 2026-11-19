@@ -153,5 +153,12 @@ export const IPC_CHANNELS = {
   BINDING_GET: 'binding:get',
   BINDING_CREATE: 'binding:create',
   BINDING_UPDATE: 'binding:update',
-  BINDING_DELETE: 'binding:delete'
+  BINDING_DELETE: 'binding:delete',
+  GAME_SETTINGS_ADD_POSE_SLOT: 'gameSettings:addPoseSlot',
+  GAME_SETTINGS_REMOVE_POSE_SLOT: 'gameSettings:removePoseSlot',
+  GAME_SETTINGS_ADD_ASSET_CATEGORY: 'gameSettings:addAssetCategory',
+  GAME_SETTINGS_REMOVE_ASSET_CATEGORY: 'gameSettings:removeAssetCategory',
+  CHARACTER_POSE_SLOT_ADD: 'characterPoseSlot:add',
+  CHARACTER_POSE_SLOT_REMOVE: 'characterPoseSlot:remove',
+  CHARACTER_CORE_POSES_REQUIRED: 'characterPoseSlot:coreRequired'
 } as const

@@ -18,6 +18,7 @@ import { registerEventCommands } from './commands/event'
 import { registerAudioCommands } from './commands/audio'
 import { registerDefinitionCommands } from './commands/definition'
 import { registerMigrateCommand } from './commands/migrate'
+import { registerGameSettingsCommands } from './commands/gameSettings'
 import * as asset from './commands/asset'
 import * as assetState from './commands/asset-state'
 
@@ -97,6 +98,8 @@ characterCmd
     await character.deleteCharacter(characterId, { ...program.opts(), ...options })
   })
 
+registerGameSettingsCommands(gamesCmd, characterCmd, program)
+
 // P1: Asset commands (generic visual assets)
 const assetCmd = program.command('asset').description('Manage visual assets (P1)')
 
@@ -104,7 +107,7 @@ assetCmd
   .command('list')
   .description('List visual assets')
   .requiredOption('--game <id>', 'Game ID')
-  .option('--category <category>', 'Filter by category (logo|symbol|item|weapon|prop)')
+  .option('--category <category>', 'Filter by category (built-in or game custom)')
   .action(async (options) => {
     await asset.list({ ...program.opts(), ...options })
   })
@@ -123,7 +126,7 @@ assetCmd
   .description('Create a new visual asset')
   .requiredOption('--game <id>', 'Game ID')
   .requiredOption('--name <name>', 'Asset name')
-  .requiredOption('--category <category>', 'Category (logo|symbol|item|weapon|prop)')
+  .requiredOption('--category <category>', 'Category (logo|symbol|item|weapon|prop|background or a game custom key)')
   .option('--tags <tags>', 'Comma-separated tags')
   .option('--image <path>', 'PNG image file path (for static single-image assets)')
   .action(async (options) => {
@@ -136,7 +139,7 @@ assetCmd
   .argument('<asset-id>', 'Asset ID')
   .requiredOption('--game <id>', 'Game ID')
   .option('--name <name>', 'Asset name')
-  .option('--category <category>', 'Category (logo|symbol|item|weapon|prop)')
+  .option('--category <category>', 'Category (logo|symbol|item|weapon|prop|background or a game custom key)')
   .option('--tags <tags>', 'Comma-separated tags')
   .option('--image <path>', 'PNG image file path (add/replace static image)')
   .action(async (assetId, options) => {
@@ -222,7 +225,7 @@ poseCmd
   .description('Import pose(s) for a character')
   .argument('<character-id>', 'Character ID')
   .argument('<files...>', 'Pose image files')
-  .option('--slot <slot>', 'Specific pose slot (ready|success|hurt|win|defeat)')
+  .option('--slot <slot>', 'Pose slot (built-in or a game/character custom key)')
   .action(async (characterId, files, options) => {
     await pose.importPoses(characterId, files, { ...program.opts(), ...options })
   })

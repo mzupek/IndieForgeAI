@@ -17,6 +17,7 @@ import { getDataDir } from './dataDir'
 import { resolveBackgroundStillRefs, resolveShotBackgroundImagePath } from '../../shared/storyboard/shotBackground'
 import { backgroundKeyRefs } from '../../shared/storyboard/backgroundKeys'
 import type { Game } from '@shared/types/assetPipeline'
+import { requiredPoseSlots } from '../../shared/gameSettings/poseSlots'
 import { generateStoryboardThumbnails } from '../export/storyboardThumbnails'
 import { homedir } from 'os'
 
@@ -142,7 +143,8 @@ export async function validateExport(
     const poses = pipeline.poses.filter(p => p.characterId === character.id)
     const approvedPoses = poses.filter(p => p.status === 'approved')
     
-    const slots = ['ready', 'success', 'hurt', 'win', 'defeat']
+    const gameForSlots = pipeline.games.find((g) => g.id === gameId)
+    const slots = requiredPoseSlots(gameForSlots, character).map((s) => s.key)
     const missingSlots = slots.filter(slot => 
       !approvedPoses.some(p => p.slot === slot)
     )
@@ -217,7 +219,7 @@ async function needsCopy(source: string, destination: string): Promise<'new' | '
 /**
  * Generate export manifest
  */
-async function generateManifest(
+export async function generateManifest(
   game: Game,
   dataDirOverride?: string
 ): Promise<ExportManifest> {

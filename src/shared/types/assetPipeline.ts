@@ -5,6 +5,7 @@
 
 export type GameEngine = 'unity' | 'godot'
 
+/** Built-in pose slots. Custom slots are free-form slugs on game.settings / character. */
 export type PoseSlot = 'ready' | 'success' | 'hurt' | 'win' | 'defeat'
 
 export type PoseStatus = 'draft' | 'polished' | 'approved'
@@ -200,6 +201,13 @@ export interface Character {
   tags: string[]
   /** Thumbnail path for library preview */
   thumbnail?: string
+  /** Extra pose slots for this character (on top of built-ins + game.settings.poseSlots). */
+  poseSlots?: GamePoseSlotDef[]
+  /**
+   * When false, the built-in five are not required for completeness (portrait-only NPC).
+   * Missing means true.
+   */
+  corePosesRequired?: boolean
   createdAt: string
   updatedAt: string
 }
@@ -210,7 +218,8 @@ export interface Character {
 export interface Pose {
   id: string
   characterId: string
-  slot: PoseSlot
+  /** Built-in or custom slot key. Validated against the character's effective slots. */
+  slot: string
   /** Path to 1024x1024 transparent PNG file */
   file: string
   /** Status: imported poses default to 'approved' */
@@ -726,8 +735,8 @@ export interface VisualAsset {
   /** Optional slug, unique per game. Never backfilled. */
   key?: string
   name: string
-  /** Asset category for organization */
-  category: 'logo' | 'symbol' | 'item' | 'weapon' | 'prop'
+  /** Built-in or per-game category key. */
+  category: string
   /** Tags for library search */
   tags: string[]
   /** Default state ID (null if single-state / static asset) */

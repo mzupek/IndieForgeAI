@@ -9,6 +9,8 @@ import React, { useState, useEffect } from 'react'
 import type { VisualAsset, AssetState } from '@shared/types/assetPipeline'
 import { StateNameModal } from './StateNameModal'
 import { ConfirmModal } from './ConfirmModal'
+import { useProjectStore } from '../state/indieForgeStore'
+import { effectiveAssetCategories } from '@shared/gameSettings/assetCategories'
 
 interface AssetEditorProps {
   asset: VisualAsset
@@ -27,8 +29,10 @@ export function AssetEditor({ asset, onSave, onClose }: AssetEditorProps) {
   const [showStateNameModal, setShowStateNameModal] = useState(false)
   const [deleteStateConfirm, setDeleteStateConfirm] = useState<AssetState | null>(null)
 
-  const categories: Array<'logo' | 'symbol' | 'item' | 'weapon' | 'prop'> = 
-    ['logo', 'symbol', 'item', 'weapon', 'prop']
+  const game = useProjectStore((s) =>
+    s.activeProject?.assetPipeline?.games.find((g) => g.id === asset.gameId)
+  )
+  const categories = effectiveAssetCategories(game)
 
   useEffect(() => {
     loadStates()
@@ -237,10 +241,13 @@ export function AssetEditor({ asset, onSave, onClose }: AssetEditorProps) {
                 style={{ width: '100%', padding: '0.5rem' }}
               >
                 {categories.map(cat => (
-                  <option key={cat} value={cat}>
-                    {cat.charAt(0).toUpperCase() + cat.slice(1)}
+                  <option key={cat.key} value={cat.key}>
+                    {cat.label}
                   </option>
                 ))}
+                {category && !categories.some((c) => c.key === category) && (
+                  <option value={category}>{category}</option>
+                )}
               </select>
             </label>
 

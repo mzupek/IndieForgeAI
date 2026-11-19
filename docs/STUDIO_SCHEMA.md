@@ -48,10 +48,18 @@ Rollback: quit the app, copy the backup over `studio.json`, redeploy the previou
 
 Idempotent: a second `forge migrate` reports already at v2 and writes nothing.
 
-## Out of 1a
+## 1b (same schema v2 — no bump)
 
-- Custom pose slots / asset categories (1b)
+Optional fields only. Missing means empty / core-five required:
+
+- `game.settings.poseSlots` / `assetCategories` (lists were empty after 1a)
+- `character.poseSlots` and `character.corePosesRequired` (optional; default empty / true)
+- `Pose.slot` and `VisualAsset.category` are free-form strings validated against the effective lists
+- built-in asset category `background` is code, not a schema bump
+
+## Out of 1a / 1b
+
 - World / Stage / Encounter / Region CRUD, screens, `content apply` (1c)
-- Export manifest changes / A4
+- A4 portable export package
 - `seedDefaultGames` and the Neon Recall Game Definition markdown special case (flagged only)
 - ScenesView / StoryboardEditor store-refresh bug (deferred)

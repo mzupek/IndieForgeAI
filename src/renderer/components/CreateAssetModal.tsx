@@ -6,6 +6,8 @@
 
 import React, { useState } from 'react'
 import type { VisualAsset } from '@shared/types/assetPipeline'
+import { useProjectStore } from '../state/indieForgeStore'
+import { CORE_ASSET_CATEGORY_KEYS, effectiveAssetCategories } from '@shared/gameSettings/assetCategories'
 
 interface CreateAssetModalProps {
   gameId: string
@@ -15,13 +17,12 @@ interface CreateAssetModalProps {
 
 export function CreateAssetModal({ gameId, onSave, onClose }: CreateAssetModalProps) {
   const [name, setName] = useState('')
-  const [category, setCategory] = useState<'logo' | 'symbol' | 'item' | 'weapon' | 'prop'>('logo')
+  const game = useProjectStore((s) => s.activeProject?.assetPipeline?.games.find((g) => g.id === gameId))
+  const categories = effectiveAssetCategories(game)
+  const [category, setCategory] = useState(categories[0]?.key || CORE_ASSET_CATEGORY_KEYS[0])
   const [tags, setTags] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
-
-  const categories: Array<'logo' | 'symbol' | 'item' | 'weapon' | 'prop'> = 
-    ['logo', 'symbol', 'item', 'weapon', 'prop']
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -151,8 +152,8 @@ export function CreateAssetModal({ gameId, onSave, onClose }: CreateAssetModalPr
               }}
             >
               {categories.map(cat => (
-                <option key={cat} value={cat}>
-                  {cat.charAt(0).toUpperCase() + cat.slice(1)}
+                <option key={cat.key} value={cat.key}>
+                  {cat.label}
                 </option>
               ))}
             </select>

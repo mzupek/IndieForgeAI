@@ -22,7 +22,7 @@ interface Options {
   json?: boolean
   game: string
   name?: string
-  category?: 'logo' | 'symbol' | 'item' | 'weapon' | 'prop'
+  category?: string
   tags?: string
   image?: string
 }
@@ -108,12 +108,6 @@ export async function create(options: Options): Promise<void> {
   try {
     if (!options.name || !options.category) {
       throw new Error('--name and --category are required')
-    }
-    
-    // Validate category
-    const validCategories: Array<'logo' | 'symbol' | 'item' | 'weapon' | 'prop'> = ['logo', 'symbol', 'item', 'weapon', 'prop']
-    if (!validCategories.includes(options.category)) {
-      throw new Error(`Invalid category: ${options.category}. Must be one of: ${validCategories.join(', ')}`)
     }
     
     await verifyGameExists(options.game, options.dataDir)
@@ -202,10 +196,6 @@ export async function update(assetId: string, options: Options): Promise<void> {
     // Update fields
     if (options.name) asset.name = options.name
     if (options.category) {
-      const validCategories: Array<'logo' | 'symbol' | 'item' | 'weapon' | 'prop'> = ['logo', 'symbol', 'item', 'weapon', 'prop']
-      if (!validCategories.includes(options.category)) {
-        throw new Error(`Invalid category: ${options.category}. Must be one of: ${validCategories.join(', ')}`)
-      }
       asset.category = options.category
     }
     if (options.tags !== undefined) {

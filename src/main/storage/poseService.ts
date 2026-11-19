@@ -2,7 +2,8 @@ import { randomUUID } from 'crypto'
 import { copyFile, mkdir } from 'fs/promises'
 import { basename, extname, join } from 'path'
 import sharp from 'sharp'
-import type { AssetPipelineProject, Pose, PoseSlot } from '@shared/types/assetPipeline'
+import type { AssetPipelineProject, Pose } from '@shared/types/assetPipeline'
+import { assertKnownPoseSlot } from '../../shared/gameSettings/poseSlots'
 import type { PoseMetadata } from '@shared/poseValidation'
 import { loadProject, saveProject } from './projectStore'
 import {
@@ -89,7 +90,7 @@ export async function validatePoseImage(filePath: string): Promise<PoseMetadata>
 export async function importPose(
   projectId: string,
   characterId: string,
-  slot: PoseSlot,
+  slot: string,
   sourcePath: string,
   options?: {
     facing?: 'left' | 'right' | 'front' | 'back'
@@ -101,6 +102,13 @@ export async function importPose(
   if (!project.assetPipeline) {
     throw new Error('Project has no asset pipeline data')
   }
+
+  const character = project.assetPipeline.characters.find((c) => c.id === characterId)
+  if (!character) {
+    throw new Error(`Character not found: ${characterId}`)
+  }
+  const game = project.assetPipeline.games.find((g) => g.id === character.gameId)
+  slot = assertKnownPoseSlot(slot, game, character)
 
   // Validate image
   const metadata = await validatePoseImage(sourcePath)

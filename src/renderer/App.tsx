@@ -11,6 +11,7 @@ import { StoryboardEditor } from './components/StoryboardEditor'
 import { GameDefinitionView } from './components/GameDefinitionView'
 import { ExportView } from './components/ExportView'
 import { LibraryView } from './components/LibraryView'
+import { GameSettingsView } from './components/GameSettingsView'
 import { useProjectStore, useUIStore } from './state/indieForgeStore'
 import {
   STUDIO_SCHEMA_VERSION,
@@ -49,6 +50,7 @@ function StudioLayout({ children }: { children: React.ReactNode }) {
     { path: '/studio/scenes', label: 'Scenes' },
     { path: '/studio/storyboards', label: 'Storyboards' },
     { path: '/studio/definitions', label: 'Game Definitions' },
+    { path: '/studio/settings', label: 'Game Settings' },
     { path: '/studio/export', label: 'Export' }
   ]
 
@@ -124,6 +126,8 @@ function AppRoutes() {
           <Route path="storyboards/:gameId" element={<StoryboardEditor />} />
           <Route path="definitions" element={<GameDefaultRedirect section="definitions" />} />
           <Route path="definitions/:gameId" element={<GameDefinitionView />} />
+          <Route path="settings" element={<GameDefaultRedirect section="settings" />} />
+          <Route path="settings/:gameId" element={<GameSettingsView />} />
           <Route path="export" element={<GameDefaultRedirect section="export" />} />
           <Route path="export/:gameId" element={<ExportView />} />
         </Route>

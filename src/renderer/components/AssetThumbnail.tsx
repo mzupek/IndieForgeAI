@@ -45,6 +45,8 @@ export function AssetThumbnail({ asset, states = [], gameId, style }: AssetThumb
       {asset.category === 'item' && '📦'}
       {asset.category === 'weapon' && '⚔️'}
       {asset.category === 'prop' && '🎨'}
+      {asset.category === 'background' && '🖼️'}
+      {!['logo', 'symbol', 'item', 'weapon', 'prop', 'background'].includes(asset.category) && '📁'}
     </span>
   )
 }
