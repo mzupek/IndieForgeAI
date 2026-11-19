@@ -1,11 +1,13 @@
 /**
- * forge world|stage|encounter|region|content — 1c world structure.
+ * forge world|stage|encounter|region|content — world structure (1c) and map (1d).
  */
 
 import { Command } from 'commander'
 import { readFileSync } from 'fs'
 import { ContentApplyError } from '@shared/worldContent/issues'
 import {
+  addWorldMapNode,
+  addWorldMapPath,
   applyContent,
   applyTypedRecords,
   createEncounter,
@@ -17,18 +19,26 @@ import {
   listRegions,
   listStages,
   listWorlds,
+  moveWorldMapNode,
+  parsePosPair,
+  parseWaypointList,
   removeEncounter,
   removeRegion,
   removeStage,
   removeWorld,
+  removeWorldMapNode,
+  removeWorldMapPath,
+  setWorldMap,
   showEncounter,
   showRegion,
   showStage,
   showWorld,
+  showWorldMap,
   updateEncounter,
   updateRegion,
   updateStage,
   updateWorld,
+  worldFlow,
   type EncounterInput,
   type RegionInput,
   type StageInput,
@@ -153,6 +163,11 @@ export function registerWorldContentCommands(program: Command): void {
       if (options.order !== undefined) patch.order = Number(options.order)
       if (options.recommendedLevel !== undefined) patch.recommendedLevel = Number(options.recommendedLevel)
       if (options.optional !== undefined) patch.optional = Boolean(options.optional)
+      if (options.entryRegion !== undefined) patch.entryRegionId = String(options.entryRegion)
+      if (options.entryAnchor !== undefined) patch.entryAnchor = String(options.entryAnchor)
+      if (options.unlockAfter !== undefined) patch.unlockAfter = csvIds(options.unlockAfter)
+      if (options.clearedBy !== undefined) patch.clearedBy = csvIds(options.clearedBy)
+      if (options.returnToNode !== undefined) patch.returnToNode = String(options.returnToNode)
       return updateStage(opts.game!, id, patch, { dataDirOverride: dir(opts), dryRun: Boolean(opts.dryRun) })
     },
     remove: (id, opts) => removeStage(opts.game!, id, { dataDirOverride: dir(opts), dryRun: Boolean(opts.dryRun) }),
@@ -174,6 +189,11 @@ export function registerWorldContentCommands(program: Command): void {
         .option('--order <n>', 'Sort order')
         .option('--recommended-level <n>', 'Recommended level')
         .option('--optional', 'Mark stage optional')
+        .option('--entry-region <id>', 'Entry region id or @key (empty to clear)')
+        .option('--entry-anchor <id>', 'Entry anchor id (defaults to spawn)')
+        .option('--unlock-after <ids>', 'Comma-separated stage ids or @keys')
+        .option('--cleared-by <ids>', 'Comma-separated encounter ids or @keys')
+        .option('--return-to-node <id>', 'Map node id to return to')
   })
 
   const encounterCmd = program.command('encounter').description('Manage encounters (1c)')
@@ -298,8 +318,8 @@ export function registerWorldContentCommands(program: Command): void {
         .option('--stage <id>', 'Stage id or @key')
         .option('--key <key>', 'Optional slug')
         .option('--edges <json>', 'JSON array of [a,b] or {from,to,requires?,hint?}')
-        .option('--hotspots <json>', 'JSON array of {id,anchor,prompt,triggerId?}')
-        .option('--exits <json>', 'JSON array of {id,anchor,toRegionId,toAnchor?}'),
+        .option('--hotspots <json>', 'JSON array of {id,anchor,prompt,triggerId?,encounterId?}')
+        .option('--exits <json>', 'JSON array of {id,anchor,toRegionId?,toAnchor?,toWorldMap?}'),
     updateFlags: (cmd) =>
       cmd
         .option('--name <name>', 'Name')
@@ -312,6 +332,29 @@ export function registerWorldContentCommands(program: Command): void {
         .option('--hotspots <json>', 'JSON hotspots')
         .option('--exits <json>', 'JSON exits')
   })
+
+  registerWorldMapCommands(worldCmd, program)
+
+  worldCmd
+    .command('flow')
+    .description('Read-only flow preview (same shape as the UI)')
+    .argument('<world>', 'uuid or @key')
+    .requiredOption('--game <id>', 'Game ID')
+    .action(async (worldArg, options, cmd) => {
+      const opts = { ...program.opts(), ...collectOpts(cmd, options) }
+      try {
+        const flow = await worldFlow(opts.game!, String(worldArg), dir(opts))
+        printOrJson(flow, opts, () => {
+          printFlow(flow.tree, 0)
+          const errors = flow.issues.filter((i) => i.level === 'error')
+          const warnings = flow.issues.filter((i) => i.level === 'warning')
+          console.log(`${errors.length} error(s), ${warnings.length} warning(s)`)
+        })
+      } catch (err) {
+        outputError(err, opts)
+        process.exit(1)
+      }
+    })
 
   const contentCmd = program.command('content').description('Apply or export world-structure content')
 
@@ -524,6 +567,218 @@ function registerCrud(parent: Command, kind: string, program: Command, spec: Cru
         })
       } catch (err) {
         outputApplyError(err, opts)
+        process.exit(1)
+      }
+    })
+}
+
+function csvIds(raw: string): string[] {
+  if (!String(raw || '').trim()) return []
+  return String(raw)
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+}
+
+function printFlow(line: { label: string; status: string; locked?: boolean; issues: { message: string }[]; children: unknown[] }, depth: number): void {
+  const pad = '  '.repeat(depth)
+  const mark = line.status === 'error' ? 'ERR' : line.status === 'warning' ? 'WARN' : 'ok'
+  const lock = line.locked ? ' [locked]' : ''
+  console.log(`${pad}${mark} ${line.label}${lock}`)
+  for (const issue of line.issues) {
+    console.log(`${pad}  - ${issue.message}`)
+  }
+  for (const child of line.children as typeof line[]) {
+    printFlow(child, depth + 1)
+  }
+}
+
+function registerWorldMapCommands(worldCmd: Command, program: Command): void {
+  const mapCmd = worldCmd.command('map').description('World stage node map (1d)')
+
+  mapCmd
+    .command('show')
+    .description('Show the world map')
+    .argument('<world>', 'uuid or @key')
+    .requiredOption('--game <id>', 'Game ID')
+    .action(async (worldArg, options, cmd) => {
+      const opts = { ...program.opts(), ...collectOpts(cmd, options) }
+      try {
+        const shown = await showWorldMap(opts.game!, String(worldArg), dir(opts))
+        printOrJson(shown, opts, () => console.log(JSON.stringify(shown.map, null, 2)))
+      } catch (err) {
+        outputError(err, opts)
+        process.exit(1)
+      }
+    })
+
+  mapCmd
+    .command('set')
+    .description('Set map background and optional start node')
+    .argument('<world>', 'uuid or @key')
+    .requiredOption('--game <id>', 'Game ID')
+    .requiredOption('--background <asset>', 'Background visual asset uuid, @key, or name')
+    .option('--start <nodeId>', 'Start node id')
+    .option('--dry-run', 'Validate without writing')
+    .action(async (worldArg, options, cmd) => {
+      const opts = { ...program.opts(), ...collectOpts(cmd, options) }
+      try {
+        const result = await setWorldMap(
+          opts.game!,
+          String(worldArg),
+          { backgroundAssetId: String(options.background), startNodeId: options.start },
+          { dataDirOverride: dir(opts), dryRun: Boolean(opts.dryRun) }
+        )
+        printOrJson({ record: result.record, warnings: result.warnings, dryRun: Boolean(opts.dryRun) }, opts, () => {
+          console.log(`${opts.dryRun ? 'Would set' : 'Set'} map on ${result.record.name}`)
+        })
+      } catch (err) {
+        outputError(err, opts)
+        process.exit(1)
+      }
+    })
+
+  const nodeCmd = mapCmd.command('node').description('Add, move, or remove a map node')
+
+  nodeCmd
+    .command('add')
+    .description('Place a node for a stage')
+    .argument('<world>', 'uuid or @key')
+    .requiredOption('--game <id>', 'Game ID')
+    .requiredOption('--stage <id>', 'Stage id or @key')
+    .requiredOption('--pos <xy>', 'Position as x,y in 0..1')
+    .option('--id <id>', 'Node id')
+    .option('--label <text>', 'Label')
+    .option('--hidden', 'Hide until unlocked')
+    .option('--dry-run', 'Validate without writing')
+    .action(async (worldArg, options, cmd) => {
+      const opts = { ...program.opts(), ...collectOpts(cmd, options) }
+      try {
+        const result = await addWorldMapNode(
+          opts.game!,
+          String(worldArg),
+          {
+            stageId: String(options.stage),
+            pos: parsePosPair(String(options.pos)),
+            id: options.id,
+            label: options.label,
+            hidden: Boolean(options.hidden)
+          },
+          { dataDirOverride: dir(opts), dryRun: Boolean(opts.dryRun) }
+        )
+        printOrJson({ record: result.record, node: result.node, warnings: result.warnings, dryRun: Boolean(opts.dryRun) }, opts, () => {
+          console.log(`${opts.dryRun ? 'Would add' : 'Added'} node ${result.node.id}`)
+        })
+      } catch (err) {
+        outputError(err, opts)
+        process.exit(1)
+      }
+    })
+
+  nodeCmd
+    .command('move')
+    .description('Move a map node')
+    .argument('<world>', 'uuid or @key')
+    .argument('<nodeId>', 'Node id')
+    .requiredOption('--game <id>', 'Game ID')
+    .requiredOption('--pos <xy>', 'Position as x,y in 0..1')
+    .option('--dry-run', 'Validate without writing')
+    .action(async (worldArg, nodeId, options, cmd) => {
+      const opts = { ...program.opts(), ...collectOpts(cmd, options) }
+      try {
+        const result = await moveWorldMapNode(
+          opts.game!,
+          String(worldArg),
+          String(nodeId),
+          parsePosPair(String(options.pos)),
+          { dataDirOverride: dir(opts), dryRun: Boolean(opts.dryRun) }
+        )
+        printOrJson({ record: result.record, node: result.node, warnings: result.warnings, dryRun: Boolean(opts.dryRun) }, opts, () => {
+          console.log(`${opts.dryRun ? 'Would move' : 'Moved'} node ${result.node.id}`)
+        })
+      } catch (err) {
+        outputError(err, opts)
+        process.exit(1)
+      }
+    })
+
+  nodeCmd
+    .command('remove')
+    .description('Remove a map node (drops its paths; refused for the start node)')
+    .argument('<world>', 'uuid or @key')
+    .argument('<nodeId>', 'Node id')
+    .requiredOption('--game <id>', 'Game ID')
+    .option('--dry-run', 'Validate without writing')
+    .action(async (worldArg, nodeId, options, cmd) => {
+      const opts = { ...program.opts(), ...collectOpts(cmd, options) }
+      try {
+        const result = await removeWorldMapNode(opts.game!, String(worldArg), String(nodeId), {
+          dataDirOverride: dir(opts),
+          dryRun: Boolean(opts.dryRun)
+        })
+        printOrJson({ ...result, dryRun: Boolean(opts.dryRun) }, opts, () => {
+          console.log(`${opts.dryRun ? 'Would remove' : 'Removed'} node ${result.removed}`)
+        })
+      } catch (err) {
+        outputError(err, opts)
+        process.exit(1)
+      }
+    })
+
+  const pathCmd = mapCmd.command('path').description('Add or remove a two-way path')
+
+  pathCmd
+    .command('add')
+    .description('Add a two-way path')
+    .argument('<world>', 'uuid or @key')
+    .requiredOption('--game <id>', 'Game ID')
+    .requiredOption('--from <node>', 'From node id')
+    .requiredOption('--to <node>', 'To node id')
+    .option('--waypoints <list>', 'Drawing waypoints as x,y;x,y')
+    .option('--id <id>', 'Path id')
+    .option('--dry-run', 'Validate without writing')
+    .action(async (worldArg, options, cmd) => {
+      const opts = { ...program.opts(), ...collectOpts(cmd, options) }
+      try {
+        const result = await addWorldMapPath(
+          opts.game!,
+          String(worldArg),
+          {
+            from: String(options.from),
+            to: String(options.to),
+            waypoints: parseWaypointList(options.waypoints),
+            id: options.id
+          },
+          { dataDirOverride: dir(opts), dryRun: Boolean(opts.dryRun) }
+        )
+        printOrJson({ record: result.record, path: result.path, warnings: result.warnings, dryRun: Boolean(opts.dryRun) }, opts, () => {
+          console.log(`${opts.dryRun ? 'Would add' : 'Added'} path ${result.path.id}`)
+        })
+      } catch (err) {
+        outputError(err, opts)
+        process.exit(1)
+      }
+    })
+
+  pathCmd
+    .command('remove')
+    .description('Remove a path (stranded nodes are allowed; flow flags them)')
+    .argument('<world>', 'uuid or @key')
+    .argument('<pathId>', 'Path id')
+    .requiredOption('--game <id>', 'Game ID')
+    .option('--dry-run', 'Validate without writing')
+    .action(async (worldArg, pathId, options, cmd) => {
+      const opts = { ...program.opts(), ...collectOpts(cmd, options) }
+      try {
+        const result = await removeWorldMapPath(opts.game!, String(worldArg), String(pathId), {
+          dataDirOverride: dir(opts),
+          dryRun: Boolean(opts.dryRun)
+        })
+        printOrJson({ ...result, dryRun: Boolean(opts.dryRun) }, opts, () => {
+          console.log(`${opts.dryRun ? 'Would remove' : 'Removed'} path ${result.removed}`)
+        })
+      } catch (err) {
+        outputError(err, opts)
         process.exit(1)
       }
     })

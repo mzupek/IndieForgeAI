@@ -3,7 +3,15 @@
     {
       "key": "world-1",
       "name": "World 1",
-      "order": 1
+      "order": 1,
+      "map": {
+        "backgroundAssetId": "World 1 map",
+        "nodes": [
+          { "id": "n-gate", "stageId": "@stage-gate", "pos": [0.18, 0.72] }
+        ],
+        "paths": [],
+        "startNodeId": "n-gate"
+      }
     }
   ],
   "stages": [
@@ -11,7 +19,10 @@
       "key": "stage-gate",
       "worldId": "@world-1",
       "name": "The Gate",
-      "order": 1
+      "order": 1,
+      "entryRegionId": "@region-gate-approach",
+      "entryAnchor": "a-start",
+      "clearedBy": ["@enc-gate-drone"]
     }
   ],
   "regions": [
@@ -27,9 +38,16 @@
       "edges": [["a-start", "a-gate"]],
       "spawn": "a-start",
       "hotspots": [
-        { "id": "hs-gate", "anchor": "a-gate", "prompt": "Hack the gate" }
+        {
+          "id": "hs-gate",
+          "anchor": "a-gate",
+          "prompt": "Hack the gate",
+          "encounterId": "@enc-gate-drone"
+        }
       ],
-      "exits": []
+      "exits": [
+        { "id": "x-map", "anchor": "a-start", "toWorldMap": true }
+      ]
     }
   ],
   "encounters": [

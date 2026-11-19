@@ -785,6 +785,26 @@ export interface IndieForgeAPI {
     createWorld: (projectId: string, gameId: string, input: any) => Promise<IndieForgeProject>
     updateWorld: (projectId: string, gameId: string, id: string, patch: any) => Promise<IndieForgeProject>
     removeWorld: (projectId: string, gameId: string, id: string) => Promise<IndieForgeProject>
+    setWorldMap: (projectId: string, gameId: string, worldId: string, input: any) => Promise<IndieForgeProject>
+    addMapNode: (projectId: string, gameId: string, worldId: string, input: any) => Promise<IndieForgeProject>
+    moveMapNode: (
+      projectId: string,
+      gameId: string,
+      worldId: string,
+      nodeId: string,
+      pos: [number, number]
+    ) => Promise<IndieForgeProject>
+    updateMapNode: (
+      projectId: string,
+      gameId: string,
+      worldId: string,
+      nodeId: string,
+      patch: any
+    ) => Promise<IndieForgeProject>
+    removeMapNode: (projectId: string, gameId: string, worldId: string, nodeId: string) => Promise<IndieForgeProject>
+    addMapPath: (projectId: string, gameId: string, worldId: string, input: any) => Promise<IndieForgeProject>
+    removeMapPath: (projectId: string, gameId: string, worldId: string, pathId: string) => Promise<IndieForgeProject>
+    setMapStart: (projectId: string, gameId: string, worldId: string, nodeId: string) => Promise<IndieForgeProject>
     createStage: (projectId: string, gameId: string, input: any) => Promise<IndieForgeProject>
     updateStage: (projectId: string, gameId: string, id: string, patch: any) => Promise<IndieForgeProject>
     removeStage: (projectId: string, gameId: string, id: string) => Promise<IndieForgeProject>

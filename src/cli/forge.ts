@@ -402,7 +402,7 @@ registerDefinitionCommands(program)
 // Explicit studio.json schema migrate (app never auto-migrates)
 registerMigrateCommand(program)
 
-// 1c World / Stage / Encounter / Region + content apply/export
+// World / Stage / Encounter / Region + map (1d) + content apply/export
 registerWorldContentCommands(program)
 
 program.parse()

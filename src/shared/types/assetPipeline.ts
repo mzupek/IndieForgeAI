@@ -771,8 +771,33 @@ export interface AssetState {
 }
 
 /**
- * World / Stage / Encounter / Region — schema v2 (1c).
+ * World / Stage / Encounter / Region — schema v2 (1c records, 1d map fields optional).
+ * Positions are 0..1 of the background image. Same shape in every game.
  */
+export interface WorldMapNode {
+  id: string
+  stageId: string
+  pos: [number, number]
+  label?: string
+  /** Secret until unlocked. Shown greyed in the editor unless hidden. */
+  hidden?: boolean
+}
+
+export interface WorldMapPath {
+  id: string
+  from: string
+  to: string
+  /** Drawing only. */
+  waypoints?: [number, number][]
+}
+
+export interface WorldMap {
+  backgroundAssetId: string
+  nodes: WorldMapNode[]
+  paths: WorldMapPath[]
+  startNodeId?: string
+}
+
 export interface World {
   id: string
   gameId: string
@@ -780,6 +805,8 @@ export interface World {
   name: string
   description?: string
   order: number
+  /** Optional overworld node map. Missing means no map (1c data stays valid). */
+  map?: WorldMap
   schemaVersion: number
   createdAt: string
   updatedAt: string
@@ -794,6 +821,15 @@ export interface Stage {
   order: number
   recommendedLevel?: number
   optional?: boolean
+  /** Stages in this world that must be cleared first. No cycles. */
+  unlockAfter?: string[]
+  /** Encounters in this stage. Default: every hotspot-linked encounter. */
+  clearedBy?: string[]
+  entryRegionId?: string
+  /** Defaults to the entry region's spawn. */
+  entryAnchor?: string
+  /** Node on this world's map. Defaults to the stage's own node. */
+  returnToNode?: string
   schemaVersion: number
   createdAt: string
   updatedAt: string
@@ -835,13 +871,17 @@ export interface RegionHotspot {
   anchor: string
   prompt: string
   triggerId?: string
+  /** Encounter in the same stage. Regions with no stage cannot set this. */
+  encounterId?: string
 }
 
 export interface RegionExit {
   id: string
   anchor: string
-  toRegionId: string
+  /** Either toRegionId or toWorldMap: true, never both. */
+  toRegionId?: string
   toAnchor?: string
+  toWorldMap?: boolean
 }
 
 export type RegionEdge = [string, string] | { from: string; to: string; requires?: string; hint?: string }

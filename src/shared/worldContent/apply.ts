@@ -9,8 +9,13 @@ import type {
   EncounterStar,
   Region,
   RegionEdge,
+  RegionExit,
+  RegionHotspot,
   Stage,
-  World
+  World,
+  WorldMap,
+  WorldMapNode,
+  WorldMapPath
 } from '../types/assetPipeline'
 import { requireGame } from './scope'
 import {
@@ -258,6 +263,100 @@ function actionOf<T>(existing: T | undefined, next: T): ApplyAction {
   return sameRecord(existing, next) ? 'unchanged' : 'update'
 }
 
+/** Keep fields this build does not know about when reconstructing a record. */
+export function overlayRecord<T extends object>(existing: T | undefined, known: T): T {
+  const next: Record<string, unknown> = existing ? { ...(existing as Record<string, unknown>) } : {}
+  for (const [key, value] of Object.entries(known as Record<string, unknown>)) {
+    if (value === undefined) continue
+    next[key] = value
+  }
+  return next as T
+}
+
+function resolveWorldMap(
+  raw: unknown,
+  gameId: string,
+  pipeline: AssetPipelineProject,
+  aliasMap: Record<string, string>,
+  path: string,
+  issues: ContentIssue[],
+  existing?: WorldMap
+): WorldMap | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    issues.push(errorIssue(path, 'map must be an object'))
+    return existing
+  }
+  const input = raw as Record<string, unknown>
+  const backgroundAssetId =
+    resolveBackgroundAsset(
+      input.backgroundAssetId ?? existing?.backgroundAssetId,
+      gameId,
+      pipeline,
+      aliasMap,
+      `${path}.backgroundAssetId`,
+      issues
+    ) || existing?.backgroundAssetId || ''
+
+  const rawNodes = Array.isArray(input.nodes) ? input.nodes : existing?.nodes || []
+  const nodes: WorldMapNode[] = rawNodes.map((n, i) => {
+    const node = (n || {}) as Record<string, unknown>
+    const stageId =
+      resolveTypedRef(node.stageId, 'stage', aliasMap, `${path}.nodes[${i}].stageId`, issues, true) ||
+      String(node.stageId || '')
+    const next: WorldMapNode = {
+      id: str(node.id),
+      stageId,
+      pos: Array.isArray(node.pos) ? (node.pos as [number, number]) : [0, 0]
+    }
+    const label = optionalStr(node.label)
+    if (label) next.label = label
+    if (node.hidden !== undefined) next.hidden = Boolean(node.hidden)
+    return next
+  })
+
+  const rawPaths = Array.isArray(input.paths) ? input.paths : existing?.paths || []
+  const paths: WorldMapPath[] = rawPaths.map((p) => {
+    const edge = (p || {}) as Record<string, unknown>
+    const next: WorldMapPath = {
+      id: str(edge.id),
+      from: str(edge.from),
+      to: str(edge.to)
+    }
+    if (Array.isArray(edge.waypoints)) next.waypoints = edge.waypoints as [number, number][]
+    return next
+  })
+
+  const map: WorldMap = {
+    backgroundAssetId,
+    nodes,
+    paths
+  }
+  const start = optionalStr(input.startNodeId) ?? existing?.startNodeId
+  if (start) map.startNodeId = start
+  return map
+}
+
+function resolveIdList(
+  raw: unknown,
+  kind: 'world' | 'stage' | 'encounter' | 'region',
+  aliasMap: Record<string, string>,
+  path: string,
+  issues: ContentIssue[]
+): string[] | undefined {
+  if (raw === undefined) return undefined
+  if (raw === null) return []
+  if (!Array.isArray(raw)) {
+    issues.push(errorIssue(path, `Expected an array of ${kind} ids`))
+    return []
+  }
+  const out: string[] = []
+  for (let i = 0; i < raw.length; i++) {
+    const id = resolveTypedRef(raw[i], kind, aliasMap, `${path}[${i}]`, issues, true)
+    if (id) out.push(id)
+  }
+  return out
+}
+
 /**
  * Mutates `pipeline`. Throws ContentApplyError if any error-level issues.
  */
@@ -309,7 +408,7 @@ export function applyContentBundle(
   for (const p of worldPlan) {
     const path = `worlds[${p.index}]`
     const existing = pipeline.worlds.find((w) => w.id === p.id)
-    const world: World = {
+    const known: World = {
       id: p.id,
       gameId,
       name: str(p.input.name) || existing?.name || '',
@@ -319,11 +418,24 @@ export function applyContentBundle(
       updatedAt: now
     }
     const key = p.key ?? existing?.key
-    if (key) world.key = key
+    if (key) known.key = key
     const description = optionalStr(p.input.description) ?? existing?.description
-    if (description) world.description = description
-    else if (p.input.description === null) delete world.description
-    issues.push(...validateWorld({ ...pipeline, worlds: [...pipeline.worlds.filter((w) => w.id !== p.id), world] }, world, path))
+    if (description) known.description = description
+    const world = overlayRecord(existing, known)
+    if (p.input.description === null) delete world.description
+    if (p.input.map === null) delete world.map
+    else if (p.input.map !== undefined) {
+      const mapped = resolveWorldMap(
+        p.input.map,
+        gameId,
+        pipeline,
+        aliasMap,
+        `${path}.map`,
+        issues,
+        existing?.map
+      )
+      if (mapped) world.map = mapped
+    }
     nextWorlds.push(world)
   }
 
@@ -345,7 +457,7 @@ export function applyContentBundle(
       issues,
       true
     )
-    const stage: Stage = {
+    const known: Stage = {
       id: p.id,
       gameId,
       worldId: worldId || existing?.worldId || '',
@@ -357,14 +469,40 @@ export function applyContentBundle(
       updatedAt: now
     }
     const key = p.key ?? existing?.key
-    if (key) stage.key = key
+    if (key) known.key = key
     const recLevel = num(p.input.recommendedLevel, existing?.recommendedLevel)
-    if (recLevel !== undefined) stage.recommendedLevel = recLevel
-    if (p.input.optional !== undefined) stage.optional = Boolean(p.input.optional)
-    else if (existing?.optional !== undefined) stage.optional = existing.optional
-    issues.push(
-      ...validateStage({ ...pipeline, stages: [...pipeline.stages.filter((s) => s.id !== p.id), stage] }, stage, path)
+    if (recLevel !== undefined) known.recommendedLevel = recLevel
+    if (p.input.optional !== undefined) known.optional = Boolean(p.input.optional)
+    else if (existing?.optional !== undefined) known.optional = existing.optional
+    const entryRegionId = resolveTypedRef(
+      p.input.entryRegionId !== undefined ? p.input.entryRegionId : existing?.entryRegionId,
+      'region',
+      aliasMap,
+      `${path}.entryRegionId`,
+      issues,
+      false
     )
+    if (entryRegionId) known.entryRegionId = entryRegionId
+    const entryAnchor = optionalStr(p.input.entryAnchor) ?? existing?.entryAnchor
+    if (entryAnchor) known.entryAnchor = entryAnchor
+    const returnToNode = optionalStr(p.input.returnToNode) ?? existing?.returnToNode
+    if (returnToNode) known.returnToNode = returnToNode
+    const unlockAfter =
+      p.input.unlockAfter !== undefined
+        ? resolveIdList(p.input.unlockAfter, 'stage', aliasMap, `${path}.unlockAfter`, issues)
+        : existing?.unlockAfter
+    if (unlockAfter) known.unlockAfter = unlockAfter
+    const clearedBy =
+      p.input.clearedBy !== undefined
+        ? resolveIdList(p.input.clearedBy, 'encounter', aliasMap, `${path}.clearedBy`, issues)
+        : existing?.clearedBy
+    if (clearedBy) known.clearedBy = clearedBy
+    const stage = overlayRecord(existing, known)
+    if (p.input.entryRegionId === null) delete stage.entryRegionId
+    if (p.input.entryAnchor === null) delete stage.entryAnchor
+    if (p.input.returnToNode === null) delete stage.returnToNode
+    if (p.input.unlockAfter === null) delete stage.unlockAfter
+    if (p.input.clearedBy === null) delete stage.clearedBy
     nextStages.push(stage)
   }
   for (const s of nextStages) {
@@ -394,7 +532,7 @@ export function applyContentBundle(
       issues
     ) || existing?.backgroundAssetId || ''
 
-    const region: Region = {
+    const known: Region = {
       id: p.id,
       gameId,
       name: str(p.input.name) || existing?.name || '',
@@ -409,11 +547,25 @@ export function applyContentBundle(
       updatedAt: now
     }
     const key = p.key ?? existing?.key
-    if (key) region.key = key
-    if (stageId) region.stageId = stageId
-    else if (existing?.stageId) region.stageId = existing.stageId
+    if (key) known.key = key
+    if (stageId) known.stageId = stageId
+    else if (existing?.stageId) known.stageId = existing.stageId
 
-    region.exits = (region.exits || []).map((ex, ei) => {
+    known.hotspots = (known.hotspots || []).map((hs: RegionHotspot, hi) => {
+      if (!hs?.encounterId) return hs
+      const encId = resolveTypedRef(
+        hs.encounterId,
+        'encounter',
+        aliasMap,
+        `${path}.hotspots[${hi}].encounterId`,
+        issues,
+        false
+      )
+      return encId ? { ...hs, encounterId: encId } : hs
+    })
+    known.exits = (known.exits || []).map((ex: RegionExit, ei) => {
+      if (ex.toWorldMap) return { ...ex }
+      if (!ex.toRegionId) return ex
       const to = resolveTypedRef(
         ex.toRegionId,
         'region',
@@ -424,16 +576,12 @@ export function applyContentBundle(
       )
       return { ...ex, toRegionId: to || ex.toRegionId }
     })
-    nextRegions.push(region)
+    nextRegions.push(overlayRecord(existing, known))
   }
   for (const r of nextRegions) {
     const idx = pipeline.regions.findIndex((x) => x.id === r.id)
     if (idx >= 0) pipeline.regions[idx] = r
     else pipeline.regions.push(r)
-  }
-  for (const r of nextRegions) {
-    const path = `regions[${regionPlan.find((p) => p.id === r.id)?.index ?? 0}]`
-    issues.push(...validateRegion(pipeline, r, path))
   }
 
   const nextEncounters: Encounter[] = []
@@ -472,7 +620,7 @@ export function applyContentBundle(
       else issues.push(...tmpIssues)
     }
 
-    const encounter: Encounter = {
+    const known: Encounter = {
       id: p.id,
       gameId,
       stageId: stageId || existing?.stageId || '',
@@ -487,23 +635,36 @@ export function applyContentBundle(
       updatedAt: now
     }
     const key = p.key ?? existing?.key
-    if (key) encounter.key = key
-    if (sceneId) encounter.sceneId = sceneId
-    if (tuningProfileId) encounter.tuningProfileId = tuningProfileId
+    if (key) known.key = key
+    if (sceneId) known.sceneId = sceneId
+    if (tuningProfileId) known.tuningProfileId = tuningProfileId
     const difficulty = optionalStr(p.input.difficultyProfileId) ?? existing?.difficultyProfileId
-    if (difficulty) encounter.difficultyProfileId = difficulty
+    if (difficulty) known.difficultyProfileId = difficulty
     const recLevel = num(p.input.recommendedLevel, existing?.recommendedLevel)
-    if (recLevel !== undefined) encounter.recommendedLevel = recLevel
-    nextEncounters.push(encounter)
+    if (recLevel !== undefined) known.recommendedLevel = recLevel
+    nextEncounters.push(overlayRecord(existing, known))
   }
   for (const e of nextEncounters) {
     const idx = pipeline.encounters.findIndex((x) => x.id === e.id)
     if (idx >= 0) pipeline.encounters[idx] = e
     else pipeline.encounters.push(e)
   }
-  for (const e of nextEncounters) {
-    const path = `encounters[${encounterPlan.find((p) => p.id === e.id)?.index ?? 0}]`
-    issues.push(...validateEncounter(pipeline, e, path))
+
+  for (const p of worldPlan) {
+    const rec = pipeline.worlds.find((w) => w.id === p.id)!
+    issues.push(...validateWorld(pipeline, rec, `worlds[${p.index}]`))
+  }
+  for (const p of stagePlan) {
+    const rec = pipeline.stages.find((s) => s.id === p.id)!
+    issues.push(...validateStage(pipeline, rec, `stages[${p.index}]`))
+  }
+  for (const p of regionPlan) {
+    const rec = pipeline.regions.find((r) => r.id === p.id)!
+    issues.push(...validateRegion(pipeline, rec, `regions[${p.index}]`))
+  }
+  for (const p of encounterPlan) {
+    const rec = pipeline.encounters.find((e) => e.id === p.id)!
+    issues.push(...validateEncounter(pipeline, rec, `encounters[${p.index}]`))
   }
 
   result.issues = issues

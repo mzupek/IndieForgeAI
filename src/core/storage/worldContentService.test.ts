@@ -10,6 +10,8 @@ import { tmpdir } from 'os'
 import { emptyGameSettings } from '../../shared/studio/schema'
 import { readStudio } from './studioStorage'
 import {
+  addWorldMapNode,
+  addWorldMapPath,
   applyContent,
   createEncounter,
   createRegion,
@@ -17,7 +19,11 @@ import {
   createWorld,
   exportContent,
   listWorlds,
-  removeWorld
+  removeWorld,
+  removeWorldMapNode,
+  setWorldMap,
+  updateWorld,
+  worldFlow
 } from './worldContentService'
 import { addEncounterModule } from './gameSettingsService'
 
@@ -104,6 +110,17 @@ function fixture() {
           gameId: 'game-a',
           key: 'bg-gate-approach',
           name: 'Gate approach',
+          category: 'background',
+          tags: [],
+          defaultStateId: null,
+          schemaVersion: 2,
+          createdAt: now,
+          updatedAt: now
+        },
+        {
+          id: 'bg-map',
+          gameId: 'game-a',
+          name: 'World 1 map',
           category: 'background',
           tags: [],
           defaultStateId: null,
@@ -344,6 +361,76 @@ await withDir(async (dir) => {
     },
     { dataDirOverride: dir }
   )
+})
+
+await withDir(async (dir) => {
+  const studioPath = join(dir, 'studio.json')
+  const world = await createWorld('game-a', { name: 'World 1', key: 'world-1' }, { dataDirOverride: dir })
+  const raw = JSON.parse(await readFile(studioPath, 'utf-8'))
+  const row = raw.assetPipeline.worlds.find((w: { id: string }) => w.id === world.record.id)
+  row._keepUnknown = true
+  await writeFile(studioPath, JSON.stringify(raw, null, 2) + '\n')
+
+  await updateWorld('game-a', '@world-1', { name: 'World 1 renamed' }, { dataDirOverride: dir })
+  const afterName = JSON.parse(await readFile(studioPath, 'utf-8'))
+  const kept = afterName.assetPipeline.worlds.find((w: { id: string }) => w.id === world.record.id)
+  assert.equal(kept._keepUnknown, true)
+  assert.equal(kept.name, 'World 1 renamed')
+
+  await addEncounterModule('game-a', { id: 'extra', label: 'Extra', typeIds: ['story'] }, { dataDirOverride: dir })
+  const afterSettings = JSON.parse(await readFile(studioPath, 'utf-8'))
+  const kept2 = afterSettings.assetPipeline.worlds.find((w: { id: string }) => w.id === world.record.id)
+  assert.equal(kept2._keepUnknown, true)
+
+  await applyContent(
+    'game-a',
+    { worlds: [{ key: 'world-1', name: 'World 1 renamed', order: 1 }] },
+    { dataDirOverride: dir }
+  )
+  const afterApply = JSON.parse(await readFile(studioPath, 'utf-8'))
+  const kept3 = afterApply.assetPipeline.worlds.find((w: { id: string }) => w.id === world.record.id)
+  assert.equal(kept3._keepUnknown, true)
+
+  const stage = await createStage(
+    'game-a',
+    { worldId: '@world-1', name: 'The Gate', key: 'stage-gate' },
+    { dataDirOverride: dir }
+  )
+  await setWorldMap('game-a', '@world-1', { backgroundAssetId: 'World 1 map' }, { dataDirOverride: dir })
+  const node = await addWorldMapNode(
+    'game-a',
+    '@world-1',
+    { stageId: '@stage-gate', pos: [0.18, 0.72], id: 'n-gate' },
+    { dataDirOverride: dir }
+  )
+  assert.equal(node.node.id, 'n-gate')
+  await assert.rejects(
+    () => removeWorldMapNode('game-a', '@world-1', 'n-gate', { dataDirOverride: dir }),
+    /start node/
+  )
+
+  await createStage('game-a', { worldId: '@world-1', name: 'Test', key: 'stage-test' }, { dataDirOverride: dir })
+  await addWorldMapNode(
+    'game-a',
+    '@world-1',
+    { stageId: '@stage-test', pos: [0.5, 0.5], id: 'n-test' },
+    { dataDirOverride: dir }
+  )
+  await addWorldMapPath(
+    'game-a',
+    '@world-1',
+    { from: 'n-gate', to: 'n-test', id: 'p-gt' },
+    { dataDirOverride: dir }
+  )
+
+  const flow = await worldFlow('game-a', '@world-1', dir)
+  assert.equal(flow.tree.children.length >= 1, true)
+  assert.ok(flow.issues.some((i) => i.message.includes('No entry region')))
+
+  const exported = await exportContent('game-a', join(dir, 'export-map'), { dataDirOverride: dir })
+  assert.ok(exported.content.worlds[0].map)
+  assert.equal(exported.content.worlds[0].map?.startNodeId, 'n-gate')
+  void stage
 })
 
 console.log('\n✓ worldContentService tests passed')

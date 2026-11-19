@@ -357,6 +357,22 @@ const api: IndieForgeAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.WORLD_UPDATE, projectId, gameId, id, patch),
     removeWorld: (projectId, gameId, id) =>
       ipcRenderer.invoke(IPC_CHANNELS.WORLD_REMOVE, projectId, gameId, id),
+    setWorldMap: (projectId, gameId, worldId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.WORLD_MAP_SET, projectId, gameId, worldId, input),
+    addMapNode: (projectId, gameId, worldId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.WORLD_MAP_NODE_ADD, projectId, gameId, worldId, input),
+    moveMapNode: (projectId, gameId, worldId, nodeId, pos) =>
+      ipcRenderer.invoke(IPC_CHANNELS.WORLD_MAP_NODE_MOVE, projectId, gameId, worldId, nodeId, pos),
+    updateMapNode: (projectId, gameId, worldId, nodeId, patch) =>
+      ipcRenderer.invoke(IPC_CHANNELS.WORLD_MAP_NODE_UPDATE, projectId, gameId, worldId, nodeId, patch),
+    removeMapNode: (projectId, gameId, worldId, nodeId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.WORLD_MAP_NODE_REMOVE, projectId, gameId, worldId, nodeId),
+    addMapPath: (projectId, gameId, worldId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.WORLD_MAP_PATH_ADD, projectId, gameId, worldId, input),
+    removeMapPath: (projectId, gameId, worldId, pathId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.WORLD_MAP_PATH_REMOVE, projectId, gameId, worldId, pathId),
+    setMapStart: (projectId, gameId, worldId, nodeId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.WORLD_MAP_START, projectId, gameId, worldId, nodeId),
     createStage: (projectId, gameId, input) =>
       ipcRenderer.invoke(IPC_CHANNELS.STAGE_CREATE, projectId, gameId, input),
     updateStage: (projectId, gameId, id, patch) =>

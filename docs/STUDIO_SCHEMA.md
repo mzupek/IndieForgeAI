@@ -71,7 +71,22 @@ The empty `worlds` / `stages` / `encounters` / `regions` arrays from 1a now hold
 
 Sample Gate Drone bundle (docs only, not app code): `docs/samples/gate-drone-content.json`.
 
-## Out of 1a / 1b / 1c
+## 1d (same schema v2 — no bump)
+
+Optional fields only. Missing means no map, no entry region, and no hotspot/exit links. 1c records stay valid. No migrate and no backup.
+
+- **World.map:** `backgroundAssetId` (background-based category in this game), `nodes[]` (unique ids; stage in this world; at most one node per stage; pos 0..1; optional `label`, `hidden`), `paths[]` (from/to real different nodes; no duplicate pair; two-way; optional waypoints in 0..1, drawing only), `startNodeId` (required once a node exists; real node; that stage cannot have `unlockAfter`).
+- **Stage:** `unlockAfter` (stages in this world, not itself, no cycles), `clearedBy` (encounters in this stage; default = every hotspot-linked encounter), `entryRegionId` / `entryAnchor` (region in this stage; anchor defaults to spawn), `returnToNode` (a node on this world's map; default = the stage's own node).
+- **Region hotspot.encounterId:** encounter in the same stage; a region with no stage cannot set it.
+- **Region exit:** either `toRegionId` or `toWorldMap: true`, never both.
+
+Removing a record is refused while something points at it (including a map node, an entry region, or a hotspot-linked encounter). Removing a node also removes its paths and is refused for the start node.
+
+`forge content export` includes these fields. **`contentSchemaVersion` stays 1** (every field is optional/additive; readers that ignore unknown keys keep working). Export **manifest v2 is unchanged**.
+
+Save paths keep fields they do not know about (in-place updates plus apply overlay), so later optional keys survive a name-only update or a bundle that omits them.
+
+## Out of 1a / 1b / 1c / 1d
 
 - Enemies and attack tables (step 2)
 - A4 portable export package

@@ -14,7 +14,10 @@ import type {
   RegionExit,
   RegionHotspot,
   Stage,
-  World
+  World,
+  WorldMap,
+  WorldMapNode,
+  WorldMapPath
 } from '../types/assetPipeline'
 import { isBackgroundCategoryKey } from '../gameSettings/assetCategories'
 import {
@@ -168,7 +171,185 @@ export function validateWorld(
   } catch (err) {
     issues.push(errorIssue(`${path}.key`, err instanceof Error ? err.message : String(err)))
   }
+  if (world.map) {
+    issues.push(...validateWorldMap(pipeline, world, `${path}.map`))
+  }
   return issues
+}
+
+export function assertPos01(pos: unknown, path: string, issues: ContentIssue[]): [number, number] | undefined {
+  if (!Array.isArray(pos) || pos.length !== 2) {
+    issues.push(errorIssue(path, `pos must be [x, y] with values in 0..1`))
+    return undefined
+  }
+  const x = Number(pos[0])
+  const y = Number(pos[1])
+  if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || x > 1 || y < 0 || y > 1) {
+    issues.push(errorIssue(path, `pos must be within 0..1, got [${pos[0]}, ${pos[1]}]`))
+    return undefined
+  }
+  return [x, y]
+}
+
+function pathPairKey(a: string, b: string): string {
+  return a < b ? `${a}|${b}` : `${b}|${a}`
+}
+
+export function validateWorldMap(
+  pipeline: AssetPipelineProject,
+  world: World,
+  path = 'world.map'
+): ContentIssue[] {
+  const issues: ContentIssue[] = []
+  const map = world.map
+  if (!map) return issues
+  const game = requireGame(pipeline, world.gameId)
+
+  const asset = (pipeline.visualAssets || []).find((a) => a.id === map.backgroundAssetId)
+  if (!asset) {
+    issues.push(
+      errorIssue(`${path}.backgroundAssetId`, `Visual asset '${map.backgroundAssetId}' was not found`)
+    )
+  } else if (
+    assertSameGame(asset.gameId, world.gameId, 'Visual asset', asset.id, `${path}.backgroundAssetId`, issues)
+  ) {
+    if (!isBackgroundCategoryKey(asset.category, game)) {
+      issues.push(
+        errorIssue(
+          `${path}.backgroundAssetId`,
+          `Visual asset '${asset.name}' category '${asset.category}' is not a background-based category`
+        )
+      )
+    }
+  }
+
+  const nodes: WorldMapNode[] = Array.isArray(map.nodes) ? map.nodes : []
+  const nodeIds = new Set<string>()
+  const stageToNode = new Map<string, string>()
+  for (let i = 0; i < nodes.length; i++) {
+    const node = nodes[i]
+    const p = `${path}.nodes[${i}]`
+    const id = String(node?.id || '').trim()
+    if (!id) issues.push(errorIssue(`${p}.id`, 'Map node id is required'))
+    else if (nodeIds.has(id)) issues.push(errorIssue(`${p}.id`, `Duplicate map node id '${id}'`))
+    else nodeIds.add(id)
+    assertPos01(node?.pos, `${p}.pos`, issues)
+    const stageId = String(node?.stageId || '').trim()
+    if (!stageId) {
+      issues.push(errorIssue(`${p}.stageId`, 'Map node stageId is required'))
+      continue
+    }
+    const stage = (pipeline.stages || []).find((s) => s.id === stageId)
+    if (!stage) {
+      issues.push(errorIssue(`${p}.stageId`, `Stage '${stageId}' was not found`))
+    } else if (assertSameGame(stage.gameId, world.gameId, 'Stage', stage.id, `${p}.stageId`, issues)) {
+      if (stage.worldId !== world.id) {
+        issues.push(
+          errorIssue(`${p}.stageId`, `Stage '${stage.name}' belongs to another world, not '${world.name}'`)
+        )
+      }
+      const prev = stageToNode.get(stage.id)
+      if (prev && prev !== id) {
+        issues.push(errorIssue(`${p}.stageId`, `Stage '${stage.name}' already has a map node ('${prev}')`))
+      } else if (id) {
+        stageToNode.set(stage.id, id)
+      }
+    }
+  }
+
+  if (nodes.length > 0) {
+    const start = String(map.startNodeId || '').trim()
+    if (!start) {
+      issues.push(errorIssue(`${path}.startNodeId`, 'startNodeId is required once the map has a node'))
+    } else if (!nodeIds.has(start)) {
+      issues.push(errorIssue(`${path}.startNodeId`, `startNodeId '${start}' is not a node on this map`))
+    } else {
+      const startNode = nodes.find((n) => n.id === start)
+      const startStage = (pipeline.stages || []).find((s) => s.id === startNode?.stageId)
+      if (startStage && Array.isArray(startStage.unlockAfter) && startStage.unlockAfter.length > 0) {
+        issues.push(
+          errorIssue(
+            `${path}.startNodeId`,
+            `Start node's stage '${startStage.name}' cannot have unlockAfter rules`
+          )
+        )
+      }
+    }
+  }
+
+  const paths: WorldMapPath[] = Array.isArray(map.paths) ? map.paths : []
+  const pathIds = new Set<string>()
+  const pairs = new Set<string>()
+  for (let i = 0; i < paths.length; i++) {
+    const edge = paths[i]
+    const p = `${path}.paths[${i}]`
+    const id = String(edge?.id || '').trim()
+    if (!id) issues.push(errorIssue(`${p}.id`, 'Map path id is required'))
+    else if (pathIds.has(id)) issues.push(errorIssue(`${p}.id`, `Duplicate map path id '${id}'`))
+    else pathIds.add(id)
+    const from = String(edge?.from || '').trim()
+    const to = String(edge?.to || '').trim()
+    if (!from || !nodeIds.has(from)) issues.push(errorIssue(`${p}.from`, `Unknown map node '${from}'`))
+    if (!to || !nodeIds.has(to)) issues.push(errorIssue(`${p}.to`, `Unknown map node '${to}'`))
+    if (from && to && from === to) {
+      issues.push(errorIssue(p, 'Path from and to must be different nodes'))
+    } else if (from && to) {
+      const pair = pathPairKey(from, to)
+      if (pairs.has(pair)) {
+        issues.push(errorIssue(p, `Duplicate path between '${from}' and '${to}' (paths are two-way)`))
+      } else {
+        pairs.add(pair)
+      }
+    }
+    const waypoints = edge?.waypoints
+    if (waypoints !== undefined) {
+      if (!Array.isArray(waypoints)) {
+        issues.push(errorIssue(`${p}.waypoints`, 'waypoints must be an array of [x, y]'))
+      } else {
+        for (let w = 0; w < waypoints.length; w++) {
+          assertPos01(waypoints[w], `${p}.waypoints[${w}]`, issues)
+        }
+      }
+    }
+  }
+
+  return issues
+}
+
+export function findUnlockCycle(stages: Stage[]): string[] | null {
+  const ids = new Set(stages.map((s) => s.id))
+  const graph = new Map<string, string[]>()
+  for (const s of stages) {
+    graph.set(
+      s.id,
+      (s.unlockAfter || []).filter((id) => typeof id === 'string' && ids.has(id))
+    )
+  }
+  const visiting = new Set<string>()
+  const visited = new Set<string>()
+  const stack: string[] = []
+  const dfs = (id: string): string[] | null => {
+    if (visiting.has(id)) {
+      const i = stack.indexOf(id)
+      return stack.slice(i).concat(id)
+    }
+    if (visited.has(id)) return null
+    visiting.add(id)
+    stack.push(id)
+    for (const next of graph.get(id) || []) {
+      const cycle = dfs(next)
+      if (cycle) return cycle
+    }
+    stack.pop()
+    visiting.delete(id)
+    visited.add(id)
+    return null
+  }
+  for (const s of stages) {
+    const cycle = dfs(s.id)
+    if (cycle) return cycle
+  }
+  return null
 }
 
 export function validateStage(
@@ -204,6 +385,125 @@ export function validateStage(
   } catch (err) {
     issues.push(errorIssue(`${path}.key`, err instanceof Error ? err.message : String(err)))
   }
+
+  const worldStages = world ? stagesOf(pipeline, stage.gameId, world.id) : []
+  const unlockAfter = Array.isArray(stage.unlockAfter) ? stage.unlockAfter : undefined
+  if (unlockAfter) {
+    const seen = new Set<string>()
+    for (let i = 0; i < unlockAfter.length; i++) {
+      const id = String(unlockAfter[i] || '').trim()
+      const p = `${path}.unlockAfter[${i}]`
+      if (!id) {
+        issues.push(errorIssue(p, 'unlockAfter id is required'))
+        continue
+      }
+      if (id === stage.id) {
+        issues.push(errorIssue(p, 'A stage cannot unlock after itself'))
+        continue
+      }
+      if (seen.has(id)) {
+        issues.push(errorIssue(p, `Duplicate unlockAfter '${id}'`))
+        continue
+      }
+      seen.add(id)
+      const other = (pipeline.stages || []).find((s) => s.id === id)
+      if (!other) {
+        issues.push(errorIssue(p, `Stage '${id}' was not found`))
+      } else if (assertSameGame(other.gameId, stage.gameId, 'Stage', other.id, p, issues)) {
+        if (!world || other.worldId !== world.id) {
+          issues.push(errorIssue(p, `unlockAfter stages must belong to the same world`))
+        }
+      }
+    }
+    if (world) {
+      const merged = worldStages.map((s) => (s.id === stage.id ? stage : s))
+      const cycle = findUnlockCycle(merged)
+      if (cycle) {
+        issues.push(
+          errorIssue(
+            `${path}.unlockAfter`,
+            `unlockAfter cycle refused: ${cycle.join(' → ')}`
+          )
+        )
+      }
+    }
+  }
+
+  if (world?.map?.startNodeId) {
+    const startNode = (world.map.nodes || []).find((n) => n.id === world.map!.startNodeId)
+    if (startNode?.stageId === stage.id && unlockAfter && unlockAfter.length > 0) {
+      issues.push(
+        errorIssue(`${path}.unlockAfter`, `The start node's stage cannot have unlockAfter rules`)
+      )
+    }
+  }
+
+  const clearedBy = Array.isArray(stage.clearedBy) ? stage.clearedBy : undefined
+  if (clearedBy) {
+    const seen = new Set<string>()
+    for (let i = 0; i < clearedBy.length; i++) {
+      const id = String(clearedBy[i] || '').trim()
+      const p = `${path}.clearedBy[${i}]`
+      if (!id) {
+        issues.push(errorIssue(p, 'clearedBy id is required'))
+        continue
+      }
+      if (seen.has(id)) {
+        issues.push(errorIssue(p, `Duplicate clearedBy '${id}'`))
+        continue
+      }
+      seen.add(id)
+      const enc = (pipeline.encounters || []).find((e) => e.id === id)
+      if (!enc) {
+        issues.push(errorIssue(p, `Encounter '${id}' was not found`))
+      } else if (assertSameGame(enc.gameId, stage.gameId, 'Encounter', enc.id, p, issues)) {
+        if (enc.stageId !== stage.id) {
+          issues.push(errorIssue(p, `clearedBy encounters must belong to this stage`))
+        }
+      }
+    }
+  }
+
+  if (stage.entryRegionId) {
+    const region = (pipeline.regions || []).find((r) => r.id === stage.entryRegionId)
+    if (!region) {
+      issues.push(errorIssue(`${path}.entryRegionId`, `Region '${stage.entryRegionId}' was not found`))
+    } else if (
+      assertSameGame(region.gameId, stage.gameId, 'Region', region.id, `${path}.entryRegionId`, issues)
+    ) {
+      if (region.stageId !== stage.id) {
+        issues.push(
+          errorIssue(`${path}.entryRegionId`, `Entry region '${region.name}' belongs to another stage`)
+        )
+      } else if (stage.entryAnchor) {
+        const anchors = new Set((region.anchors || []).map((a) => a.id))
+        if (!anchors.has(stage.entryAnchor)) {
+          issues.push(
+            errorIssue(
+              `${path}.entryAnchor`,
+              `Anchor '${stage.entryAnchor}' does not exist on region '${region.name}'`
+            )
+          )
+        }
+      }
+    }
+  } else if (stage.entryAnchor) {
+    issues.push(errorIssue(`${path}.entryAnchor`, 'entryAnchor requires entryRegionId'))
+  }
+
+  if (stage.returnToNode) {
+    const map: WorldMap | undefined = world?.map
+    const node = (map?.nodes || []).find((n) => n.id === stage.returnToNode)
+    if (!node) {
+      issues.push(
+        errorIssue(
+          `${path}.returnToNode`,
+          `returnToNode '${stage.returnToNode}' is not a node on this world's map`
+        )
+      )
+    }
+  }
+
   return issues
 }
 
@@ -404,17 +704,7 @@ function parseEdge(
 }
 
 function assertAnchorPos(pos: unknown, path: string, issues: ContentIssue[]): [number, number] | undefined {
-  if (!Array.isArray(pos) || pos.length !== 2) {
-    issues.push(errorIssue(path, 'Anchor pos must be [x, y] with values in 0..1'))
-    return undefined
-  }
-  const x = Number(pos[0])
-  const y = Number(pos[1])
-  if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || x > 1 || y < 0 || y > 1) {
-    issues.push(errorIssue(path, `Anchor pos must be within 0..1, got [${pos[0]}, ${pos[1]}]`))
-    return undefined
-  }
-  return [x, y]
+  return assertPos01(pos, path, issues)
 }
 
 export function validateRegion(
@@ -502,6 +792,26 @@ export function validateRegion(
     if (!String(hs?.prompt || '').trim()) issues.push(errorIssue(`${p}.prompt`, 'Hotspot prompt is required'))
     hasAnchor(String(hs?.anchor || ''), `${p}.anchor`)
     // triggerId stored, not checked until step 3
+    if (hs?.encounterId) {
+      if (!region.stageId) {
+        issues.push(
+          errorIssue(`${p}.encounterId`, 'A region with no stage cannot link an encounter')
+        )
+      } else {
+        const enc = (pipeline.encounters || []).find((e) => e.id === hs.encounterId)
+        if (!enc) {
+          issues.push(errorIssue(`${p}.encounterId`, `Encounter '${hs.encounterId}' was not found`))
+        } else if (
+          assertSameGame(enc.gameId, region.gameId, 'Encounter', enc.id, `${p}.encounterId`, issues)
+        ) {
+          if (enc.stageId !== region.stageId) {
+            issues.push(
+              errorIssue(`${p}.encounterId`, `Encounter '${enc.name}' belongs to another stage`)
+            )
+          }
+        }
+      }
+    }
   }
 
   const exits: RegionExit[] = Array.isArray(region.exits) ? region.exits : []
@@ -514,16 +824,26 @@ export function validateRegion(
     else if (exitIds.has(id)) issues.push(errorIssue(`${p}.id`, `Duplicate exit id '${id}'`))
     else exitIds.add(id)
     hasAnchor(String(ex?.anchor || ''), `${p}.anchor`)
-    const target = (pipeline.regions || []).find((r) => r.id === ex.toRegionId)
-    if (!target) {
-      issues.push(errorIssue(`${p}.toRegionId`, `Region '${ex.toRegionId}' was not found`))
-    } else if (assertSameGame(target.gameId, region.gameId, 'Region', target.id, `${p}.toRegionId`, issues)) {
-      if (ex.toAnchor) {
-        const targetAnchors = new Set((target.anchors || []).map((a) => a.id))
-        if (!targetAnchors.has(ex.toAnchor)) {
-          issues.push(
-            errorIssue(`${p}.toAnchor`, `Anchor '${ex.toAnchor}' does not exist on region '${target.name}'`)
-          )
+    const toWorldMap = Boolean(ex.toWorldMap)
+    const toRegionId = String(ex.toRegionId || '').trim()
+    if (toWorldMap && toRegionId) {
+      issues.push(errorIssue(p, 'An exit has either toRegionId or toWorldMap: true, never both'))
+    } else if (toWorldMap) {
+      // return to the world map
+    } else if (!toRegionId) {
+      issues.push(errorIssue(`${p}.toRegionId`, 'Exit needs toRegionId or toWorldMap: true'))
+    } else {
+      const target = (pipeline.regions || []).find((r) => r.id === toRegionId)
+      if (!target) {
+        issues.push(errorIssue(`${p}.toRegionId`, `Region '${toRegionId}' was not found`))
+      } else if (assertSameGame(target.gameId, region.gameId, 'Region', target.id, `${p}.toRegionId`, issues)) {
+        if (ex.toAnchor) {
+          const targetAnchors = new Set((target.anchors || []).map((a) => a.id))
+          if (!targetAnchors.has(ex.toAnchor)) {
+            issues.push(
+              errorIssue(`${p}.toAnchor`, `Anchor '${ex.toAnchor}' does not exist on region '${target.name}'`)
+            )
+          }
         }
       }
     }
@@ -552,11 +872,37 @@ export function collectStageUsers(pipeline: AssetPipelineProject, stageId: strin
   for (const r of pipeline.regions || []) {
     if (r.stageId === stageId) users.push({ id: r.id, name: r.name, kind: 'region' })
   }
+  for (const w of pipeline.worlds || []) {
+    for (const node of w.map?.nodes || []) {
+      if (node.stageId === stageId) {
+        users.push({ id: w.id, name: `${w.name} map node ${node.id}`, kind: 'world' })
+      }
+    }
+  }
+  for (const s of pipeline.stages || []) {
+    if (s.id === stageId) continue
+    if ((s.unlockAfter || []).includes(stageId)) {
+      users.push({ id: s.id, name: `${s.name} unlockAfter`, kind: 'stage' })
+    }
+  }
   return users
 }
 
-export function collectEncounterUsers(_pipeline: AssetPipelineProject, _encounterId: string): NamedUser[] {
-  return []
+export function collectEncounterUsers(pipeline: AssetPipelineProject, encounterId: string): NamedUser[] {
+  const users: NamedUser[] = []
+  for (const r of pipeline.regions || []) {
+    for (const hs of r.hotspots || []) {
+      if (hs.encounterId === encounterId) {
+        users.push({ id: r.id, name: `${r.name} hotspot ${hs.id}`, kind: 'region' })
+      }
+    }
+  }
+  for (const s of pipeline.stages || []) {
+    if ((s.clearedBy || []).includes(encounterId)) {
+      users.push({ id: s.id, name: `${s.name} clearedBy`, kind: 'stage' })
+    }
+  }
+  return users
 }
 
 export function collectRegionUsers(pipeline: AssetPipelineProject, regionId: string): NamedUser[] {
@@ -569,7 +915,18 @@ export function collectRegionUsers(pipeline: AssetPipelineProject, regionId: str
       }
     }
   }
+  for (const s of pipeline.stages || []) {
+    if (s.entryRegionId === regionId) {
+      users.push({ id: s.id, name: `${s.name} entry region`, kind: 'stage' })
+    }
+  }
   return users
 }
+
+export function mapNodeForStage(world: World | undefined, stageId: string): WorldMapNode | undefined {
+  return (world?.map?.nodes || []).find((n) => n.stageId === stageId)
+}
+
+export { pathPairKey }
 
 export { resolveSceneId, resolveTuningProfileId }

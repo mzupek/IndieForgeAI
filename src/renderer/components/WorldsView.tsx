@@ -3,7 +3,7 @@
  * Refreshes the project store after every create/update/remove.
  */
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useOutletContext } from 'react-router-dom'
 import { useProjectStore } from '../state/indieForgeStore'
 import { useLocalFilePreview } from '../hooks/useLocalFilePreview'
@@ -18,8 +18,10 @@ import type {
   Stage,
   World
 } from '@shared/types/assetPipeline'
+import { WorldMapPanel } from './WorldMapPanel'
+import { WorldFlowPreview, type FlowOpenTarget } from './WorldFlowPreview'
 
-type TabId = 'structure' | 'encounters' | 'regions'
+type TabId = 'structure' | 'encounters' | 'regions' | 'map' | 'flow'
 
 export function WorldsView() {
   const { projectId, gameId } = useOutletContext<{ projectId: string; gameId: string }>()
@@ -27,6 +29,11 @@ export function WorldsView() {
   const [tab, setTab] = useState<TabId>('structure')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [selectedWorldId, setSelectedWorldId] = useState<string | null>(null)
+  const [focusStageId, setFocusStageId] = useState<string | null>(null)
+  const [focusEncounterId, setFocusEncounterId] = useState<string | null>(null)
+  const [focusRegionId, setFocusRegionId] = useState<string | null>(null)
+  const [focusNodeId, setFocusNodeId] = useState<string | null>(null)
 
   const pipeline = activeProject?.assetPipeline as AssetPipelineProject | undefined
   const game = pipeline?.games.find((g) => g.id === gameId)
@@ -62,9 +69,20 @@ export function WorldsView() {
 
   const tabs: { id: TabId; label: string }[] = [
     { id: 'structure', label: 'Worlds & Stages' },
+    { id: 'map', label: 'World Map' },
     { id: 'encounters', label: 'Encounters' },
-    { id: 'regions', label: 'Regions' }
+    { id: 'regions', label: 'Regions' },
+    { id: 'flow', label: 'Flow' }
   ]
+
+  function openFlowTarget(target: FlowOpenTarget) {
+    setTab(target.tab)
+    if (target.worldId) setSelectedWorldId(target.worldId)
+    if (target.stageId) setFocusStageId(target.stageId)
+    if (target.encounterId) setFocusEncounterId(target.encounterId)
+    if (target.regionId) setFocusRegionId(target.regionId)
+    if (target.nodeId) setFocusNodeId(target.nodeId)
+  }
 
   return (
     <div>
@@ -72,7 +90,7 @@ export function WorldsView() {
         <div>
           <h2>Worlds</h2>
           <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>
-            {game.name} • worlds, stages, encounters, regions
+            {game.name} • Game &gt; World &gt; Stage &gt; Region &gt; Encounter
           </p>
         </div>
       </div>
@@ -119,7 +137,27 @@ export function WorldsView() {
           gameId={gameId}
           worlds={worlds}
           stages={stages}
+          regions={regions}
+          encounters={encounters}
           busy={busy}
+          selectedWorldId={selectedWorldId || worlds[0]?.id || null}
+          focusStageId={focusStageId}
+          onSelectWorld={setSelectedWorldId}
+          refreshAfter={refreshAfter}
+        />
+      )}
+      {tab === 'map' && (
+        <WorldMapPanel
+          projectId={projectId}
+          gameId={gameId}
+          pipeline={pipeline}
+          worlds={worlds}
+          stages={stages}
+          backgrounds={backgrounds.map((a) => ({ id: a.id, name: a.name }))}
+          busy={busy}
+          selectedWorldId={selectedWorldId || worlds[0]?.id || null}
+          onSelectWorld={setSelectedWorldId}
+          focusNodeId={focusNodeId}
           refreshAfter={refreshAfter}
         />
       )}
@@ -134,6 +172,7 @@ export function WorldsView() {
           scenes={scenes.map((s) => ({ id: s.id, name: s.name }))}
           tuning={tuning.map((t) => ({ id: t.id, name: t.name }))}
           busy={busy}
+          focusId={focusEncounterId}
           refreshAfter={refreshAfter}
         />
       )}
@@ -144,9 +183,20 @@ export function WorldsView() {
           pipeline={pipeline}
           stages={stages}
           regions={regions}
+          encounters={encounters}
           backgrounds={backgrounds.map((a) => ({ id: a.id, name: a.name }))}
           busy={busy}
+          focusId={focusRegionId}
           refreshAfter={refreshAfter}
+        />
+      )}
+      {tab === 'flow' && (
+        <WorldFlowPreview
+          pipeline={pipeline}
+          worlds={worlds}
+          selectedWorldId={selectedWorldId || worlds[0]?.id || null}
+          onSelectWorld={setSelectedWorldId}
+          onOpen={openFlowTarget}
         />
       )}
     </div>
@@ -158,17 +208,26 @@ function WorldStagePanel({
   gameId,
   worlds,
   stages,
+  regions,
+  encounters,
   busy,
+  selectedWorldId,
+  focusStageId,
+  onSelectWorld,
   refreshAfter
 }: {
   projectId: string
   gameId: string
   worlds: World[]
   stages: Stage[]
+  regions: Region[]
+  encounters: Encounter[]
   busy: boolean
+  selectedWorldId: string | null
+  focusStageId: string | null
+  onSelectWorld: (id: string) => void
   refreshAfter: (m: () => Promise<any>) => Promise<void>
 }) {
-  const [selectedWorldId, setSelectedWorldId] = useState<string | null>(worlds[0]?.id || null)
   const [wName, setWName] = useState('')
   const [wKey, setWKey] = useState('')
   const [wDesc, setWDesc] = useState('')
@@ -178,9 +237,37 @@ function WorldStagePanel({
   const [sOrder, setSOrder] = useState('1')
   const [sLevel, setSLevel] = useState('')
   const [sOptional, setSOptional] = useState(false)
+  const [selectedStageId, setSelectedStageId] = useState<string | null>(focusStageId)
+  const [entryRegionId, setEntryRegionId] = useState('')
+  const [entryAnchor, setEntryAnchor] = useState('')
+  const [returnToNode, setReturnToNode] = useState('')
+  const [clearedBy, setClearedBy] = useState<string[]>([])
 
   const selectedWorld = worlds.find((w) => w.id === selectedWorldId) || null
   const worldStages = stages.filter((s) => s.worldId === selectedWorldId)
+  const selectedStage = worldStages.find((s) => s.id === selectedStageId) || null
+  const stageRegions = regions.filter((r) => r.stageId === selectedStage?.id)
+  const stageEncounters = encounters.filter((e) => e.stageId === selectedStage?.id)
+  const mapNodes = selectedWorld?.map?.nodes || []
+
+  function loadStage(s: Stage) {
+    setSelectedStageId(s.id)
+    setSName(s.name)
+    setSKey(s.key || '')
+    setSOrder(String(s.order))
+    setSLevel(s.recommendedLevel !== undefined ? String(s.recommendedLevel) : '')
+    setSOptional(Boolean(s.optional))
+    setEntryRegionId(s.entryRegionId || '')
+    setEntryAnchor(s.entryAnchor || '')
+    setReturnToNode(s.returnToNode || '')
+    setClearedBy(s.clearedBy || [])
+  }
+
+  useEffect(() => {
+    if (!focusStageId) return
+    const s = stages.find((st) => st.id === focusStageId)
+    if (s) loadStage(s)
+  }, [focusStageId])
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
@@ -199,7 +286,7 @@ function WorldStagePanel({
                 gap: '0.5rem'
               }}
               onClick={() => {
-                setSelectedWorldId(w.id)
+                onSelectWorld(w.id)
                 setWName(w.name)
                 setWKey(w.key || '')
                 setWDesc(w.description || '')
@@ -266,7 +353,7 @@ function WorldStagePanel({
               className="ghost"
               disabled={busy}
               onClick={() => {
-                setSelectedWorldId(null)
+                onSelectWorld('')
                 setWName('')
                 setWKey('')
                 setWDesc('')
@@ -286,7 +373,17 @@ function WorldStagePanel({
           <>
             <ul style={{ listStyle: 'none', padding: 0 }}>
               {worldStages.map((s) => (
-                <li key={s.id} style={{ padding: '0.35rem 0', display: 'flex', justifyContent: 'space-between' }}>
+                <li
+                  key={s.id}
+                  style={{
+                    padding: '0.35rem 0',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    cursor: 'pointer',
+                    background: s.id === selectedStageId ? 'var(--bg-secondary)' : 'transparent'
+                  }}
+                  onClick={() => loadStage(s)}
+                >
                   <span>
                     {s.order}. {s.name}
                     {s.key ? <code style={{ marginLeft: '0.5rem' }}>@{s.key}</code> : null}
@@ -344,6 +441,87 @@ function WorldStagePanel({
                 Add stage
               </button>
             </form>
+            {selectedStage && (
+              <form
+                style={{ display: 'grid', gap: '0.4rem', marginTop: '1rem' }}
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  void refreshAfter(() =>
+                    window.indieForge.worldContent.updateStage(projectId, gameId, selectedStage.id, {
+                      name: sName.trim() || selectedStage.name,
+                      key: sKey.trim() || undefined,
+                      order: Number(sOrder) || selectedStage.order,
+                      recommendedLevel: sLevel ? Number(sLevel) : undefined,
+                      optional: sOptional,
+                      entryRegionId: entryRegionId || null,
+                      entryAnchor: entryAnchor || null,
+                      returnToNode: returnToNode || null,
+                      clearedBy
+                    })
+                  )
+                }}
+              >
+                <h4>Stage entry / clear</h4>
+                <label>
+                  Entry region
+                  <select value={entryRegionId} onChange={(e) => setEntryRegionId(e.target.value)} disabled={busy}>
+                    <option value="">(none)</option>
+                    {stageRegions.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Entry anchor
+                  <select value={entryAnchor} onChange={(e) => setEntryAnchor(e.target.value)} disabled={busy}>
+                    <option value="">(spawn default)</option>
+                    {(stageRegions.find((r) => r.id === entryRegionId)?.anchors || []).map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.id}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Return to node
+                  <select value={returnToNode} onChange={(e) => setReturnToNode(e.target.value)} disabled={busy}>
+                    <option value="">(this stage&apos;s node)</option>
+                    {mapNodes.map((n) => (
+                      <option key={n.id} value={n.id}>
+                        {n.label || n.id}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <fieldset style={{ border: '1px solid var(--border)', padding: '0.5rem' }}>
+                  <legend>Cleared by</legend>
+                  {stageEncounters.length === 0 && (
+                    <p style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>
+                      Default: every hotspot-linked encounter
+                    </p>
+                  )}
+                  {stageEncounters.map((enc) => (
+                    <label key={enc.id} style={{ display: 'flex', gap: '0.35rem', fontSize: '0.85rem' }}>
+                      <input
+                        type="checkbox"
+                        checked={clearedBy.includes(enc.id)}
+                        onChange={(e) => {
+                          setClearedBy(
+                            e.target.checked ? [...clearedBy, enc.id] : clearedBy.filter((id) => id !== enc.id)
+                          )
+                        }}
+                      />
+                      {enc.name}
+                    </label>
+                  ))}
+                </fieldset>
+                <button type="submit" disabled={busy}>
+                  Save stage
+                </button>
+              </form>
+            )}
           </>
         )}
       </div>
@@ -361,6 +539,7 @@ function EncounterPanel({
   scenes,
   tuning,
   busy,
+  focusId,
   refreshAfter
 }: {
   projectId: string
@@ -372,6 +551,7 @@ function EncounterPanel({
   scenes: { id: string; name: string }[]
   tuning: { id: string; name: string }[]
   busy: boolean
+  focusId: string | null
   refreshAfter: (m: () => Promise<any>) => Promise<void>
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -404,6 +584,12 @@ function EncounterPanel({
     setDifficulty(enc.difficultyProfileId || '')
     setStars([enc.stars[0] || null, enc.stars[1] || null, enc.stars[2] || null])
   }
+
+  useEffect(() => {
+    if (!focusId) return
+    const enc = encounters.find((e) => e.id === focusId)
+    if (enc) load(enc)
+  }, [focusId])
 
   function starPayload(): EncounterStar[] {
     return stars
@@ -594,8 +780,10 @@ function RegionPanel({
   pipeline,
   stages,
   regions,
+  encounters,
   backgrounds,
   busy,
+  focusId,
   refreshAfter
 }: {
   projectId: string
@@ -603,8 +791,10 @@ function RegionPanel({
   pipeline: AssetPipelineProject
   stages: Stage[]
   regions: Region[]
+  encounters: Encounter[]
   backgrounds: { id: string; name: string }[]
   busy: boolean
+  focusId: string | null
   refreshAfter: (m: () => Promise<any>) => Promise<void>
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -647,6 +837,12 @@ function RegionPanel({
     setExitsJson(JSON.stringify(region.exits, null, 2))
     setJsonError(null)
   }
+
+  useEffect(() => {
+    if (!focusId) return
+    const region = regions.find((r) => r.id === focusId)
+    if (region) load(region)
+  }, [focusId])
 
   function parseFields() {
     try {
@@ -763,10 +959,17 @@ function RegionPanel({
             Hotspots JSON
             <textarea rows={4} value={hotspotsJson} onChange={(e) => setHotspotsJson(e.target.value)} disabled={busy} />
           </label>
+          <HotspotEncounterPickers
+            hotspotsJson={hotspotsJson}
+            setHotspotsJson={setHotspotsJson}
+            encounters={encounters.filter((e) => !stageId || e.stageId === stageId)}
+            busy={busy}
+          />
           <label>
             Exits JSON
             <textarea rows={4} value={exitsJson} onChange={(e) => setExitsJson(e.target.value)} disabled={busy} />
           </label>
+          <ExitWorldMapPickers exitsJson={exitsJson} setExitsJson={setExitsJson} busy={busy} />
           <div style={{ display: 'flex', gap: '0.5rem' }}>
             <button type="submit" disabled={busy || !name.trim() || !backgroundAssetId || !spawn.trim()}>
               {selected ? 'Save' : 'Create'}
@@ -830,6 +1033,99 @@ function RegionPanel({
           })}
         </div>
       </div>
+    </div>
+  )
+}
+
+function HotspotEncounterPickers({
+  hotspotsJson,
+  setHotspotsJson,
+  encounters,
+  busy
+}: {
+  hotspotsJson: string
+  setHotspotsJson: (v: string) => void
+  encounters: Encounter[]
+  busy: boolean
+}) {
+  let hotspots: Array<{ id?: string; encounterId?: string }> = []
+  try {
+    const parsed = JSON.parse(hotspotsJson || '[]')
+    if (Array.isArray(parsed)) hotspots = parsed
+  } catch {
+    return null
+  }
+  if (hotspots.length === 0) return null
+  return (
+    <div>
+      <div style={{ fontSize: '0.85rem', color: 'var(--muted)' }}>Hotspot encounters (this stage)</div>
+      {hotspots.map((hs, i) => (
+        <label key={hs.id || i} style={{ display: 'grid', gap: '0.2rem', fontSize: '0.85rem' }}>
+          {hs.id || `hotspot ${i + 1}`}
+          <select
+            value={hs.encounterId || ''}
+            disabled={busy}
+            onChange={(e) => {
+              const next = hotspots.map((h, idx) =>
+                idx === i ? { ...h, encounterId: e.target.value || undefined } : h
+              )
+              setHotspotsJson(JSON.stringify(next, null, 2))
+            }}
+          >
+            <option value="">(none)</option>
+            {encounters.map((enc) => (
+              <option key={enc.id} value={enc.id}>
+                {enc.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      ))}
+    </div>
+  )
+}
+
+function ExitWorldMapPickers({
+  exitsJson,
+  setExitsJson,
+  busy
+}: {
+  exitsJson: string
+  setExitsJson: (v: string) => void
+  busy: boolean
+}) {
+  let exits: Array<{ id?: string; toWorldMap?: boolean; toRegionId?: string }> = []
+  try {
+    const parsed = JSON.parse(exitsJson || '[]')
+    if (Array.isArray(parsed)) exits = parsed
+  } catch {
+    return null
+  }
+  if (exits.length === 0) return null
+  return (
+    <div>
+      {exits.map((ex, i) => (
+        <label key={ex.id || i} style={{ display: 'flex', gap: '0.35rem', fontSize: '0.85rem' }}>
+          <input
+            type="checkbox"
+            checked={Boolean(ex.toWorldMap)}
+            disabled={busy}
+            onChange={(e) => {
+              const next = exits.map((item, idx) => {
+                if (idx !== i) return item
+                if (e.target.checked) {
+                  const { toRegionId: _drop, ...rest } = item
+                  return { ...rest, toWorldMap: true }
+                }
+                const { toWorldMap: _drop, ...rest } = item
+                return rest
+              })
+              setExitsJson(JSON.stringify(next, null, 2))
+            }}
+          />
+          {ex.id || `exit ${i + 1}`}: back to world map
+        </label>
+      ))}
     </div>
   )
 }

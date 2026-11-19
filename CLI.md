@@ -137,6 +137,8 @@ World, Stage, Encounter, and Region records are per-game. Types and modules come
 
 ```bash
 forge world     list|show|create|update|remove|apply --game <id> --json
+forge world     map show|set|node add|node move|node remove|path add|path remove --game <id> --json
+forge world     flow --game <id> <world> --json
 forge stage     list|show|create|update|remove|apply --game <id> --json [--world <id|@key>]
 forge encounter list|show|create|update|remove|apply --game <id> --json [--stage <id|@key>]
 forge region    list|show|create|update|remove|apply --game <id> --json [--stage <id|@key>]
@@ -152,7 +154,9 @@ forge game settings update --game <id> --file settings.json [--dry-run] --json
 
 Removal is refused while other records reference the target. Removing an encounter type or module is refused while an encounter uses it.
 
-`content export` is read-only (`contentSchemaVersion: 1` sidecar). Export manifest v2 is unchanged.
+`content export` is read-only (`contentSchemaVersion: 1` sidecar). Export manifest v2 is unchanged. 1d map / entry / hotspot / exit fields are included; the sidecar version stays 1.
+
+World map writes take `--dry-run`. `show` / `update` / `remove` / map / flow accept a uuid or `@key` for the world. Removing a node also drops its paths and is refused for the start node. Cutting a path that strands a node is allowed; `forge world flow` flags it.
 
 Example bundle: `docs/samples/gate-drone-content.json`.
 

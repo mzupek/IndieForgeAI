@@ -12,7 +12,10 @@ import type {
   Region,
   RegionEdge,
   Stage,
-  World
+  World,
+  WorldMap,
+  WorldMapNode,
+  WorldMapPath
 } from '@shared/types/assetPipeline'
 import { getAssetPipeline, readStudio, updateAssetPipeline } from './studioStorage'
 import { requireGame } from '@shared/worldContent/scope'
@@ -35,6 +38,7 @@ import {
   validateWorld,
   worldsOf
 } from '@shared/worldContent/validate'
+import { buildWorldFlow, type WorldFlow } from '@shared/worldContent/flow'
 import { errorMessages, type ContentIssue } from '@shared/worldContent/issues'
 import {
   applyContentBundleIsolated,
@@ -187,6 +191,11 @@ export interface StageInput {
   order?: number
   recommendedLevel?: number
   optional?: boolean
+  unlockAfter?: string[] | null
+  clearedBy?: string[] | null
+  entryRegionId?: string | null
+  entryAnchor?: string | null
+  returnToNode?: string | null
 }
 
 export interface EncounterInput {
@@ -217,6 +226,19 @@ export interface RegionInput {
 
 function newId(): string {
   return globalThis.crypto.randomUUID()
+}
+
+function resolveRegionLinkRefs(pipeline: AssetPipelineProject, gameId: string, region: Region): void {
+  region.hotspots = (region.hotspots || []).map((hs) => {
+    if (!hs.encounterId) return hs
+    const enc = requireIdOrKey(pipeline.encounters || [], hs.encounterId, gameId, 'Encounter')
+    return { ...hs, encounterId: enc.id }
+  })
+  region.exits = (region.exits || []).map((ex) => {
+    if (ex.toWorldMap || !ex.toRegionId) return ex
+    const target = requireIdOrKey(pipeline.regions || [], ex.toRegionId, gameId, 'Region')
+    return { ...ex, toRegionId: target.id }
+  })
 }
 
 export async function createWorld(
@@ -316,6 +338,7 @@ export async function createStage(
     if (key) stage.key = key
     if (input.recommendedLevel !== undefined) stage.recommendedLevel = input.recommendedLevel
     if (input.optional !== undefined) stage.optional = input.optional
+    applyStageLinkPatch(pipeline, gameId, stage, input)
     throwIssues(validateStage(pipeline, stage))
     if (options?.dryRun) return stage
     pipeline.stages.push(stage)
@@ -346,11 +369,58 @@ export async function updateStage(
       if (key) stage.key = key
       else delete stage.key
     }
+    applyStageLinkPatch(pipeline, gameId, stage, patch)
     stage.updatedAt = nowIso()
     throwIssues(validateStage(pipeline, stage))
     return stage
   })
   return { record: value, warnings: [] }
+}
+
+function resolveStageIdList(
+  pipeline: AssetPipelineProject,
+  gameId: string,
+  raw: string[] | undefined | null,
+  kind: 'stage' | 'encounter'
+): string[] | undefined | null {
+  if (raw === undefined) return undefined
+  if (raw === null) return null
+  const records = kind === 'stage' ? pipeline.stages || [] : pipeline.encounters || []
+  const label = kind === 'stage' ? 'Stage' : 'Encounter'
+  return raw.map((id) => requireIdOrKey(records, id, gameId, label).id)
+}
+
+function applyStageLinkPatch(
+  pipeline: AssetPipelineProject,
+  gameId: string,
+  stage: Stage,
+  patch: Partial<StageInput>
+): void {
+  if (patch.unlockAfter !== undefined) {
+    const ids = resolveStageIdList(pipeline, gameId, patch.unlockAfter, 'stage')
+    if (ids === null || (Array.isArray(ids) && ids.length === 0)) delete stage.unlockAfter
+    else if (ids) stage.unlockAfter = ids
+  }
+  if (patch.clearedBy !== undefined) {
+    const ids = resolveStageIdList(pipeline, gameId, patch.clearedBy, 'encounter')
+    if (ids === null || (Array.isArray(ids) && ids.length === 0)) delete stage.clearedBy
+    else if (ids) stage.clearedBy = ids
+  }
+  if (patch.entryRegionId !== undefined) {
+    if (!patch.entryRegionId) delete stage.entryRegionId
+    else {
+      const region = requireIdOrKey(pipeline.regions || [], patch.entryRegionId, gameId, 'Region')
+      stage.entryRegionId = region.id
+    }
+  }
+  if (patch.entryAnchor !== undefined) {
+    if (!patch.entryAnchor) delete stage.entryAnchor
+    else stage.entryAnchor = String(patch.entryAnchor).trim()
+  }
+  if (patch.returnToNode !== undefined) {
+    if (!patch.returnToNode) delete stage.returnToNode
+    else stage.returnToNode = String(patch.returnToNode).trim()
+  }
 }
 
 export async function removeStage(
@@ -522,6 +592,7 @@ export async function createRegion(
       const stage = requireIdOrKey(pipeline.stages || [], input.stageId, gameId, 'Stage')
       region.stageId = stage.id
     }
+    resolveRegionLinkRefs(pipeline, gameId, region)
     const issues = validateRegion(pipeline, region)
     throwIssues(issues)
     warnings = warningsOf(issues)
@@ -564,6 +635,7 @@ export async function updateRegion(
       if (key) region.key = key
       else delete region.key
     }
+    resolveRegionLinkRefs(pipeline, gameId, region)
     region.updatedAt = nowIso()
     const issues = validateRegion(pipeline, region)
     throwIssues(issues)
@@ -588,6 +660,269 @@ export async function removeRegion(
     return region.id
   })
   return { removed: value }
+}
+
+export function parsePosPair(raw: string, label = 'pos'): [number, number] {
+  const parts = String(raw || '')
+    .split(',')
+    .map((s) => Number(s.trim()))
+  if (parts.length !== 2 || parts.some((n) => !Number.isFinite(n))) {
+    throw new Error(`${label} must be x,y with values in 0..1, got '${raw}'`)
+  }
+  return [parts[0], parts[1]]
+}
+
+export function parseWaypointList(raw: string | undefined): [number, number][] | undefined {
+  if (raw === undefined || raw === '') return undefined
+  return String(raw)
+    .split(';')
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => parsePosPair(part, 'waypoint'))
+}
+
+function requireMap(world: World): WorldMap {
+  if (!world.map) {
+    throw new Error(`World '${world.key || world.id}' has no map. Set a background first.`)
+  }
+  return world.map
+}
+
+function touchWorld(world: World): void {
+  world.updatedAt = nowIso()
+}
+
+export async function showWorldMap(
+  gameId: string,
+  worldIdOrKey: string,
+  dataDirOverride?: string
+): Promise<{ world: World; map: WorldMap | null }> {
+  const pipeline = await getAssetPipeline(dataDirOverride)
+  requireGame(pipeline, gameId)
+  const world = requireIdOrKey(pipeline.worlds || [], worldIdOrKey, gameId, 'World')
+  return { world, map: world.map || null }
+}
+
+export async function setWorldMap(
+  gameId: string,
+  worldIdOrKey: string,
+  input: { backgroundAssetId: string; startNodeId?: string },
+  options?: WriteOptions
+): Promise<{ record: World; warnings: ContentIssue[] }> {
+  let warnings: ContentIssue[] = []
+  const { value } = await mutatePipeline(options, (pipeline) => {
+    requireGame(pipeline, gameId)
+    const world = requireIdOrKey(pipeline.worlds || [], worldIdOrKey, gameId, 'World')
+    const backgroundAssetId = resolveBackgroundAssetId(pipeline, gameId, input.backgroundAssetId)
+    const prev = world.map
+    world.map = {
+      backgroundAssetId,
+      nodes: prev?.nodes ? [...prev.nodes] : [],
+      paths: prev?.paths ? [...prev.paths] : [],
+      startNodeId: input.startNodeId || prev?.startNodeId
+    }
+    if (!world.map.startNodeId) delete world.map.startNodeId
+    if (input.startNodeId) world.map.startNodeId = input.startNodeId
+    touchWorld(world)
+    const issues = validateWorld(pipeline, world)
+    throwIssues(issues)
+    warnings = warningsOf(issues)
+    return world
+  })
+  return { record: value, warnings }
+}
+
+export async function addWorldMapNode(
+  gameId: string,
+  worldIdOrKey: string,
+  input: { stageId: string; pos: [number, number]; id?: string; label?: string; hidden?: boolean },
+  options?: WriteOptions
+): Promise<{ record: World; node: WorldMapNode; warnings: ContentIssue[] }> {
+  let warnings: ContentIssue[] = []
+  const { value } = await mutatePipeline(options, (pipeline) => {
+    requireGame(pipeline, gameId)
+    const world = requireIdOrKey(pipeline.worlds || [], worldIdOrKey, gameId, 'World')
+    const map = requireMap(world)
+    const stage = requireIdOrKey(pipeline.stages || [], input.stageId, gameId, 'Stage')
+    const id = String(input.id || `n-${stage.key || stage.id.slice(0, 8)}`).trim()
+    const node: WorldMapNode = { id, stageId: stage.id, pos: input.pos }
+    if (input.label) node.label = input.label
+    if (input.hidden) node.hidden = true
+    map.nodes = [...(map.nodes || []), node]
+    if (!map.startNodeId) map.startNodeId = id
+    touchWorld(world)
+    const issues = validateWorld(pipeline, world)
+    throwIssues(issues)
+    warnings = warningsOf(issues)
+    return { world, node }
+  })
+  return { record: value.world, node: value.node, warnings }
+}
+
+export async function moveWorldMapNode(
+  gameId: string,
+  worldIdOrKey: string,
+  nodeId: string,
+  pos: [number, number],
+  options?: WriteOptions
+): Promise<{ record: World; node: WorldMapNode; warnings: ContentIssue[] }> {
+  let warnings: ContentIssue[] = []
+  const { value } = await mutatePipeline(options, (pipeline) => {
+    requireGame(pipeline, gameId)
+    const world = requireIdOrKey(pipeline.worlds || [], worldIdOrKey, gameId, 'World')
+    const map = requireMap(world)
+    const node = (map.nodes || []).find((n) => n.id === nodeId)
+    if (!node) throw new Error(`Map node '${nodeId}' was not found`)
+    node.pos = pos
+    touchWorld(world)
+    const issues = validateWorld(pipeline, world)
+    throwIssues(issues)
+    warnings = warningsOf(issues)
+    return { world, node }
+  })
+  return { record: value.world, node: value.node, warnings }
+}
+
+export async function updateWorldMapNode(
+  gameId: string,
+  worldIdOrKey: string,
+  nodeId: string,
+  patch: { label?: string | null; hidden?: boolean; pos?: [number, number] },
+  options?: WriteOptions
+): Promise<{ record: World; node: WorldMapNode; warnings: ContentIssue[] }> {
+  let warnings: ContentIssue[] = []
+  const { value } = await mutatePipeline(options, (pipeline) => {
+    requireGame(pipeline, gameId)
+    const world = requireIdOrKey(pipeline.worlds || [], worldIdOrKey, gameId, 'World')
+    const map = requireMap(world)
+    const node = (map.nodes || []).find((n) => n.id === nodeId)
+    if (!node) throw new Error(`Map node '${nodeId}' was not found`)
+    if (patch.pos) node.pos = patch.pos
+    if (patch.label !== undefined) {
+      if (patch.label) node.label = patch.label
+      else delete node.label
+    }
+    if (patch.hidden !== undefined) {
+      if (patch.hidden) node.hidden = true
+      else delete node.hidden
+    }
+    touchWorld(world)
+    const issues = validateWorld(pipeline, world)
+    throwIssues(issues)
+    warnings = warningsOf(issues)
+    return { world, node }
+  })
+  return { record: value.world, node: value.node, warnings }
+}
+
+export async function removeWorldMapNode(
+  gameId: string,
+  worldIdOrKey: string,
+  nodeId: string,
+  options?: WriteOptions
+): Promise<{ record: World; removed: string; warnings: ContentIssue[] }> {
+  let warnings: ContentIssue[] = []
+  const { value } = await mutatePipeline(options, (pipeline) => {
+    requireGame(pipeline, gameId)
+    const world = requireIdOrKey(pipeline.worlds || [], worldIdOrKey, gameId, 'World')
+    const map = requireMap(world)
+    const node = (map.nodes || []).find((n) => n.id === nodeId)
+    if (!node) throw new Error(`Map node '${nodeId}' was not found`)
+    if (map.startNodeId === nodeId) {
+      throw new Error(`Cannot remove the start node '${nodeId}'`)
+    }
+    map.nodes = (map.nodes || []).filter((n) => n.id !== nodeId)
+    map.paths = (map.paths || []).filter((p) => p.from !== nodeId && p.to !== nodeId)
+    for (const stage of stagesOf(pipeline, gameId, world.id)) {
+      if (stage.returnToNode === nodeId) delete stage.returnToNode
+    }
+    touchWorld(world)
+    const issues = validateWorld(pipeline, world)
+    throwIssues(issues)
+    warnings = warningsOf(issues)
+    return { world, removed: nodeId }
+  })
+  return { record: value.world, removed: value.removed, warnings }
+}
+
+export async function addWorldMapPath(
+  gameId: string,
+  worldIdOrKey: string,
+  input: { from: string; to: string; waypoints?: [number, number][]; id?: string },
+  options?: WriteOptions
+): Promise<{ record: World; path: WorldMapPath; warnings: ContentIssue[] }> {
+  let warnings: ContentIssue[] = []
+  const { value } = await mutatePipeline(options, (pipeline) => {
+    requireGame(pipeline, gameId)
+    const world = requireIdOrKey(pipeline.worlds || [], worldIdOrKey, gameId, 'World')
+    const map = requireMap(world)
+    const id = String(input.id || `p-${input.from}-${input.to}`).trim()
+    const edge: WorldMapPath = { id, from: input.from, to: input.to }
+    if (input.waypoints && input.waypoints.length) edge.waypoints = input.waypoints
+    map.paths = [...(map.paths || []), edge]
+    touchWorld(world)
+    const issues = validateWorld(pipeline, world)
+    throwIssues(issues)
+    warnings = warningsOf(issues)
+    return { world, path: edge }
+  })
+  return { record: value.world, path: value.path, warnings }
+}
+
+export async function removeWorldMapPath(
+  gameId: string,
+  worldIdOrKey: string,
+  pathId: string,
+  options?: WriteOptions
+): Promise<{ record: World; removed: string; warnings: ContentIssue[] }> {
+  let warnings: ContentIssue[] = []
+  const { value } = await mutatePipeline(options, (pipeline) => {
+    requireGame(pipeline, gameId)
+    const world = requireIdOrKey(pipeline.worlds || [], worldIdOrKey, gameId, 'World')
+    const map = requireMap(world)
+    const edge = (map.paths || []).find((p) => p.id === pathId)
+    if (!edge) throw new Error(`Map path '${pathId}' was not found`)
+    map.paths = (map.paths || []).filter((p) => p.id !== pathId)
+    touchWorld(world)
+    const issues = validateWorld(pipeline, world)
+    throwIssues(issues)
+    warnings = warningsOf(issues)
+    return { world, removed: pathId }
+  })
+  return { record: value.world, removed: value.removed, warnings }
+}
+
+export async function setWorldMapStart(
+  gameId: string,
+  worldIdOrKey: string,
+  nodeId: string,
+  options?: WriteOptions
+): Promise<{ record: World; warnings: ContentIssue[] }> {
+  let warnings: ContentIssue[] = []
+  const { value } = await mutatePipeline(options, (pipeline) => {
+    requireGame(pipeline, gameId)
+    const world = requireIdOrKey(pipeline.worlds || [], worldIdOrKey, gameId, 'World')
+    const map = requireMap(world)
+    map.startNodeId = nodeId
+    touchWorld(world)
+    const issues = validateWorld(pipeline, world)
+    throwIssues(issues)
+    warnings = warningsOf(issues)
+    return world
+  })
+  return { record: value, warnings }
+}
+
+export async function worldFlow(
+  gameId: string,
+  worldIdOrKey: string,
+  dataDirOverride?: string
+): Promise<WorldFlow> {
+  const studio = await readStudio(dataDirOverride)
+  const pipeline = studio.assetPipeline
+  requireGame(pipeline, gameId)
+  const world = requireIdOrKey(pipeline.worlds || [], worldIdOrKey, gameId, 'World')
+  return buildWorldFlow(pipeline, world)
 }
 
 function parseBundle(raw: unknown): ContentBundle {

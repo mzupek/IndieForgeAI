@@ -188,18 +188,26 @@ import {
   updateEncounterModule
 } from '../../core/storage/gameSettingsService'
 import {
+  addWorldMapNode,
+  addWorldMapPath,
   createEncounter,
   createRegion,
   createStage,
   createWorld,
+  moveWorldMapNode,
   removeEncounter,
   removeRegion,
   removeStage,
   removeWorld,
+  removeWorldMapNode,
+  removeWorldMapPath,
+  setWorldMap,
+  setWorldMapStart,
   updateEncounter,
   updateRegion,
   updateStage,
-  updateWorld
+  updateWorld,
+  updateWorldMapNode
 } from '../../core/storage/worldContentService'
 import {
   applyDesignerAssetPrompt,
@@ -1599,6 +1607,62 @@ export function registerIpcHandlers(): void {
     await removeWorld(gameId, id)
     return await loadProject(projectId)
   })
+  ipcMain.handle(
+    IPC_CHANNELS.WORLD_MAP_SET,
+    async (_e, projectId: string, gameId: string, worldId: string, input: any) => {
+      await setWorldMap(gameId, worldId, input)
+      return await loadProject(projectId)
+    }
+  )
+  ipcMain.handle(
+    IPC_CHANNELS.WORLD_MAP_NODE_ADD,
+    async (_e, projectId: string, gameId: string, worldId: string, input: any) => {
+      await addWorldMapNode(gameId, worldId, input)
+      return await loadProject(projectId)
+    }
+  )
+  ipcMain.handle(
+    IPC_CHANNELS.WORLD_MAP_NODE_MOVE,
+    async (_e, projectId: string, gameId: string, worldId: string, nodeId: string, pos: [number, number]) => {
+      await moveWorldMapNode(gameId, worldId, nodeId, pos)
+      return await loadProject(projectId)
+    }
+  )
+  ipcMain.handle(
+    IPC_CHANNELS.WORLD_MAP_NODE_UPDATE,
+    async (_e, projectId: string, gameId: string, worldId: string, nodeId: string, patch: any) => {
+      await updateWorldMapNode(gameId, worldId, nodeId, patch)
+      return await loadProject(projectId)
+    }
+  )
+  ipcMain.handle(
+    IPC_CHANNELS.WORLD_MAP_NODE_REMOVE,
+    async (_e, projectId: string, gameId: string, worldId: string, nodeId: string) => {
+      await removeWorldMapNode(gameId, worldId, nodeId)
+      return await loadProject(projectId)
+    }
+  )
+  ipcMain.handle(
+    IPC_CHANNELS.WORLD_MAP_PATH_ADD,
+    async (_e, projectId: string, gameId: string, worldId: string, input: any) => {
+      await addWorldMapPath(gameId, worldId, input)
+      return await loadProject(projectId)
+    }
+  )
+  ipcMain.handle(
+    IPC_CHANNELS.WORLD_MAP_PATH_REMOVE,
+    async (_e, projectId: string, gameId: string, worldId: string, pathId: string) => {
+      await removeWorldMapPath(gameId, worldId, pathId)
+      return await loadProject(projectId)
+    }
+  )
+  ipcMain.handle(
+    IPC_CHANNELS.WORLD_MAP_START,
+    async (_e, projectId: string, gameId: string, worldId: string, nodeId: string) => {
+      await setWorldMapStart(gameId, worldId, nodeId)
+      return await loadProject(projectId)
+    }
+  )
   ipcMain.handle(IPC_CHANNELS.STAGE_CREATE, async (_e, projectId: string, gameId: string, input: any) => {
     await createStage(gameId, input)
     return await loadProject(projectId)

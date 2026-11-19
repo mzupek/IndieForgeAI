@@ -8,6 +8,7 @@ import type { AssetPipelineProject, Encounter, Region, Stage, World } from '../t
 import { applyContentBundleIsolated } from './apply'
 import { ContentApplyError } from './issues'
 import { validateEncounter, validateRegion, validateStage, validateWorld } from './validate'
+import { buildWorldFlow } from './flow'
 
 const now = '2026-01-01T00:00:00.000Z'
 
@@ -101,6 +102,17 @@ function pipeline(): AssetPipelineProject {
         gameId: 'game-a',
         name: 'Logo',
         category: 'logo',
+        tags: [],
+        defaultStateId: null,
+        schemaVersion: 2,
+        createdAt: now,
+        updatedAt: now
+      },
+      {
+        id: 'bg-map',
+        gameId: 'game-a',
+        name: 'World 1 map',
+        category: 'background',
         tags: [],
         defaultStateId: null,
         schemaVersion: 2,
@@ -381,6 +393,166 @@ function region(over: Partial<Region> = {}): Region {
   assert.equal(enc.sceneId, 'scene-a')
   assert.equal(enc.tuningProfileId, 'tune-a')
   assert.equal(enc.difficultyProfileId, 'stored-not-checked')
+}
+
+{
+  const p = pipeline()
+  p.worlds![0].map = {
+    backgroundAssetId: 'bg-map',
+    nodes: [{ id: 'n-gate', stageId: 'stage-a', pos: [0.18, 0.72] }],
+    paths: [],
+    startNodeId: 'n-gate'
+  }
+  const ok = validateWorld(p, p.worlds![0])
+  assert.equal(ok.filter((i) => i.level === 'error').length, 0)
+}
+
+{
+  const p = pipeline()
+  p.worlds![0].map = {
+    backgroundAssetId: 'bg-map',
+    nodes: [
+      { id: 'n-gate', stageId: 'stage-a', pos: [0.18, 0.72] },
+      { id: 'n-dup', stageId: 'stage-a', pos: [0.4, 0.4] }
+    ],
+    paths: [],
+    startNodeId: 'n-gate'
+  }
+  const issues = validateWorld(p, p.worlds![0])
+  assert.ok(issues.some((i) => i.message.includes('already has a map node')))
+}
+
+{
+  const p = pipeline()
+  p.stages!.push(
+    stage({ id: 'stage-b', key: 'stage-b', name: 'B', worldId: 'world-a', unlockAfter: ['stage-a'] })
+  )
+  p.stages![0].unlockAfter = ['stage-b']
+  const issues = validateStage(p, p.stages![0])
+  assert.ok(issues.some((i) => i.message.includes('cycle')))
+}
+
+{
+  const p = pipeline()
+  p.worlds![0].map = {
+    backgroundAssetId: 'bg-map',
+    nodes: [{ id: 'n-gate', stageId: 'stage-a', pos: [0.18, 0.72] }],
+    paths: [],
+    startNodeId: 'n-gate'
+  }
+  p.stages![0].unlockAfter = ['missing']
+  const issues = validateStage(p, p.stages![0])
+  assert.ok(issues.some((i) => i.message.includes('start node')))
+}
+
+{
+  const issues = validateRegion(
+    pipeline(),
+    region({
+      hotspots: [{ id: 'hs-gate', anchor: 'a-gate', prompt: 'Hack', encounterId: 'nope' }]
+    })
+  )
+  assert.ok(issues.some((i) => i.message.includes('was not found')))
+}
+
+{
+  const issues = validateRegion(
+    pipeline(),
+    region({
+      exits: [{ id: 'x-both', anchor: 'a-start', toRegionId: 'r1', toWorldMap: true }]
+    })
+  )
+  assert.ok(issues.some((i) => i.message.includes('never both')))
+}
+
+{
+  const p = pipeline()
+  p.encounters = [encounter({ id: 'e-gate', key: 'enc-gate', name: 'Boss' })]
+  p.regions = [
+    region({
+      id: 'r-entry',
+      key: 'region-gate-approach',
+      hotspots: [{ id: 'hs-gate', anchor: 'a-gate', prompt: 'Hack', encounterId: 'e-gate' }],
+      exits: [{ id: 'x-map', anchor: 'a-start', toWorldMap: true }]
+    })
+  ]
+  p.stages![0].entryRegionId = 'r-entry'
+  p.stages![0].entryAnchor = 'a-start'
+  p.stages![0].clearedBy = ['e-gate']
+  p.worlds![0].map = {
+    backgroundAssetId: 'bg-map',
+    nodes: [{ id: 'n-gate', stageId: 'stage-a', pos: [0.18, 0.72] }],
+    paths: [],
+    startNodeId: 'n-gate'
+  }
+  const flow = buildWorldFlow(p, p.worlds![0])
+  assert.equal(flow.issues.filter((i) => i.level === 'error').length, 0)
+  const labels = JSON.stringify(flow.tree)
+  assert.ok(labels.includes('The Gate'))
+  assert.ok(labels.includes('Hack') || labels.includes('Boss'))
+}
+
+{
+  const { pipeline: next } = applyContentBundleIsolated(pipeline(), 'game-a', {
+    worlds: [
+      {
+        key: 'world-1',
+        name: 'World 1',
+        order: 1,
+        map: {
+          backgroundAssetId: 'World 1 map',
+          nodes: [{ id: 'n-gate', stageId: '@stage-gate', pos: [0.18, 0.72] }],
+          paths: [],
+          startNodeId: 'n-gate'
+        }
+      }
+    ],
+    stages: [
+      {
+        key: 'stage-gate',
+        worldId: '@world-1',
+        name: 'The Gate',
+        order: 1,
+        entryRegionId: '@region-gate-approach',
+        entryAnchor: 'a-start',
+        clearedBy: ['@enc-boss']
+      }
+    ],
+    regions: [
+      {
+        key: 'region-gate-approach',
+        stageId: '@stage-gate',
+        name: 'Gate approach',
+        backgroundAssetId: 'Alley',
+        anchors: [
+          { id: 'a-start', pos: [0.12, 0.78] },
+          { id: 'a-gate', pos: [0.8, 0.7] }
+        ],
+        edges: [['a-start', 'a-gate']],
+        spawn: 'a-start',
+        hotspots: [{ id: 'hs-gate', anchor: 'a-gate', prompt: 'Hack', encounterId: '@enc-boss' }],
+        exits: [{ id: 'x-map', anchor: 'a-start', toWorldMap: true }]
+      }
+    ],
+    encounters: [
+      {
+        key: 'enc-boss',
+        stageId: '@stage-gate',
+        name: 'Boss',
+        typeId: 'battle',
+        moduleId: 'pad'
+      }
+    ]
+  })
+  const w = next.worlds!.find((x) => x.key === 'world-1')!
+  assert.equal(w.map?.startNodeId, 'n-gate')
+  assert.equal(w.map?.nodes[0].stageId, 'stage-a')
+  const st = next.stages!.find((s) => s.key === 'stage-gate')!
+  const region = next.regions!.find((r) => r.key === 'region-gate-approach')!
+  const enc = next.encounters!.find((e) => e.key === 'enc-boss')!
+  assert.equal(st.entryRegionId, region.id)
+  assert.equal(region.hotspots[0].encounterId, enc.id)
+  assert.equal(region.exits[0].toWorldMap, true)
 }
 
 console.log('\n✓ worldContent validate tests passed')
