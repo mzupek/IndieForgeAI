@@ -18,6 +18,8 @@ echo "Unit (tsx, isolated tmpdir, no Electron)"
 echo "----------------------------------------"
 npx tsx src/shared/attackTables/validate.test.ts
 echo ""
+npx tsx src/shared/attackTables/formSave.test.ts
+echo ""
 npx tsx src/shared/attackTables/simulate.test.ts
 echo ""
 npx tsx --tsconfig tsconfig.node.json src/core/storage/attackTableService.test.ts

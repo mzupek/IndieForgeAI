@@ -8,7 +8,8 @@ import { useOutletContext } from 'react-router-dom'
 import { useProjectStore } from '../state/indieForgeStore'
 import { useLocalFilePreview } from '../hooks/useLocalFilePreview'
 import { effectivePoseSlots } from '@shared/gameSettings/poseSlots'
-import { BATTLE_TYPE_ID, buildEnemyChecklist, FALLBACK_BATTLE_POSE_SLOT } from '@shared/enemies/validate'
+import { BATTLE_TYPE_ID, buildEnemyChecklist, FALLBACK_BATTLE_POSE_SLOT, validateEnemy } from '@shared/enemies/validate'
+import { formErrorFromIssues, plainErrorMessage } from '@shared/studio/formErrors'
 import { AttackTablesPanel } from './AttackTablesPanel'
 import type {
   AssetPipelineProject,
@@ -97,7 +98,7 @@ export function EnemiesView() {
       if (updated) setActiveProject(updated)
       return updated
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(plainErrorMessage(err))
       return null
     } finally {
       setBusy(false)
@@ -121,6 +122,7 @@ export function EnemiesView() {
   const winKinds = selectedModule?.winConditions || []
 
   function hideForm() {
+    setError(null)
     setFormMode('idle')
     setSelectedId(null)
   }
@@ -150,6 +152,7 @@ export function EnemiesView() {
   }
 
   function beginNew() {
+    setError(null)
     setFormMode('new')
     setSelectedId(null)
     setName('')
@@ -166,6 +169,8 @@ export function EnemiesView() {
   }
 
   function selectRow(enemy: Enemy) {
+    if (formMode === 'edit' && selectedId === enemy.id) return
+    setError(null)
     setFormMode('edit')
     setSelectedId(enemy.id)
     fill(enemy)
@@ -274,6 +279,8 @@ export function EnemiesView() {
           pipeline={pipeline}
           game={game}
           busy={busy}
+          error={error}
+          onError={setError}
           refreshAfter={refreshAfter}
         />
       )}
@@ -348,6 +355,12 @@ export function EnemiesView() {
               onSubmit={(e) => {
                 e.preventDefault()
                 if (!name.trim() || !characterId || !moduleId || !winKind) return
+                const issues = validateEnemy(pipeline, draftEnemy)
+                const message = formErrorFromIssues(issues)
+                if (message) {
+                  setError(message)
+                  return
+                }
                 void refreshAfter(async () => {
                   const body = payload()
                   if (selected) {
@@ -367,6 +380,21 @@ export function EnemiesView() {
               style={{ display: 'grid', gap: '0.5rem', alignContent: 'start' }}
             >
               <h4 style={{ margin: 0 }}>{selected ? 'Edit enemy' : 'New enemy'}</h4>
+              {error && (
+                <div
+                  style={{
+                    padding: '0.6rem 0.75rem',
+                    background: 'var(--error-bg, #3a1a1a)',
+                    border: '1px solid var(--error)',
+                    borderRadius: 4,
+                    color: 'var(--error)',
+                    whiteSpace: 'pre-wrap',
+                    fontSize: '0.85rem'
+                  }}
+                >
+                  {error}
+                </div>
+              )}
               <label>
                 Name
                 <input value={name} onChange={(e) => setName(e.target.value)} disabled={busy} />

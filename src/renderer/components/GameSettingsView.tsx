@@ -8,6 +8,12 @@ import { useOutletContext } from 'react-router-dom'
 import { useProjectStore } from '../state/indieForgeStore'
 import { CORE_POSE_SLOTS } from '@shared/gameSettings/poseSlots'
 import { CORE_ASSET_CATEGORIES } from '@shared/gameSettings/assetCategories'
+import {
+  assertWinConditionKey,
+  normalizeAttackKind,
+  normalizeCounterKind
+} from '@shared/gameSettings/encounterSettings'
+import { attemptSync, plainErrorMessage } from '@shared/studio/formErrors'
 import type { GameAssetCategoryDef, GameEncounterModule, GamePoseSlotDef } from '@shared/types/assetPipeline'
 
 export function GameSettingsView() {
@@ -51,9 +57,11 @@ export function GameSettingsView() {
     setError(null)
     try {
       const updated = await mutator()
-      setActiveProject(updated)
+      if (updated) setActiveProject(updated)
+      return updated ?? null
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(plainErrorMessage(err))
+      return null
     } finally {
       setBusy(false)
     }
@@ -459,8 +467,9 @@ function ModuleWinConditions({
   draft: string
   busy: boolean
   onDraftChange: (value: string) => void
-  onSave: (winConditions: string[]) => void
+  onSave: (winConditions: string[]) => Promise<unknown>
 }) {
+  const [error, setError] = useState<string | null>(null)
   const kinds = module.winConditions || []
   return (
     <div style={{ display: 'grid', gap: '0.35rem' }}>
@@ -485,7 +494,10 @@ function ModuleWinConditions({
               className="ghost"
               disabled={busy}
               style={{ color: 'var(--error)', padding: 0 }}
-              onClick={() => onSave(kinds.filter((k) => k !== kind))}
+              onClick={() => {
+                setError(null)
+                void onSave(kinds.filter((k) => k !== kind))
+              }}
               aria-label={`Remove ${kind}`}
             >
               ×
@@ -499,6 +511,14 @@ function ModuleWinConditions({
           e.preventDefault()
           const added = splitKinds(draft)
           if (!added.length) return
+          setError(null)
+          for (const kind of added) {
+            const preview = attemptSync(() => assertWinConditionKey(kind))
+            if (!preview.ok) {
+              setError(preview.message)
+              return
+            }
+          }
           const seen = new Set(kinds.map((k) => k.toLowerCase()))
           const next = [...kinds]
           for (const kind of added) {
@@ -506,20 +526,27 @@ function ModuleWinConditions({
             seen.add(kind.toLowerCase())
             next.push(kind)
           }
-          onSave(next)
-          onDraftChange('')
+          void Promise.resolve(onSave(next)).then((updated) => {
+            if (updated) onDraftChange('')
+          })
         }}
       >
         <input
           placeholder="add kinds (comma)"
           value={draft}
-          onChange={(e) => onDraftChange(e.target.value)}
+          onChange={(e) => {
+            onDraftChange(e.target.value)
+            if (error) setError(null)
+          }}
           disabled={busy}
         />
         <button type="submit" className="ghost" disabled={busy || !draft.trim()}>
           Add
         </button>
       </form>
+      {error && (
+        <p style={{ color: 'var(--error)', fontSize: '0.8rem', margin: 0, whiteSpace: 'pre-wrap' }}>{error}</p>
+      )}
     </div>
   )
 }
@@ -535,13 +562,14 @@ function ModuleAttackKinds({
   busy: boolean
   projectId: string
   gameId: string
-  onChange: (mutator: () => Promise<unknown>) => void
+  onChange: (mutator: () => Promise<unknown>) => Promise<unknown>
 }) {
   const [key, setKey] = useState('')
   const [label, setLabel] = useState('')
   const [paramKey, setParamKey] = useState('')
   const [paramMin, setParamMin] = useState('')
   const [paramMax, setParamMax] = useState('')
+  const [error, setError] = useState<string | null>(null)
   const kinds = module.attackKinds || []
   return (
     <div style={{ display: 'grid', gap: '0.35rem' }}>
@@ -572,9 +600,12 @@ function ModuleAttackKinds({
               className="ghost"
               disabled={busy}
               style={{ color: 'var(--error)', padding: 0 }}
-              onClick={() =>
-                onChange(() => window.indieForge.gameSettings.removeAttackKind(projectId, gameId, module.id, kind.key))
-              }
+              onClick={() => {
+                setError(null)
+                void onChange(() =>
+                  window.indieForge.gameSettings.removeAttackKind(projectId, gameId, module.id, kind.key)
+                )
+              }}
               aria-label={`Remove ${kind.key}`}
             >
               ×
@@ -598,30 +629,61 @@ function ModuleAttackKinds({
                   }
                 ]
               : undefined
-          onChange(async () => {
-            const updated = await window.indieForge.gameSettings.addAttackKind(projectId, gameId, module.id, {
-              key: key.trim(),
-              label: label.trim() || key.trim(),
-              params
-            })
+          const input = {
+            key: key.trim(),
+            label: label.trim() || key.trim(),
+            params
+          }
+          const preview = attemptSync(() => normalizeAttackKind(input, module.id))
+          if (!preview.ok) {
+            setError(preview.message)
+            return
+          }
+          setError(null)
+          void Promise.resolve(
+            onChange(() => window.indieForge.gameSettings.addAttackKind(projectId, gameId, module.id, input))
+          ).then((updated) => {
+            if (!updated) return
             setKey('')
             setLabel('')
             setParamKey('')
             setParamMin('')
             setParamMax('')
-            return updated
           })
         }}
       >
-        <input placeholder="key" value={key} onChange={(e) => setKey(e.target.value)} disabled={busy} />
+        <input
+          placeholder="key"
+          value={key}
+          onChange={(e) => {
+            setKey(e.target.value)
+            if (error) setError(null)
+          }}
+          disabled={busy}
+        />
         <input placeholder="label" value={label} onChange={(e) => setLabel(e.target.value)} disabled={busy} />
         <input placeholder="param key" value={paramKey} onChange={(e) => setParamKey(e.target.value)} disabled={busy} />
-        <input placeholder="min" value={paramMin} onChange={(e) => setParamMin(e.target.value)} disabled={busy} style={{ width: '3.5rem' }} />
-        <input placeholder="max" value={paramMax} onChange={(e) => setParamMax(e.target.value)} disabled={busy} style={{ width: '3.5rem' }} />
+        <input
+          placeholder="min"
+          value={paramMin}
+          onChange={(e) => setParamMin(e.target.value)}
+          disabled={busy}
+          style={{ width: '3.5rem' }}
+        />
+        <input
+          placeholder="max"
+          value={paramMax}
+          onChange={(e) => setParamMax(e.target.value)}
+          disabled={busy}
+          style={{ width: '3.5rem' }}
+        />
         <button type="submit" className="ghost" disabled={busy || !key.trim()}>
           Add
         </button>
       </form>
+      {error && (
+        <p style={{ color: 'var(--error)', fontSize: '0.8rem', margin: 0, whiteSpace: 'pre-wrap' }}>{error}</p>
+      )}
     </div>
   )
 }
@@ -637,10 +699,11 @@ function ModuleCounterKinds({
   busy: boolean
   projectId: string
   gameId: string
-  onChange: (mutator: () => Promise<unknown>) => void
+  onChange: (mutator: () => Promise<unknown>) => Promise<unknown>
 }) {
   const [key, setKey] = useState('')
   const [label, setLabel] = useState('')
+  const [error, setError] = useState<string | null>(null)
   const kinds = module.counterKinds || []
   return (
     <div style={{ display: 'grid', gap: '0.35rem' }}>
@@ -665,9 +728,12 @@ function ModuleCounterKinds({
               className="ghost"
               disabled={busy}
               style={{ color: 'var(--error)', padding: 0 }}
-              onClick={() =>
-                onChange(() => window.indieForge.gameSettings.removeCounterKind(projectId, gameId, module.id, kind.key))
-              }
+              onClick={() => {
+                setError(null)
+                void onChange(() =>
+                  window.indieForge.gameSettings.removeCounterKind(projectId, gameId, module.id, kind.key)
+                )
+              }}
               aria-label={`Remove ${kind.key}`}
             >
               ×
@@ -680,23 +746,39 @@ function ModuleCounterKinds({
         onSubmit={(e) => {
           e.preventDefault()
           if (!key.trim()) return
-          onChange(async () => {
-            const updated = await window.indieForge.gameSettings.addCounterKind(projectId, gameId, module.id, {
-              key: key.trim(),
-              label: label.trim() || key.trim()
-            })
+          const input = { key: key.trim(), label: label.trim() || key.trim() }
+          const preview = attemptSync(() => normalizeCounterKind(input, module.id))
+          if (!preview.ok) {
+            setError(preview.message)
+            return
+          }
+          setError(null)
+          void Promise.resolve(
+            onChange(() => window.indieForge.gameSettings.addCounterKind(projectId, gameId, module.id, input))
+          ).then((updated) => {
+            if (!updated) return
             setKey('')
             setLabel('')
-            return updated
           })
         }}
       >
-        <input placeholder="key" value={key} onChange={(e) => setKey(e.target.value)} disabled={busy} />
+        <input
+          placeholder="key"
+          value={key}
+          onChange={(e) => {
+            setKey(e.target.value)
+            if (error) setError(null)
+          }}
+          disabled={busy}
+        />
         <input placeholder="label" value={label} onChange={(e) => setLabel(e.target.value)} disabled={busy} />
         <button type="submit" className="ghost" disabled={busy || !key.trim()}>
           Add
         </button>
       </form>
+      {error && (
+        <p style={{ color: 'var(--error)', fontSize: '0.8rem', margin: 0, whiteSpace: 'pre-wrap' }}>{error}</p>
+      )}
     </div>
   )
 }
