@@ -780,6 +780,20 @@ export interface IndieForgeAPI {
       input: { label?: string; typeIds?: string[]; starKinds?: string[]; winConditions?: string[] }
     ) => Promise<IndieForgeProject>
     removeModule: (projectId: string, gameId: string, moduleId: string) => Promise<IndieForgeProject>
+    addAttackKind: (
+      projectId: string,
+      gameId: string,
+      moduleId: string,
+      input: { key: string; label?: string; params?: { key: string; type?: string; min?: number; max?: number }[] }
+    ) => Promise<IndieForgeProject>
+    removeAttackKind: (projectId: string, gameId: string, moduleId: string, key: string) => Promise<IndieForgeProject>
+    addCounterKind: (
+      projectId: string,
+      gameId: string,
+      moduleId: string,
+      input: { key: string; label?: string }
+    ) => Promise<IndieForgeProject>
+    removeCounterKind: (projectId: string, gameId: string, moduleId: string, key: string) => Promise<IndieForgeProject>
   }
   worldContent: {
     createWorld: (projectId: string, gameId: string, input: any) => Promise<IndieForgeProject>
@@ -826,6 +840,20 @@ export interface IndieForgeAPI {
     create: (projectId: string, gameId: string, input: any) => Promise<IndieForgeProject>
     update: (projectId: string, gameId: string, id: string, patch: any) => Promise<IndieForgeProject>
     remove: (projectId: string, gameId: string, id: string) => Promise<IndieForgeProject>
+  }
+  attackTables: {
+    create: (projectId: string, gameId: string, input: any) => Promise<IndieForgeProject>
+    update: (projectId: string, gameId: string, id: string, patch: any) => Promise<IndieForgeProject>
+    remove: (projectId: string, gameId: string, id: string) => Promise<IndieForgeProject>
+    addRow: (projectId: string, gameId: string, tableId: string, input: any) => Promise<IndieForgeProject>
+    updateRow: (
+      projectId: string,
+      gameId: string,
+      tableId: string,
+      rowId: string,
+      input: any
+    ) => Promise<IndieForgeProject>
+    removeRow: (projectId: string, gameId: string, tableId: string, rowId: string) => Promise<IndieForgeProject>
   }
 }
 

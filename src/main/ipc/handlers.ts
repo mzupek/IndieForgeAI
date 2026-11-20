@@ -179,11 +179,15 @@ import {
   addEncounterType,
   addGameAssetCategory,
   addGamePoseSlot,
+  addModuleAttackKind,
+  addModuleCounterKind,
   removeCharacterPoseSlot,
   removeEncounterModule,
   removeEncounterType,
   removeGameAssetCategory,
   removeGamePoseSlot,
+  removeModuleAttackKind,
+  removeModuleCounterKind,
   setCharacterCorePosesRequired,
   updateEncounterModule
 } from '../../core/storage/gameSettingsService'
@@ -212,6 +216,14 @@ import {
   updateWorldMapNode
 } from '../../core/storage/worldContentService'
 import { createEnemy, removeEnemy, updateEnemy } from '../../core/storage/enemyService'
+import {
+  addAttackTableRow,
+  createAttackTable,
+  removeAttackTable,
+  removeAttackTableRow,
+  updateAttackTable,
+  updateAttackTableRow
+} from '../../core/storage/attackTableService'
 import {
   applyDesignerAssetPrompt,
   applyDesignerStyleGuide,
@@ -1598,6 +1610,40 @@ export function registerIpcHandlers(): void {
       return await loadProject(projectId)
     }
   )
+  ipcMain.handle(
+    IPC_CHANNELS.GAME_SETTINGS_ADD_ATTACK_KIND,
+    async (
+      _e,
+      projectId: string,
+      gameId: string,
+      moduleId: string,
+      input: { key: string; label?: string; params?: { key: string; type?: string; min?: number; max?: number }[] }
+    ) => {
+      await addModuleAttackKind(gameId, moduleId, input)
+      return await loadProject(projectId)
+    }
+  )
+  ipcMain.handle(
+    IPC_CHANNELS.GAME_SETTINGS_REMOVE_ATTACK_KIND,
+    async (_e, projectId: string, gameId: string, moduleId: string, key: string) => {
+      await removeModuleAttackKind(gameId, moduleId, key)
+      return await loadProject(projectId)
+    }
+  )
+  ipcMain.handle(
+    IPC_CHANNELS.GAME_SETTINGS_ADD_COUNTER_KIND,
+    async (_e, projectId: string, gameId: string, moduleId: string, input: { key: string; label?: string }) => {
+      await addModuleCounterKind(gameId, moduleId, input)
+      return await loadProject(projectId)
+    }
+  )
+  ipcMain.handle(
+    IPC_CHANNELS.GAME_SETTINGS_REMOVE_COUNTER_KIND,
+    async (_e, projectId: string, gameId: string, moduleId: string, key: string) => {
+      await removeModuleCounterKind(gameId, moduleId, key)
+      return await loadProject(projectId)
+    }
+  )
   ipcMain.handle(IPC_CHANNELS.WORLD_CREATE, async (_e, projectId: string, gameId: string, input: any) => {
     await createWorld(gameId, input)
     return await loadProject(projectId)
@@ -1731,6 +1777,42 @@ export function registerIpcHandlers(): void {
     await removeEnemy(gameId, id)
     return await loadProject(projectId)
   })
+  ipcMain.handle(IPC_CHANNELS.ATTACK_TABLE_CREATE, async (_e, projectId: string, gameId: string, input: any) => {
+    await createAttackTable(gameId, input)
+    return await loadProject(projectId)
+  })
+  ipcMain.handle(
+    IPC_CHANNELS.ATTACK_TABLE_UPDATE,
+    async (_e, projectId: string, gameId: string, id: string, patch: any) => {
+      await updateAttackTable(gameId, id, patch)
+      return await loadProject(projectId)
+    }
+  )
+  ipcMain.handle(IPC_CHANNELS.ATTACK_TABLE_REMOVE, async (_e, projectId: string, gameId: string, id: string) => {
+    await removeAttackTable(gameId, id)
+    return await loadProject(projectId)
+  })
+  ipcMain.handle(
+    IPC_CHANNELS.ATTACK_TABLE_ROW_ADD,
+    async (_e, projectId: string, gameId: string, tableId: string, input: any) => {
+      await addAttackTableRow(gameId, tableId, input)
+      return await loadProject(projectId)
+    }
+  )
+  ipcMain.handle(
+    IPC_CHANNELS.ATTACK_TABLE_ROW_UPDATE,
+    async (_e, projectId: string, gameId: string, tableId: string, rowId: string, input: any) => {
+      await updateAttackTableRow(gameId, tableId, rowId, input)
+      return await loadProject(projectId)
+    }
+  )
+  ipcMain.handle(
+    IPC_CHANNELS.ATTACK_TABLE_ROW_REMOVE,
+    async (_e, projectId: string, gameId: string, tableId: string, rowId: string) => {
+      await removeAttackTableRow(gameId, tableId, rowId)
+      return await loadProject(projectId)
+    }
+  )
 }
 
 export async function ensureAppDataDirs(): Promise<void> {

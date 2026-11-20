@@ -9,6 +9,7 @@ import type {
   AssetPipelineProject,
   Encounter,
   EncounterStar,
+  AttackTable,
   Enemy,
   Region,
   RegionEdge,
@@ -1019,7 +1020,7 @@ function parseBundle(raw: unknown): ContentBundle {
   }
   const obj = raw as Record<string, unknown>
   const bundle: ContentBundle = {}
-  for (const name of ['worlds', 'stages', 'encounters', 'regions', 'enemies'] as const) {
+  for (const name of ['worlds', 'stages', 'encounters', 'regions', 'enemies', 'attackTables'] as const) {
     if (obj[name] === undefined) continue
     if (!Array.isArray(obj[name])) {
       throw new Error(`bundle.${name} must be an array`)
@@ -1077,6 +1078,7 @@ export interface ContentExportFile {
   encounters: Encounter[]
   regions: Region[]
   enemies: Enemy[]
+  attackTables: AttackTable[]
 }
 
 export async function exportContent(
@@ -1099,7 +1101,8 @@ export async function exportContent(
     stages: stagesOf(pipeline, gameId),
     encounters: encountersOf(pipeline, gameId),
     regions: regionsOf(pipeline, gameId),
-    enemies: (pipeline.enemies || []).filter((e) => e.gameId === gameId)
+    enemies: (pipeline.enemies || []).filter((e) => e.gameId === gameId),
+    attackTables: (pipeline.attackTables || []).filter((t) => t.gameId === gameId)
   }
   const target = join(outDir, 'content.json')
   if (options?.dryRun) {

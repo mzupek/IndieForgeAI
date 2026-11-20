@@ -74,6 +74,13 @@ export function collectAudioUsage(
       labels.push(`event binding ${binding.id} playSfx`)
     }
   }
+  for (const table of pipeline.attackTables || []) {
+    for (const row of table.rows || []) {
+      if (row.sfxAudioId === audioId) {
+        labels.push(`${table.name} row ${row.label || row.id} sfx`)
+      }
+    }
+  }
   return { labels }
 }
 

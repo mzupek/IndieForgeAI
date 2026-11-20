@@ -36,10 +36,15 @@ import {
   ensureGameSettings,
   gameEncounterTypes,
   gameModules,
+  collectAttackKindUsers,
+  collectCounterKindUsers,
+  normalizeAttackKind,
+  normalizeCounterKind,
   normalizeEncounterType,
   normalizeModule
 } from '@shared/gameSettings/encounterSettings'
-import type { GameEncounterModule } from '@shared/types/assetPipeline'
+import { formatInUseError } from '@shared/worldContent/issues'
+import type { GameEncounterModule, ModuleAttackKind, ModuleCounterKind } from '@shared/types/assetPipeline'
 import { getAssetPipeline, updateAssetPipeline } from './studioStorage'
 
 export interface NamedUser {
@@ -441,13 +446,23 @@ export async function listEncounterModules(
     ...m,
     typeIds: [...m.typeIds],
     starKinds: m.starKinds ? [...m.starKinds] : undefined,
-    winConditions: m.winConditions ? [...m.winConditions] : undefined
+    winConditions: m.winConditions ? [...m.winConditions] : undefined,
+    attackKinds: m.attackKinds ? m.attackKinds.map((k) => ({ ...k, params: k.params ? k.params.map((p) => ({ ...p })) : undefined })) : undefined,
+    counterKinds: m.counterKinds ? m.counterKinds.map((k) => ({ ...k })) : undefined
   }))
 }
 
 export async function addEncounterModule(
   gameId: string,
-  input: { id: string; label: string; typeIds: string[]; starKinds?: string[]; winConditions?: string[] },
+  input: {
+    id: string
+    label: string
+    typeIds: string[]
+    starKinds?: string[]
+    winConditions?: string[]
+    attackKinds?: ModuleAttackKind[]
+    counterKinds?: ModuleCounterKind[]
+  },
   options?: SlotCategoryWriteOptions
 ): Promise<GameEncounterModule> {
   const pipeline = await getAssetPipeline(options?.dataDirOverride)
@@ -472,7 +487,14 @@ export async function addEncounterModule(
 export async function updateEncounterModule(
   gameId: string,
   moduleId: string,
-  input: { label?: string; typeIds?: string[]; starKinds?: string[]; winConditions?: string[] },
+  input: {
+    label?: string
+    typeIds?: string[]
+    starKinds?: string[]
+    winConditions?: string[]
+    attackKinds?: ModuleAttackKind[]
+    counterKinds?: ModuleCounterKind[]
+  },
   options?: SlotCategoryWriteOptions
 ): Promise<GameEncounterModule> {
   const pipeline = await getAssetPipeline(options?.dataDirOverride)
@@ -486,7 +508,9 @@ export async function updateEncounterModule(
     label: input.label ?? previous.label,
     typeIds: input.typeIds ?? previous.typeIds,
     starKinds: input.starKinds !== undefined ? input.starKinds : previous.starKinds,
-    winConditions: input.winConditions !== undefined ? input.winConditions : previous.winConditions
+    winConditions: input.winConditions !== undefined ? input.winConditions : previous.winConditions,
+    attackKinds: input.attackKinds !== undefined ? input.attackKinds : previous.attackKinds,
+    counterKinds: input.counterKinds !== undefined ? input.counterKinds : previous.counterKinds
   })
   for (const t of next.typeIds) {
     if (!settings.encounterTypes.includes(t)) {
@@ -518,6 +542,121 @@ export async function removeEncounterModule(
   await updateAssetPipeline(pipeline, options?.dataDirOverride)
   return { removed: key }
 }
+
+export async function addModuleAttackKind(
+  gameId: string,
+  moduleId: string,
+  input: { key: string; label?: string; params?: ModuleKindParamDefLike[] },
+  options?: SlotCategoryWriteOptions
+): Promise<GameEncounterModule> {
+  const pipeline = await getAssetPipeline(options?.dataDirOverride)
+  const game = requireGame(pipeline, gameId)
+  const settings = ensureSettings(game)
+  const index = settings.modules.findIndex((m) => m.id === moduleId.trim().toLowerCase() || m.id === moduleId)
+  if (index < 0) throw new Error(`Module not found: ${moduleId}`)
+  const previous = settings.modules[index]
+  const def = normalizeAttackKind(
+    { key: input.key, label: input.label || input.key, params: input.params },
+    previous.id
+  )
+  const existing = previous.attackKinds || []
+  if (existing.some((k) => k.key.toLowerCase() === def.key.toLowerCase())) {
+    throw new Error(`Attack kind '${def.key}' already exists on module '${previous.id}'`)
+  }
+  const next = normalizeModule({
+    ...previous,
+    attackKinds: [...existing, def]
+  })
+  if (options?.dryRun) return next
+  settings.modules[index] = next
+  touch(game)
+  await updateAssetPipeline(pipeline, options?.dataDirOverride)
+  return next
+}
+
+export async function removeModuleAttackKind(
+  gameId: string,
+  moduleId: string,
+  key: string,
+  options?: SlotCategoryWriteOptions
+): Promise<GameEncounterModule> {
+  const pipeline = await getAssetPipeline(options?.dataDirOverride)
+  const game = requireGame(pipeline, gameId)
+  const settings = ensureSettings(game)
+  const index = settings.modules.findIndex((m) => m.id === moduleId.trim().toLowerCase() || m.id === moduleId)
+  if (index < 0) throw new Error(`Module not found: ${moduleId}`)
+  const previous = settings.modules[index]
+  const found = (previous.attackKinds || []).find((k) => k.key.toLowerCase() === key.trim().toLowerCase())
+  if (!found) throw new Error(`Attack kind '${key}' was not found on module '${previous.id}'`)
+  const users = collectAttackKindUsers(pipeline, gameId, previous.id, found.key)
+  if (users.length > 0) throw new Error(formatInUseError('attack kind', found.key, users))
+  const next = normalizeModule({
+    ...previous,
+    attackKinds: (previous.attackKinds || []).filter((k) => k.key.toLowerCase() !== found.key.toLowerCase())
+  })
+  if (options?.dryRun) return next
+  settings.modules[index] = next
+  touch(game)
+  await updateAssetPipeline(pipeline, options?.dataDirOverride)
+  return next
+}
+
+export async function addModuleCounterKind(
+  gameId: string,
+  moduleId: string,
+  input: { key: string; label?: string },
+  options?: SlotCategoryWriteOptions
+): Promise<GameEncounterModule> {
+  const pipeline = await getAssetPipeline(options?.dataDirOverride)
+  const game = requireGame(pipeline, gameId)
+  const settings = ensureSettings(game)
+  const index = settings.modules.findIndex((m) => m.id === moduleId.trim().toLowerCase() || m.id === moduleId)
+  if (index < 0) throw new Error(`Module not found: ${moduleId}`)
+  const previous = settings.modules[index]
+  const def = normalizeCounterKind({ key: input.key, label: input.label || input.key }, previous.id)
+  const existing = previous.counterKinds || []
+  if (existing.some((k) => k.key.toLowerCase() === def.key.toLowerCase())) {
+    throw new Error(`Counter kind '${def.key}' already exists on module '${previous.id}'`)
+  }
+  const next = normalizeModule({
+    ...previous,
+    counterKinds: [...existing, def]
+  })
+  if (options?.dryRun) return next
+  settings.modules[index] = next
+  touch(game)
+  await updateAssetPipeline(pipeline, options?.dataDirOverride)
+  return next
+}
+
+export async function removeModuleCounterKind(
+  gameId: string,
+  moduleId: string,
+  key: string,
+  options?: SlotCategoryWriteOptions
+): Promise<GameEncounterModule> {
+  const pipeline = await getAssetPipeline(options?.dataDirOverride)
+  const game = requireGame(pipeline, gameId)
+  const settings = ensureSettings(game)
+  const index = settings.modules.findIndex((m) => m.id === moduleId.trim().toLowerCase() || m.id === moduleId)
+  if (index < 0) throw new Error(`Module not found: ${moduleId}`)
+  const previous = settings.modules[index]
+  const found = (previous.counterKinds || []).find((k) => k.key.toLowerCase() === key.trim().toLowerCase())
+  if (!found) throw new Error(`Counter kind '${key}' was not found on module '${previous.id}'`)
+  const users = collectCounterKindUsers(pipeline, gameId, previous.id, found.key)
+  if (users.length > 0) throw new Error(formatInUseError('counter kind', found.key, users))
+  const next = normalizeModule({
+    ...previous,
+    counterKinds: (previous.counterKinds || []).filter((k) => k.key.toLowerCase() !== found.key.toLowerCase())
+  })
+  if (options?.dryRun) return next
+  settings.modules[index] = next
+  touch(game)
+  await updateAssetPipeline(pipeline, options?.dataDirOverride)
+  return next
+}
+
+type ModuleKindParamDefLike = { key: string; type?: string; min?: number; max?: number }
 
 export async function updateGameSettingsFromFile(
   gameId: string,

@@ -78,6 +78,7 @@ function createEmptyStudioData(): StudioData {
       encounters: [],
       regions: [],
       enemies: [],
+      attackTables: [],
       createdAt: now,
       updatedAt: now
     },

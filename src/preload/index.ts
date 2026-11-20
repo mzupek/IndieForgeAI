@@ -348,7 +348,15 @@ const api: IndieForgeAPI = {
     updateModule: (projectId, gameId, moduleId, input) =>
       ipcRenderer.invoke(IPC_CHANNELS.GAME_SETTINGS_UPDATE_MODULE, projectId, gameId, moduleId, input),
     removeModule: (projectId, gameId, moduleId) =>
-      ipcRenderer.invoke(IPC_CHANNELS.GAME_SETTINGS_REMOVE_MODULE, projectId, gameId, moduleId)
+      ipcRenderer.invoke(IPC_CHANNELS.GAME_SETTINGS_REMOVE_MODULE, projectId, gameId, moduleId),
+    addAttackKind: (projectId, gameId, moduleId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.GAME_SETTINGS_ADD_ATTACK_KIND, projectId, gameId, moduleId, input),
+    removeAttackKind: (projectId, gameId, moduleId, key) =>
+      ipcRenderer.invoke(IPC_CHANNELS.GAME_SETTINGS_REMOVE_ATTACK_KIND, projectId, gameId, moduleId, key),
+    addCounterKind: (projectId, gameId, moduleId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.GAME_SETTINGS_ADD_COUNTER_KIND, projectId, gameId, moduleId, input),
+    removeCounterKind: (projectId, gameId, moduleId, key) =>
+      ipcRenderer.invoke(IPC_CHANNELS.GAME_SETTINGS_REMOVE_COUNTER_KIND, projectId, gameId, moduleId, key)
   },
   worldContent: {
     createWorld: (projectId, gameId, input) =>
@@ -403,6 +411,20 @@ const api: IndieForgeAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.ENEMY_UPDATE, projectId, gameId, id, patch),
     remove: (projectId, gameId, id) =>
       ipcRenderer.invoke(IPC_CHANNELS.ENEMY_REMOVE, projectId, gameId, id)
+  },
+  attackTables: {
+    create: (projectId, gameId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.ATTACK_TABLE_CREATE, projectId, gameId, input),
+    update: (projectId, gameId, id, patch) =>
+      ipcRenderer.invoke(IPC_CHANNELS.ATTACK_TABLE_UPDATE, projectId, gameId, id, patch),
+    remove: (projectId, gameId, id) =>
+      ipcRenderer.invoke(IPC_CHANNELS.ATTACK_TABLE_REMOVE, projectId, gameId, id),
+    addRow: (projectId, gameId, tableId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.ATTACK_TABLE_ROW_ADD, projectId, gameId, tableId, input),
+    updateRow: (projectId, gameId, tableId, rowId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.ATTACK_TABLE_ROW_UPDATE, projectId, gameId, tableId, rowId, input),
+    removeRow: (projectId, gameId, tableId, rowId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.ATTACK_TABLE_ROW_REMOVE, projectId, gameId, tableId, rowId)
   }
 }
 

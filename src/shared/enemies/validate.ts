@@ -5,6 +5,7 @@
 
 import type {
   AssetPipelineProject,
+  AttackTable,
   BattleMoment,
   Character,
   Enemy,
@@ -340,6 +341,36 @@ export function validateEnemy(
     }
   }
 
+  if (enemy.attackTableId) {
+    const tables = (pipeline.attackTables || []).filter((t) => t.gameId === enemy.gameId)
+    const table =
+      tables.find((t) => t.id === enemy.attackTableId) ||
+      tables.find((t) => t.key === enemy.attackTableId) ||
+      tables.find((t) => t.name === enemy.attackTableId)
+    if (!table) {
+      issues.push(
+        errorIssue(`${path}.attackTableId`, `Attack table '${enemy.attackTableId}' was not found in this game`)
+      )
+    } else {
+      if (table.gameId !== enemy.gameId) {
+        issues.push(
+          errorIssue(
+            `${path}.attackTableId`,
+            `Attack table '${table.name}' belongs to game '${table.gameId}', not '${enemy.gameId}'`
+          )
+        )
+      }
+      if (table.moduleId !== enemy.moduleId) {
+        issues.push(
+          errorIssue(
+            `${path}.attackTableId`,
+            `Attack table '${table.name}' belongs to module '${table.moduleId}', not '${enemy.moduleId}'`
+          )
+        )
+      }
+    }
+  }
+
   return issues
 }
 
@@ -363,12 +394,21 @@ export interface EnemyChecklistAsset {
   states?: Record<string, boolean>
 }
 
+export interface EnemyChecklistRef {
+  id: string
+  name: string
+  have: boolean
+  usedBy: string
+}
+
 export interface EnemyChecklist {
   enemy: string
   character: string
   ready: boolean
   poses: EnemyChecklistPose[]
   assets: EnemyChecklistAsset[]
+  cueEvents: EnemyChecklistRef[]
+  sfx: EnemyChecklistRef[]
   usedBy: string[]
 }
 
@@ -382,6 +422,21 @@ export function buildEnemyChecklist(pipeline: AssetPipelineProject, enemy: Enemy
     const label = mapped ? moment : `${moment} (unmapped, falls back to ${FALLBACK_BATTLE_POSE_SLOT})`
     if (!slotUses[slot]) slotUses[slot] = []
     slotUses[slot]!.push(label)
+  }
+  const table: AttackTable | undefined = enemy.attackTableId
+    ? (pipeline.attackTables || []).find(
+        (t) =>
+          t.id === enemy.attackTableId ||
+          t.key === enemy.attackTableId ||
+          t.name === enemy.attackTableId
+      )
+    : undefined
+  for (const row of table?.rows || []) {
+    if (row.poseSlot) {
+      const label = `attack row ${row.label || row.id}`
+      if (!slotUses[row.poseSlot]) slotUses[row.poseSlot] = []
+      slotUses[row.poseSlot]!.push(label)
+    }
   }
   const poseRows: EnemyChecklistPose[] = Object.keys(slotUses).map((slot) => ({
     slot,
@@ -406,16 +461,51 @@ export function buildEnemyChecklist(pipeline: AssetPipelineProject, enemy: Enemy
     assets.push({ role: ref.role, have, states })
   }
 
+  const cueEvents: EnemyChecklistRef[] = []
+  const sfx: EnemyChecklistRef[] = []
+  for (const row of table?.rows || []) {
+    const usedBy = `attack row ${row.label || row.id}`
+    if (row.cueEventId) {
+      const event = (pipeline.eventDefinitions || []).find(
+        (e) =>
+          e.id === row.cueEventId ||
+          e.key === row.cueEventId ||
+          e.name === row.cueEventId
+      )
+      cueEvents.push({
+        id: row.cueEventId,
+        name: event?.name || row.cueEventId,
+        have: Boolean(event) && event!.gameId === enemy.gameId,
+        usedBy
+      })
+    }
+    if (row.sfxAudioId) {
+      const audio = (pipeline.audioAssets || []).find(
+        (a) => a.id === row.sfxAudioId || a.name === row.sfxAudioId
+      )
+      sfx.push({
+        id: row.sfxAudioId,
+        name: audio?.name || row.sfxAudioId,
+        have: Boolean(audio) && audio!.gameId === enemy.gameId,
+        usedBy
+      })
+    }
+  }
+
   const poseReady = poseRows.every((p) => p.have)
   const assetReady = assets.every(
     (a) => a.have && (!a.states || Object.values(a.states).every(Boolean))
   )
+  const cueReady = cueEvents.every((c) => c.have)
+  const sfxReady = sfx.every((s) => s.have)
   return {
     enemy: enemy.name,
     character: character?.name || enemy.characterId,
-    ready: poseReady && assetReady,
+    ready: poseReady && assetReady && cueReady && sfxReady,
     poses: poseRows,
     assets,
+    cueEvents,
+    sfx,
     usedBy: []
   }
 }

@@ -318,8 +318,8 @@ export function GameSettingsView() {
       <div className="panel-section" style={{ marginTop: '2rem' }}>
         <h3>Encounter modules</h3>
         <p style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>
-          Each module lists the types it supports, optional star kinds, and optional win conditions.
-          Removal of a module or a win condition is refused while an encounter or enemy uses it.
+          Each module lists the types it supports, optional star kinds, win conditions, attack kinds, and counter kinds.
+          Removal of a module, win condition, or kind is refused while an encounter, enemy, or attack row uses it.
         </p>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
           <thead>
@@ -329,6 +329,8 @@ export function GameSettingsView() {
               <th>Types</th>
               <th>Star kinds</th>
               <th>Win conditions</th>
+              <th>Attack kinds</th>
+              <th>Counter kinds</th>
               <th></th>
             </tr>
           </thead>
@@ -353,6 +355,12 @@ export function GameSettingsView() {
                       )
                     }
                   />
+                </td>
+                <td style={{ minWidth: '16rem' }}>
+                  <ModuleAttackKinds module={m} busy={busy} projectId={projectId} gameId={gameId} onChange={refreshAfter} />
+                </td>
+                <td style={{ minWidth: '12rem' }}>
+                  <ModuleCounterKinds module={m} busy={busy} projectId={projectId} gameId={gameId} onChange={refreshAfter} />
                 </td>
                 <td>
                   <button
@@ -509,6 +517,183 @@ function ModuleWinConditions({
           disabled={busy}
         />
         <button type="submit" className="ghost" disabled={busy || !draft.trim()}>
+          Add
+        </button>
+      </form>
+    </div>
+  )
+}
+
+function ModuleAttackKinds({
+  module,
+  busy,
+  projectId,
+  gameId,
+  onChange
+}: {
+  module: GameEncounterModule
+  busy: boolean
+  projectId: string
+  gameId: string
+  onChange: (mutator: () => Promise<unknown>) => void
+}) {
+  const [key, setKey] = useState('')
+  const [label, setLabel] = useState('')
+  const [paramKey, setParamKey] = useState('')
+  const [paramMin, setParamMin] = useState('')
+  const [paramMax, setParamMax] = useState('')
+  const kinds = module.attackKinds || []
+  return (
+    <div style={{ display: 'grid', gap: '0.35rem' }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
+        {kinds.length === 0 && <span style={{ color: 'var(--muted)' }}>(none)</span>}
+        {kinds.map((kind) => (
+          <span
+            key={kind.key}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.25rem',
+              padding: '0.1rem 0.4rem',
+              border: '1px solid var(--border)',
+              borderRadius: 4,
+              fontSize: '0.8rem'
+            }}
+          >
+            {kind.label} <code>{kind.key}</code>
+            {(kind.params || []).map((p) => (
+              <span key={p.key} style={{ color: 'var(--muted)' }}>
+                {p.key}
+                {p.min !== undefined || p.max !== undefined ? `(${p.min ?? ''}–${p.max ?? ''})` : ''}
+              </span>
+            ))}
+            <button
+              type="button"
+              className="ghost"
+              disabled={busy}
+              style={{ color: 'var(--error)', padding: 0 }}
+              onClick={() =>
+                onChange(() => window.indieForge.gameSettings.removeAttackKind(projectId, gameId, module.id, kind.key))
+              }
+              aria-label={`Remove ${kind.key}`}
+            >
+              ×
+            </button>
+          </span>
+        ))}
+      </div>
+      <form
+        style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', alignItems: 'center' }}
+        onSubmit={(e) => {
+          e.preventDefault()
+          if (!key.trim()) return
+          const params =
+            paramKey.trim()
+              ? [
+                  {
+                    key: paramKey.trim(),
+                    type: 'number' as const,
+                    min: paramMin.trim() ? Number(paramMin) : undefined,
+                    max: paramMax.trim() ? Number(paramMax) : undefined
+                  }
+                ]
+              : undefined
+          onChange(async () => {
+            const updated = await window.indieForge.gameSettings.addAttackKind(projectId, gameId, module.id, {
+              key: key.trim(),
+              label: label.trim() || key.trim(),
+              params
+            })
+            setKey('')
+            setLabel('')
+            setParamKey('')
+            setParamMin('')
+            setParamMax('')
+            return updated
+          })
+        }}
+      >
+        <input placeholder="key" value={key} onChange={(e) => setKey(e.target.value)} disabled={busy} />
+        <input placeholder="label" value={label} onChange={(e) => setLabel(e.target.value)} disabled={busy} />
+        <input placeholder="param key" value={paramKey} onChange={(e) => setParamKey(e.target.value)} disabled={busy} />
+        <input placeholder="min" value={paramMin} onChange={(e) => setParamMin(e.target.value)} disabled={busy} style={{ width: '3.5rem' }} />
+        <input placeholder="max" value={paramMax} onChange={(e) => setParamMax(e.target.value)} disabled={busy} style={{ width: '3.5rem' }} />
+        <button type="submit" className="ghost" disabled={busy || !key.trim()}>
+          Add
+        </button>
+      </form>
+    </div>
+  )
+}
+
+function ModuleCounterKinds({
+  module,
+  busy,
+  projectId,
+  gameId,
+  onChange
+}: {
+  module: GameEncounterModule
+  busy: boolean
+  projectId: string
+  gameId: string
+  onChange: (mutator: () => Promise<unknown>) => void
+}) {
+  const [key, setKey] = useState('')
+  const [label, setLabel] = useState('')
+  const kinds = module.counterKinds || []
+  return (
+    <div style={{ display: 'grid', gap: '0.35rem' }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
+        {kinds.length === 0 && <span style={{ color: 'var(--muted)' }}>(none)</span>}
+        {kinds.map((kind) => (
+          <span
+            key={kind.key}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.25rem',
+              padding: '0.1rem 0.4rem',
+              border: '1px solid var(--border)',
+              borderRadius: 4,
+              fontSize: '0.8rem'
+            }}
+          >
+            {kind.label} <code>{kind.key}</code>
+            <button
+              type="button"
+              className="ghost"
+              disabled={busy}
+              style={{ color: 'var(--error)', padding: 0 }}
+              onClick={() =>
+                onChange(() => window.indieForge.gameSettings.removeCounterKind(projectId, gameId, module.id, kind.key))
+              }
+              aria-label={`Remove ${kind.key}`}
+            >
+              ×
+            </button>
+          </span>
+        ))}
+      </div>
+      <form
+        style={{ display: 'flex', gap: '0.35rem', alignItems: 'center' }}
+        onSubmit={(e) => {
+          e.preventDefault()
+          if (!key.trim()) return
+          onChange(async () => {
+            const updated = await window.indieForge.gameSettings.addCounterKind(projectId, gameId, module.id, {
+              key: key.trim(),
+              label: label.trim() || key.trim()
+            })
+            setKey('')
+            setLabel('')
+            return updated
+          })
+        }}
+      >
+        <input placeholder="key" value={key} onChange={(e) => setKey(e.target.value)} disabled={busy} />
+        <input placeholder="label" value={label} onChange={(e) => setLabel(e.target.value)} disabled={busy} />
+        <button type="submit" className="ghost" disabled={busy || !key.trim()}>
           Add
         </button>
       </form>

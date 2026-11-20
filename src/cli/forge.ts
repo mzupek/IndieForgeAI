@@ -21,6 +21,7 @@ import { registerMigrateCommand } from './commands/migrate'
 import { registerGameSettingsCommands } from './commands/gameSettings'
 import { registerWorldContentCommands } from './commands/worldContent'
 import { registerEnemyCommands } from './commands/enemy'
+import { registerAttackTableCommands } from './commands/attackTable'
 import * as asset from './commands/asset'
 import * as assetState from './commands/asset-state'
 
@@ -408,5 +409,8 @@ registerWorldContentCommands(program)
 
 // 2a enemies
 registerEnemyCommands(program)
+
+// 2b attack tables
+registerAttackTableCommands(program)
 
 program.parse()

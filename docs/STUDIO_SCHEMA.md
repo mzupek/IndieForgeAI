@@ -91,13 +91,24 @@ Save paths keep fields they do not know about (in-place updates plus apply overl
 Optional top-level `enemies` array, filled in memory when missing (same as `worlds`). No migrate. No freemium / currency / reward fields. Still poses only.
 
 - **Game.settings.modules[].winConditions:** optional unique string keys (camelCase allowed). Removal is refused while an enemy in this game uses that kind.
-- **Enemy:** `id`, optional `key`, `gameId`, `name`, `characterId` (same game), `moduleId` (exists and supports `battle`), `winCondition: { kind, params }` (`kind` must be in that module's `winConditions`; `params` are flat numbers), `stats` (flat numbers), `poses` (built-in moments `idle` / `telegraph` / `attack` / `hit` / `defeat` / `win` → a pose slot of that character: core, game, or character), optional reserved `attackTableId` (stored, not validated), optional `assets[]` `{ role, assetId, states? }` (states must exist), optional `notes`.
+- **Enemy:** `id`, optional `key`, `gameId`, `name`, `characterId` (same game), `moduleId` (exists and supports `battle`), `winCondition: { kind, params }` (`kind` must be in that module's `winConditions`; `params` are flat numbers), `stats` (flat numbers), `poses` (built-in moments `idle` / `telegraph` / `attack` / `hit` / `defeat` / `win` → a pose slot of that character: core, game, or character), optional `attackTableId` (same game and module; validated in 2b), optional `assets[]` `{ role, assetId, states? }` (states must exist), optional `notes`.
 - Character removal is refused while an enemy uses it (message names the enemy).
 - `content apply` / `content export` include `enemies`. **`contentSchemaVersion` stays 1**. Export **manifest v2 is unchanged**. Saves overlay unknown fields so extra keys survive an update.
 
-## Out of 1a / 1b / 1c / 1d / 2a
+## 2b (same schema v2 — no bump)
 
-- Attack tables and difficulty (2b / 2c)
+Optional top-level `attackTables` array, filled in memory when missing. No migrate. No freemium / currency / reward fields. Still poses only.
+
+- **Game.settings.modules[].attackKinds:** optional `{ key, label, params?: [{ key, type: 'number', min?, max? }] }`. Unique camelCase keys. Removal refused while an attack row in this game/module uses the kind.
+- **Game.settings.modules[].counterKinds:** optional `{ key, label }`. Unique camelCase keys. Removal refused while a row uses the kind.
+- **AttackTable:** `id`, optional `key`, `gameId`, `name`, `moduleId`, `selection` (`weighted` | `sequence`), `noRepeatInARow`, `reveal` (`roundStart`), `skipFinalRound`, `rows[]`. Empty rows are allowed.
+- **AttackRow:** record-local slug `id`, `label`, `telegraph`, `kind` (in the module's attackKinds), `params` (match that kind's types/ranges), optional `damage`, `weight` (`> 0` when weighted), optional `minRound`/`maxRound` (`min <= max`), optional `counter: { kind, result: 'cancel'|'halve' }` (kind in module counterKinds), optional `poseSlot` (linked enemy's character slots), optional `heroPoseSlot` (core + game slots), optional `cueEventId` (uuid, `@key`, or exact event name), optional `sfxAudioId` (uuid or exact audio name).
+- **Enemy.attackTableId:** table must exist in the same game and module. Table removal refused while an enemy uses it. Event/audio removal refused while a row uses it.
+- `content apply` / `content export` include `attackTables`. **`contentSchemaVersion` stays 1**. Export **manifest v2 is unchanged**. Saves overlay unknown fields so extra keys survive an update.
+
+## Out of 1a / 1b / 1c / 1d / 2a / 2b
+
+- Difficulty (2c)
 - A4 portable export package
 - `seedDefaultGames` and the Neon Recall Game Definition markdown special case (flagged only)
 - ScenesView / StoryboardEditor store-refresh bug (deferred)

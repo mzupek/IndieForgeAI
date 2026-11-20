@@ -135,7 +135,7 @@ function addWriteFlags(cmd: Command, required: boolean): Command {
     .option('--pose <moment=slot>', 'Battle moment -> pose slot (repeatable)', collect, [])
     .option('--asset <role=id[:states]>', 'Extra asset (repeatable)', collect, [])
     .option('--notes <text>', 'Notes')
-    .option('--attack-table <id>', 'Reserved attack table id (2b)')
+    .option('--attack-table <id>', 'Attack table id, @key, or exact name')
     .option('--dry-run', 'Validate without writing')
 }
 
@@ -259,6 +259,12 @@ export function registerEnemyCommands(program: Command): void {
           }
           for (const a of checklist.assets) {
             console.log(`  asset ${a.role}  ${a.have ? 'have' : 'missing'}`)
+          }
+          for (const c of checklist.cueEvents) {
+            console.log(`  cue ${c.name}  ${c.have ? 'have' : 'missing'}  (${c.usedBy})`)
+          }
+          for (const s of checklist.sfx) {
+            console.log(`  sfx ${s.name}  ${s.have ? 'have' : 'missing'}  (${s.usedBy})`)
           }
           if (!checklist.usedBy.length) console.log('  usedBy: (none until 2c)')
         })

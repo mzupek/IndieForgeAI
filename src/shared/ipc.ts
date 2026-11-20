@@ -163,6 +163,10 @@ export const IPC_CHANNELS = {
   GAME_SETTINGS_ADD_MODULE: 'gameSettings:addModule',
   GAME_SETTINGS_UPDATE_MODULE: 'gameSettings:updateModule',
   GAME_SETTINGS_REMOVE_MODULE: 'gameSettings:removeModule',
+  GAME_SETTINGS_ADD_ATTACK_KIND: 'gameSettings:addAttackKind',
+  GAME_SETTINGS_REMOVE_ATTACK_KIND: 'gameSettings:removeAttackKind',
+  GAME_SETTINGS_ADD_COUNTER_KIND: 'gameSettings:addCounterKind',
+  GAME_SETTINGS_REMOVE_COUNTER_KIND: 'gameSettings:removeCounterKind',
   CHARACTER_POSE_SLOT_ADD: 'characterPoseSlot:add',
   CHARACTER_POSE_SLOT_REMOVE: 'characterPoseSlot:remove',
   CHARACTER_CORE_POSES_REQUIRED: 'characterPoseSlot:coreRequired',
@@ -190,5 +194,11 @@ export const IPC_CHANNELS = {
   REGION_REMOVE: 'region:remove',
   ENEMY_CREATE: 'enemy:create',
   ENEMY_UPDATE: 'enemy:update',
-  ENEMY_REMOVE: 'enemy:remove'
+  ENEMY_REMOVE: 'enemy:remove',
+  ATTACK_TABLE_CREATE: 'attackTable:create',
+  ATTACK_TABLE_UPDATE: 'attackTable:update',
+  ATTACK_TABLE_REMOVE: 'attackTable:remove',
+  ATTACK_TABLE_ROW_ADD: 'attackTable:rowAdd',
+  ATTACK_TABLE_ROW_UPDATE: 'attackTable:rowUpdate',
+  ATTACK_TABLE_ROW_REMOVE: 'attackTable:rowRemove'
 } as const

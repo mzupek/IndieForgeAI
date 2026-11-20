@@ -170,7 +170,7 @@ Example bundle: `docs/samples/gate-drone-content.json`.
 
 ### Enemies (2a)
 
-Game-level enemy records wrap a **character** (still poses only) plus a **module win condition**. No game names are hardcoded: character, module, win kinds, and pose slots come from that game's data. Attack tables (2b) and encounter links (2c) are not here; `attackTableId` is stored when present and not validated.
+Game-level enemy records wrap a **character** (still poses only) plus a **module win condition**. No game names are hardcoded: character, module, win kinds, and pose slots come from that game's data. `attackTableId` is validated in 2b (same game and module). Encounter links land in 2c.
 
 ```bash
 forge enemy list --game <id> [--json]
@@ -229,6 +229,8 @@ Create / update wrap `{ "record": { ...same enemy... }, "dryRun": false }`. Show
     { "slot": "defeat", "have": false, "usedBy": "defeat" }
   ],
   "assets": [{ "role": "sigil", "have": true, "states": { "on": true } }],
+  "cueEvents": [],
+  "sfx": [],
   "usedBy": []
 }
 ```
@@ -250,6 +252,104 @@ Create / update wrap `{ "record": { ...same enemy... }, "dryRun": false }`. Show
 ```
 
 Win condition keys keep camelCase (`enemyHp`). They must be unique per module (case-insensitive).
+
+---
+
+### Attack tables (2b)
+
+Game-level attack tables are their own records, linked from `Enemy.attackTableId`. Rows are picked between puzzle rounds. No game names are hardcoded: attack kinds, counter kinds, pose slots, events, and audio come from that game's data. Still poses only; no scripts, rewards, or currency fields.
+
+```bash
+forge game module attack-kind add --game <id> <moduleId> --key damage [--label Damage]
+forge game module attack-kind add --game <id> <moduleId> --key extendPattern --param by:number:1:3
+forge game module attack-kind remove --game <id> <moduleId> --key damage [--dry-run] [--json]
+forge game module counter-kind add --game <id> <moduleId> --key perfectRound [--label "Perfect round"]
+forge game module counter-kind remove --game <id> <moduleId> --key perfectRound [--dry-run] [--json]
+
+forge attack-table list --game <id> [--json]
+forge attack-table show <id|@key> --game <id> [--json]
+forge attack-table create --game <id> --name "Gate pattern" --module pad [--key gate] \
+  [--selection weighted|sequence] [--forbid-repeat] [--skip-final-round] [--dry-run] [--json]
+forge attack-table update <id|@key> --game <id> --name "Gate pattern" [--dry-run] [--json]
+forge attack-table remove <id|@key> --game <id> [--dry-run] [--json]
+
+forge attack-table row add <table> --game <id> --label "Taser Arc" --kind damage --weight 60 \
+  [--id taser_arc] [--damage 8] [--param by=1] [--min-round 2] [--max-round 4] \
+  [--counter-kind perfectRound] [--counter-result cancel] [--pose attack_arc] [--hero-pose hurt] \
+  [--cue @jam] [--sfx Zap] [--dry-run] [--json]
+forge attack-table row update <table> <rowId> --game <id> --weight 80 [--dry-run] [--json]
+forge attack-table row remove <table> <rowId> --game <id> [--dry-run] [--json]
+
+forge attack-table simulate <table> --game <id> --rounds 3 --seed 42 --json
+```
+
+`--param` on `attack-kind add` is `key:number[:min[:max]]` and is repeatable. Row `--param` is `k=v` and is repeatable. `--cue` accepts uuid, `@key`, or exact event name. `--sfx` accepts uuid or exact audio name. Table removal is refused while an enemy uses it. Kind / event / audio removal is refused while a row uses it. `content apply` / `content export` include `attackTables`. **`contentSchemaVersion` stays 1**.
+
+#### Seeded pick algorithm (Unity must match)
+
+PRNG is **Mulberry32**. Seed is a uint32. State starts as `seed >>> 0`. Each `next()`:
+
+```
+S = (S + 0x6D2B79F5) >>> 0
+t = Math.imul(S ^ (S >>> 15), S | 1)
+t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
+return ((t ^ (t >>> 14)) >>> 0) / 4294967296   // float in [0, 1)
+```
+
+Rounds are 1-based. For each round `r` in `1..N`:
+
+1. If `skipFinalRound` and `r === N`, the round is **skipped**. No `next()` is consumed. `possible` is empty.
+2. Eligible rows: `(minRound ?? 1) <= r <= (maxRound ?? +Infinity)`, in **table order**.
+3. If `noRepeatInARow` and the previous pick is in the eligible list and that list has more than one row, drop the previous pick.
+4. If nothing remains, the round is skipped with reason `noEligibleRows`. No `next()`.
+5. **sequence:** start after the previous pick's index in the full `rows` array (or index 0 on the first pick), wrap, and take the first remaining eligible row. No `next()`.
+6. **weighted:** if exactly one row remains, pick it (no `next()`). Otherwise `total = sum(weight)`, `u = next() * total`, then walk remaining eligible rows in table order subtracting each `weight` until `u < 0`. The last remaining row wins on float dust.
+
+Weights must be `> 0` when `selection` is `weighted`. Changing a weight changes later picks for the same seed whenever a roll is consumed.
+
+#### Sample: seed 42, 3 rounds, weighted, noRepeatInARow, skipFinalRound
+
+Rows in table order:
+
+| id | weight | minRound |
+| --- | --- | --- |
+| taser_arc | 60 | (1) |
+| scan_jam | 25 | 2 |
+| alarm_pulse | 15 | 2 |
+
+- Round 1: only `taser_arc` is eligible → **Taser Arc**. No roll.
+- Round 2: `scan_jam` (25) and `alarm_pulse` (15). One Mulberry32 step from seed `42` yields `u = next() * 40`. Walk table order: if `u < 25` pick Scan Jam, else Alarm Pulse. **Seed 42 picks Scan Jam.**
+- Round 3: **skipped** (`skipFinalRound`). No roll.
+
+Rerun with the same seed matches. Raising `alarm_pulse` weight (for example to 80) changes the round-2 pick for seed 42.
+
+#### JSON: `forge attack-table simulate --json`
+
+```json
+{
+  "tableId": "uuid",
+  "tableName": "Gate pattern",
+  "selection": "weighted",
+  "seed": 42,
+  "rounds": 3,
+  "results": [
+    {
+      "round": 1,
+      "skipped": false,
+      "picked": { "id": "taser_arc", "label": "Taser Arc", "kind": "damage", "weight": 60 },
+      "possible": [{ "id": "taser_arc", "label": "Taser Arc", "kind": "damage", "weight": 60 }]
+    },
+    {
+      "round": 3,
+      "skipped": true,
+      "reason": "skipFinalRound",
+      "possible": []
+    }
+  ]
+}
+```
+
+Create / update wrap `{ "record": { ...table... }, "dryRun": false }`. List wraps `{ "attackTables": [ ... ] }`.
 
 ---
 

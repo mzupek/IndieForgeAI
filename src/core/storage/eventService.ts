@@ -23,6 +23,8 @@ import {
   validateEventDefinitionInput
 } from '../../shared/storyboard/eventValidation'
 import { collectEventCueUsage } from '../../shared/storyboard/eventCues'
+import { collectEventAttackRowUsers } from '../../shared/attackTables/validate'
+import { formatInUseError } from '../../shared/worldContent/issues'
 import { getAssetPipeline, updateAssetPipeline } from './studioStorage'
 
 export interface CreateEventInput {
@@ -139,6 +141,10 @@ export async function removeEvent(
   }
   const usage = collectEventBindingUsage(pipeline, eventId)
   const cueUsage = collectEventCueUsage(pipeline, eventId)
+  const rowUsers = collectEventAttackRowUsers(pipeline, eventId)
+  if (rowUsers.length > 0) {
+    throw new Error(formatInUseError('event', event.name, rowUsers))
+  }
   if (usage.labels.length > 0 && cueUsage.labels.length === 0) {
     throw new Error(formatBindingInUseError('event', event.name, usage.labels))
   }

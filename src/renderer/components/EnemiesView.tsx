@@ -1,6 +1,6 @@
 /**
- * /studio/enemies/:gameId — enemy records (2a). List + idle/new/edit, live checklist.
- * Attack tables / difficulty land in 2b / 2c.
+ * /studio/enemies/:gameId — enemy records (2a) and attack tables (2b).
+ * Difficulty lands in 2c.
  */
 
 import { useMemo, useState } from 'react'
@@ -9,6 +9,7 @@ import { useProjectStore } from '../state/indieForgeStore'
 import { useLocalFilePreview } from '../hooks/useLocalFilePreview'
 import { effectivePoseSlots } from '@shared/gameSettings/poseSlots'
 import { BATTLE_TYPE_ID, buildEnemyChecklist, FALLBACK_BATTLE_POSE_SLOT } from '@shared/enemies/validate'
+import { AttackTablesPanel } from './AttackTablesPanel'
 import type {
   AssetPipelineProject,
   BattleMoment,
@@ -83,6 +84,7 @@ export function EnemiesView() {
   const [poses, setPoses] = useState<Partial<Record<BattleMoment, string>>>({})
   const [assets, setAssets] = useState<AssetRow[]>([])
   const [notes, setNotes] = useState('')
+  const [attackTableId, setAttackTableId] = useState('')
 
   const pipeline = activeProject?.assetPipeline as AssetPipelineProject | undefined
   const game = pipeline?.games.find((g) => g.id === gameId)
@@ -144,6 +146,7 @@ export function EnemiesView() {
       }))
     )
     setNotes(enemy.notes || '')
+    setAttackTableId(enemy.attackTableId || '')
   }
 
   function beginNew() {
@@ -159,6 +162,7 @@ export function EnemiesView() {
     setPoses({})
     setAssets([])
     setNotes('')
+    setAttackTableId('')
   }
 
   function selectRow(enemy: Enemy) {
@@ -186,7 +190,8 @@ export function EnemiesView() {
       stats: recordFromKv(stats),
       poses,
       assets: assetRefs,
-      notes: notes.trim() || undefined
+      notes: notes.trim() || undefined,
+      attackTableId: attackTableId || null
     }
   }
 
@@ -201,6 +206,7 @@ export function EnemiesView() {
     poses,
     assets: payload().assets,
     notes: notes.trim() || undefined,
+    attackTableId: attackTableId || undefined,
     key: key.trim() || undefined,
     schemaVersion: 2,
     createdAt: selected?.createdAt || '',
@@ -220,7 +226,7 @@ export function EnemiesView() {
         <div>
           <h2>Enemies</h2>
           <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>
-            {game.name} • still poses wrapping a character. Attack tables (2b) and encounter links (2c) later.
+            {game.name} • still poses wrapping a character. Attack tables on this screen; encounter links in 2c.
           </p>
         </div>
       </div>
@@ -262,7 +268,14 @@ export function EnemiesView() {
       </div>
 
       {tab === 'tables' && (
-        <p style={{ color: 'var(--muted)' }}>Attack tables come in step 2b.</p>
+        <AttackTablesPanel
+          projectId={projectId}
+          gameId={gameId}
+          pipeline={pipeline}
+          game={game}
+          busy={busy}
+          refreshAfter={refreshAfter}
+        />
       )}
       {tab === 'difficulty' && (
         <p style={{ color: 'var(--muted)' }}>Difficulty profiles come in step 2c.</p>
@@ -414,6 +427,24 @@ export function EnemiesView() {
                 </select>
               </label>
               <KvEditor label="Win params" rows={winParams} onChange={setWinParams} busy={busy} />
+              <label>
+                Attack table
+                <select
+                  value={attackTableId}
+                  disabled={busy}
+                  onChange={(e) => setAttackTableId(e.target.value)}
+                >
+                  <option value="">(none)</option>
+                  {(pipeline.attackTables || [])
+                    .filter((t) => t.gameId === gameId && (!moduleId || t.moduleId === moduleId))
+                    .map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name}
+                        {t.key ? ` @${t.key}` : ''}
+                      </option>
+                    ))}
+                </select>
+              </label>
               <KvEditor label="Stats" rows={stats} onChange={setStats} busy={busy} />
               <BattlePoseRow
                 game={game}
@@ -762,6 +793,18 @@ function ChecklistPanel({
       {checklist.assets.map((a) => (
         <div key={a.role} style={{ fontSize: '0.85rem', marginBottom: '0.25rem' }}>
           asset {a.role}: {a.have ? 'have' : 'missing'}
+        </div>
+      ))}
+      {checklist.cueEvents.map((c) => (
+        <div key={`cue-${c.id}-${c.usedBy}`} style={{ fontSize: '0.85rem', marginBottom: '0.25rem' }}>
+          cue {c.name}: {c.have ? 'have' : 'missing'}{' '}
+          <span style={{ color: 'var(--muted)' }}>({c.usedBy})</span>
+        </div>
+      ))}
+      {checklist.sfx.map((s) => (
+        <div key={`sfx-${s.id}-${s.usedBy}`} style={{ fontSize: '0.85rem', marginBottom: '0.25rem' }}>
+          sfx {s.name}: {s.have ? 'have' : 'missing'}{' '}
+          <span style={{ color: 'var(--muted)' }}>({s.usedBy})</span>
         </div>
       ))}
       <p style={{ color: 'var(--muted)', fontSize: '0.8rem' }}>usedBy encounters: none until 2c</p>

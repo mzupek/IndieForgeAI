@@ -147,6 +147,24 @@ export interface GameAssetCategoryDef {
   base?: string
 }
 
+export interface ModuleKindParamDef {
+  key: string
+  type: 'number'
+  min?: number
+  max?: number
+}
+
+export interface ModuleAttackKind {
+  key: string
+  label: string
+  params?: ModuleKindParamDef[]
+}
+
+export interface ModuleCounterKind {
+  key: string
+  label: string
+}
+
 export interface GameEncounterModule {
   id: string
   label: string
@@ -154,6 +172,10 @@ export interface GameEncounterModule {
   starKinds?: string[]
   /** 2a: allowed enemy win-condition kinds for this module (data, not code). */
   winConditions?: string[]
+  /** 2b: allowed attack row kinds for this module (data, not code). */
+  attackKinds?: ModuleAttackKind[]
+  /** 2b: allowed counter kinds for attack rows (data, not code). */
+  counterKinds?: ModuleCounterKind[]
 }
 
 export interface GameSettings {
@@ -918,10 +940,59 @@ export interface Enemy {
   stats: Record<string, number>
   /** Battle moment -> a pose slot of the character (core, game, or character). */
   poses: Partial<Record<BattleMoment, string>>
-  /** Reserved for 2b. Stored when present; not required in 2a. */
+  /** 2b: attack table in this game with the same module. */
   attackTableId?: string
   assets?: EnemyAssetRef[]
   notes?: string
+  schemaVersion: number
+  createdAt: string
+  updatedAt: string
+}
+
+export type AttackSelection = 'weighted' | 'sequence'
+export type AttackReveal = 'roundStart'
+export type AttackCounterResult = 'cancel' | 'halve'
+
+export interface AttackRowCounter {
+  kind: string
+  result: AttackCounterResult
+}
+
+/** Record-local slug row on an attack table. */
+export interface AttackRow {
+  id: string
+  label: string
+  telegraph: string
+  kind: string
+  params?: Record<string, number>
+  damage?: number
+  weight: number
+  minRound?: number
+  maxRound?: number
+  counter?: AttackRowCounter
+  /** Pose slot on the linked enemy's character. */
+  poseSlot?: string
+  /** Pose slot on the hero (core + game slots). */
+  heroPoseSlot?: string
+  cueEventId?: string
+  sfxAudioId?: string
+}
+
+/**
+ * Game-level attack table: rows an enemy picks from between puzzle rounds.
+ * Linked from Enemy.attackTableId. Still data only; no scripts.
+ */
+export interface AttackTable {
+  id: string
+  gameId: string
+  key?: string
+  name: string
+  moduleId: string
+  selection: AttackSelection
+  noRepeatInARow: boolean
+  reveal: AttackReveal
+  skipFinalRound: boolean
+  rows: AttackRow[]
   schemaVersion: number
   createdAt: string
   updatedAt: string
@@ -985,6 +1056,8 @@ export interface AssetPipelineProject {
   regions?: Region[]
   /** 2a: game-level enemy records. Optional on disk; filled in memory when missing. */
   enemies?: Enemy[]
+  /** 2b: game-level attack tables. Optional on disk; filled in memory when missing. */
+  attackTables?: AttackTable[]
   createdAt: string
   updatedAt: string
 }

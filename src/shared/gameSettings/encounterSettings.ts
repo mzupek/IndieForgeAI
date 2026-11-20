@@ -6,7 +6,10 @@ import type {
   AssetPipelineProject,
   Encounter,
   Game,
-  GameEncounterModule
+  GameEncounterModule,
+  ModuleAttackKind,
+  ModuleCounterKind,
+  ModuleKindParamDef
 } from '../types/assetPipeline'
 import { emptyGameSettings, DEFAULT_ENCOUNTER_TYPES } from '../studio/schema'
 import { assertLabel, assertSettingsKey, normalizeSettingsKey } from './keys'
@@ -23,6 +26,161 @@ export function assertWinConditionKey(raw: string, kind = 'Win condition'): stri
     )
   }
   return trimmed
+}
+
+export function normalizeKindParamDef(raw: unknown, kindKey: string): ModuleKindParamDef {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error(`Attack kind '${kindKey}' param must be { key, type, min?, max? }`)
+  }
+  const obj = raw as Record<string, unknown>
+  const key = assertWinConditionKey(String(obj.key ?? ''), 'Attack kind param')
+  const type = String(obj.type ?? 'number').trim()
+  if (type !== 'number') {
+    throw new Error(`Attack kind '${kindKey}' param '${key}' type must be 'number'`)
+  }
+  const def: ModuleKindParamDef = { key, type: 'number' }
+  if (obj.min !== undefined && obj.min !== null && obj.min !== '') {
+    const min = Number(obj.min)
+    if (!Number.isFinite(min)) throw new Error(`Attack kind '${kindKey}' param '${key}' min must be a number`)
+    def.min = min
+  }
+  if (obj.max !== undefined && obj.max !== null && obj.max !== '') {
+    const max = Number(obj.max)
+    if (!Number.isFinite(max)) throw new Error(`Attack kind '${kindKey}' param '${key}' max must be a number`)
+    def.max = max
+  }
+  if (def.min !== undefined && def.max !== undefined && def.min > def.max) {
+    throw new Error(`Attack kind '${kindKey}' param '${key}' min cannot be greater than max`)
+  }
+  return def
+}
+
+export function normalizeAttackKind(raw: unknown, moduleId: string): ModuleAttackKind {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error(`Module '${moduleId}' attack kind must be { key, label, params? }`)
+  }
+  const obj = raw as Record<string, unknown>
+  const key = assertWinConditionKey(String(obj.key ?? ''), 'Attack kind')
+  const label = assertLabel(String(obj.label ?? obj.key ?? ''), 'Attack kind')
+  const def: ModuleAttackKind = { key, label }
+  if (obj.params !== undefined) {
+    if (!Array.isArray(obj.params)) {
+      throw new Error(`Attack kind '${key}' params must be an array`)
+    }
+    const params: ModuleKindParamDef[] = []
+    const seen = new Set<string>()
+    for (const item of obj.params) {
+      const p = normalizeKindParamDef(item, key)
+      const lower = p.key.toLowerCase()
+      if (seen.has(lower)) throw new Error(`Attack kind '${key}' has duplicate param '${p.key}'`)
+      seen.add(lower)
+      params.push(p)
+    }
+    if (params.length) def.params = params
+  }
+  return def
+}
+
+export function normalizeAttackKinds(
+  raw: ModuleAttackKind[] | undefined,
+  moduleId: string
+): ModuleAttackKind[] | undefined {
+  if (!raw || raw.length === 0) return undefined
+  const kinds: ModuleAttackKind[] = []
+  const seen = new Set<string>()
+  for (const item of raw) {
+    const def = normalizeAttackKind(item, moduleId)
+    const lower = def.key.toLowerCase()
+    if (seen.has(lower)) throw new Error(`Module '${moduleId}' has duplicate attackKind '${def.key}'`)
+    seen.add(lower)
+    kinds.push(def)
+  }
+  return kinds
+}
+
+export function normalizeCounterKind(raw: unknown, moduleId: string): ModuleCounterKind {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error(`Module '${moduleId}' counter kind must be { key, label }`)
+  }
+  const obj = raw as Record<string, unknown>
+  const key = assertWinConditionKey(String(obj.key ?? ''), 'Counter kind')
+  const label = assertLabel(String(obj.label ?? obj.key ?? ''), 'Counter kind')
+  return { key, label }
+}
+
+export function normalizeCounterKinds(
+  raw: ModuleCounterKind[] | undefined,
+  moduleId: string
+): ModuleCounterKind[] | undefined {
+  if (!raw || raw.length === 0) return undefined
+  const kinds: ModuleCounterKind[] = []
+  const seen = new Set<string>()
+  for (const item of raw) {
+    const def = normalizeCounterKind(item, moduleId)
+    const lower = def.key.toLowerCase()
+    if (seen.has(lower)) throw new Error(`Module '${moduleId}' has duplicate counterKind '${def.key}'`)
+    seen.add(lower)
+    kinds.push(def)
+  }
+  return kinds
+}
+
+export function findAttackKind(mod: GameEncounterModule | undefined, key: string): ModuleAttackKind | undefined {
+  const lower = String(key || '').trim().toLowerCase()
+  return (mod?.attackKinds || []).find((k) => k.key.toLowerCase() === lower)
+}
+
+export function findCounterKind(mod: GameEncounterModule | undefined, key: string): ModuleCounterKind | undefined {
+  const lower = String(key || '').trim().toLowerCase()
+  return (mod?.counterKinds || []).find((k) => k.key.toLowerCase() === lower)
+}
+
+function attackTableRowUsers(
+  pipeline: AssetPipelineProject,
+  gameId: string,
+  moduleId: string,
+  match: (row: { kind: string; counter?: { kind: string } }, tableName: string, tableId: string) => boolean
+): NamedUser[] {
+  const users: NamedUser[] = []
+  for (const table of pipeline.attackTables || []) {
+    if (table.gameId !== gameId || table.moduleId !== moduleId) continue
+    for (const row of table.rows || []) {
+      if (match(row, table.name, table.id)) {
+        users.push({ id: `${table.id}:${row.id}`, name: `${table.name} row ${row.label || row.id}`, kind: 'attack-row' })
+      }
+    }
+  }
+  return users
+}
+
+export function collectAttackKindUsers(
+  pipeline: AssetPipelineProject,
+  gameId: string,
+  moduleId: string,
+  kind: string
+): NamedUser[] {
+  const lower = kind.toLowerCase()
+  return attackTableRowUsers(
+    pipeline,
+    gameId,
+    moduleId,
+    (row) => row.kind.toLowerCase() === lower
+  )
+}
+
+export function collectCounterKindUsers(
+  pipeline: AssetPipelineProject,
+  gameId: string,
+  moduleId: string,
+  kind: string
+): NamedUser[] {
+  const lower = kind.toLowerCase()
+  return attackTableRowUsers(
+    pipeline,
+    gameId,
+    moduleId,
+    (row) => (row.counter?.kind || '').toLowerCase() === lower
+  )
 }
 
 export function normalizeWinConditions(raw: string[] | undefined, moduleId: string): string[] | undefined {
@@ -79,6 +237,8 @@ export function normalizeModule(input: {
   typeIds: string[]
   starKinds?: string[]
   winConditions?: string[]
+  attackKinds?: ModuleAttackKind[]
+  counterKinds?: ModuleCounterKind[]
 }): GameEncounterModule {
   const id = assertSettingsKey(input.id, 'Module')
   const label = assertLabel(input.label, 'Module')
@@ -105,6 +265,10 @@ export function normalizeModule(input: {
   }
   const win = normalizeWinConditions(input.winConditions, id)
   if (win) def.winConditions = win
+  const attacks = normalizeAttackKinds(input.attackKinds, id)
+  if (attacks) def.attackKinds = attacks
+  const counters = normalizeCounterKinds(input.counterKinds, id)
+  if (counters) def.counterKinds = counters
   return def
 }
 
@@ -164,7 +328,10 @@ export function collectModuleUsers(
   const enemies = (pipeline.enemies || [])
     .filter((e) => e.gameId === gameId && e.moduleId === key)
     .map((e) => ({ id: e.id, name: e.name, kind: 'enemy' }))
-  return [...encounters, ...enemies]
+  const tables = (pipeline.attackTables || [])
+    .filter((t) => t.gameId === gameId && t.moduleId === key)
+    .map((t) => ({ id: t.id, name: t.name, kind: 'attack-table' }))
+  return [...encounters, ...enemies, ...tables]
 }
 
 export function assertCanRemoveEncounterType(
@@ -236,5 +403,17 @@ export function assertModuleUpdateCompatible(
         )
       )
     }
+  }
+  const nextAttacks = new Set((next.attackKinds || []).map((k) => k.key.toLowerCase()))
+  for (const kind of previous.attackKinds || []) {
+    if (nextAttacks.has(kind.key.toLowerCase())) continue
+    const users = collectAttackKindUsers(pipeline, gameId, previous.id, kind.key)
+    if (users.length > 0) throw new Error(formatInUseError('attack kind', kind.key, users))
+  }
+  const nextCounters = new Set((next.counterKinds || []).map((k) => k.key.toLowerCase()))
+  for (const kind of previous.counterKinds || []) {
+    if (nextCounters.has(kind.key.toLowerCase())) continue
+    const users = collectCounterKindUsers(pipeline, gameId, previous.id, kind.key)
+    if (users.length > 0) throw new Error(formatInUseError('counter kind', kind.key, users))
   }
 }

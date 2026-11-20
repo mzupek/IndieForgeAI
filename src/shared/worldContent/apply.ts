@@ -5,6 +5,7 @@
 
 import type {
   AssetPipelineProject,
+  AttackTable,
   Encounter,
   EncounterStar,
   Enemy,
@@ -46,6 +47,12 @@ import {
   resolveVisualAssetRef,
   validateEnemy
 } from '../enemies/validate'
+import {
+  attackTablesOf,
+  parseAttackRows,
+  resolveAttackTableRef,
+  validateAttackTable
+} from '../attackTables/validate'
 import { resolveSceneId, resolveTuningProfileId } from './validate'
 
 export interface ContentBundle {
@@ -54,12 +61,13 @@ export interface ContentBundle {
   encounters?: Record<string, unknown>[]
   regions?: Record<string, unknown>[]
   enemies?: Record<string, unknown>[]
+  attackTables?: Record<string, unknown>[]
 }
 
 export type ApplyAction = 'create' | 'update' | 'unchanged'
 
 export interface ApplyRecordResult {
-  type: 'world' | 'stage' | 'encounter' | 'region' | 'enemy'
+  type: 'world' | 'stage' | 'encounter' | 'region' | 'enemy' | 'attackTable'
   action: ApplyAction
   id: string
   key?: string
@@ -97,6 +105,7 @@ function seedAliasMap(pipeline: AssetPipelineProject, gameId: string): Record<st
   for (const e of encountersOf(pipeline, gameId)) add('encounter', e.key, e.id)
   for (const r of regionsOf(pipeline, gameId)) add('region', r.key, r.id)
   for (const e of enemiesOf(pipeline, gameId)) add('enemy', e.key, e.id)
+  for (const t of attackTablesOf(pipeline, gameId)) add('attackTable', t.key, t.id)
   for (const c of (pipeline.characters || []).filter((x) => x.gameId === gameId)) {
     add('character', c.key, c.id)
   }
@@ -173,7 +182,7 @@ interface Planned {
 }
 
 function planIncoming(
-  kind: 'world' | 'stage' | 'encounter' | 'region' | 'enemy',
+  kind: 'world' | 'stage' | 'encounter' | 'region' | 'enemy' | 'attackTable',
   inputs: Record<string, unknown>[],
   existing: { id: string; key?: string; gameId: string }[],
   gameId: string,
@@ -391,10 +400,19 @@ export function applyContentBundle(
   if (!pipeline.encounters) pipeline.encounters = []
   if (!pipeline.regions) pipeline.regions = []
   if (!pipeline.enemies) pipeline.enemies = []
+  if (!pipeline.attackTables) pipeline.attackTables = []
 
   const worldPlan = planIncoming('world', bundle.worlds || [], pipeline.worlds, gameId, aliasMap, issues)
   const stagePlan = planIncoming('stage', bundle.stages || [], pipeline.stages, gameId, aliasMap, issues)
   const regionPlan = planIncoming('region', bundle.regions || [], pipeline.regions, gameId, aliasMap, issues)
+  const attackTablePlan = planIncoming(
+    'attackTable',
+    bundle.attackTables || [],
+    pipeline.attackTables,
+    gameId,
+    aliasMap,
+    issues
+  )
   const enemyPlan = planIncoming('enemy', bundle.enemies || [], pipeline.enemies, gameId, aliasMap, issues)
   const encounterPlan = planIncoming(
     'encounter',
@@ -668,6 +686,49 @@ export function applyContentBundle(
     else pipeline.encounters.push(e)
   }
 
+  const nextTables: AttackTable[] = []
+  for (const p of attackTablePlan) {
+    const path = `attackTables[${p.index}]`
+    const existing = pipeline.attackTables.find((t) => t.id === p.id)
+    const rowIssues: ContentIssue[] = []
+    const rows = parseAttackRows(
+      p.input.rows !== undefined ? p.input.rows : existing?.rows || [],
+      `${path}.rows`,
+      rowIssues
+    )
+    issues.push(...rowIssues)
+    const selectionRaw = optionalStr(p.input.selection) || existing?.selection || 'weighted'
+    const revealRaw = optionalStr(p.input.reveal) || existing?.reveal || 'roundStart'
+    const known: AttackTable = {
+      id: p.id,
+      gameId,
+      name: str(p.input.name) || existing?.name || '',
+      moduleId: str(p.input.moduleId) || existing?.moduleId || '',
+      selection: selectionRaw === 'sequence' ? 'sequence' : 'weighted',
+      noRepeatInARow:
+        p.input.noRepeatInARow !== undefined
+          ? Boolean(p.input.noRepeatInARow)
+          : existing?.noRepeatInARow ?? false,
+      reveal: revealRaw === 'roundStart' ? 'roundStart' : 'roundStart',
+      skipFinalRound:
+        p.input.skipFinalRound !== undefined
+          ? Boolean(p.input.skipFinalRound)
+          : existing?.skipFinalRound ?? false,
+      rows,
+      schemaVersion: RECORD_SCHEMA_VERSION,
+      createdAt: existing?.createdAt || now,
+      updatedAt: now
+    }
+    const key = p.key ?? existing?.key
+    if (key) known.key = key
+    nextTables.push(overlayRecord(existing, known))
+  }
+  for (const t of nextTables) {
+    const idx = pipeline.attackTables.findIndex((x) => x.id === t.id)
+    if (idx >= 0) pipeline.attackTables[idx] = t
+    else pipeline.attackTables.push(t)
+  }
+
   const nextEnemies: Enemy[] = []
   for (const p of enemyPlan) {
     const path = `enemies[${p.index}]`
@@ -720,8 +781,18 @@ export function applyContentBundle(
     if (assets.length) known.assets = assets
     const notes = optionalStr(p.input.notes) ?? existing?.notes
     if (notes) known.notes = notes
-    const table = optionalStr(p.input.attackTableId) ?? existing?.attackTableId
-    if (table) known.attackTableId = table
+    const tableRaw = optionalStr(p.input.attackTableId) ?? existing?.attackTableId
+    if (tableRaw) {
+      if (isAliasRef(tableRaw)) {
+        const resolved = lookupAlias(aliasMap, tableRaw, 'attackTable')
+        if (!resolved) issues.push(errorIssue(`${path}.attackTableId`, `Unknown alias '${tableRaw}' for attack table`))
+        else known.attackTableId = resolved
+      } else {
+        const resolved = resolveAttackTableRef(pipeline, gameId, tableRaw)
+        if (resolved.error) issues.push(errorIssue(`${path}.attackTableId`, resolved.error))
+        else known.attackTableId = resolved.id || tableRaw
+      }
+    }
     nextEnemies.push(overlayRecord(existing, known))
   }
   for (const e of nextEnemies) {
@@ -745,6 +816,10 @@ export function applyContentBundle(
   for (const p of encounterPlan) {
     const rec = pipeline.encounters.find((e) => e.id === p.id)!
     issues.push(...validateEncounter(pipeline, rec, `encounters[${p.index}]`))
+  }
+  for (const p of attackTablePlan) {
+    const rec = pipeline.attackTables.find((t) => t.id === p.id)!
+    issues.push(...validateAttackTable(pipeline, rec, `attackTables[${p.index}]`))
   }
   for (const p of enemyPlan) {
     const rec = pipeline.enemies.find((e) => e.id === p.id)!
@@ -805,6 +880,7 @@ export function applyContentBundle(
   pack('region', regionPlan, pipeline.regions)
   pack('encounter', encounterPlan, pipeline.encounters)
   pack('enemy', enemyPlan, pipeline.enemies)
+  pack('attackTable', attackTablePlan, pipeline.attackTables)
 
   return result
 }
@@ -822,14 +898,16 @@ export function classifyApplyActions(
     stage: before.stages || [],
     encounter: before.encounters || [],
     region: before.regions || [],
-    enemy: before.enemies || []
+    enemy: before.enemies || [],
+    attackTable: before.attackTables || []
   }
   const afterLookup = {
     world: after.worlds || [],
     stage: after.stages || [],
     encounter: after.encounters || [],
     region: after.regions || [],
-    enemy: after.enemies || []
+    enemy: after.enemies || [],
+    attackTable: after.attackTables || []
   }
   const all = [...result.creates, ...result.updates, ...result.unchanged]
   result.creates = []

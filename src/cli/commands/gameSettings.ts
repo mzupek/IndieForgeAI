@@ -9,6 +9,8 @@ import {
   addCharacterPoseSlot,
   addEncounterModule,
   addEncounterType,
+  addModuleAttackKind,
+  addModuleCounterKind,
   addGameAssetCategory,
   addGamePoseSlot,
   listCharacterPoseSlots,
@@ -19,6 +21,8 @@ import {
   removeCharacterPoseSlot,
   removeEncounterModule,
   removeEncounterType,
+  removeModuleAttackKind,
+  removeModuleCounterKind,
   removeGameAssetCategory,
   removeGamePoseSlot,
   setCharacterCorePosesRequired,
@@ -468,8 +472,10 @@ export function registerGameSettingsCommands(gamesCmd: Command, characterCmd: Co
           if (modules.length === 0) console.log('  (none)')
           for (const m of modules) {
             const wins = (m.winConditions || []).join(',')
+            const attacks = (m.attackKinds || []).map((k) => k.key).join(',')
+            const counters = (m.counterKinds || []).map((k) => k.key).join(',')
             console.log(
-              `  ${m.id}  ${m.label}  types=${m.typeIds.join(',')}${wins ? `  win=${wins}` : ''}`
+              `  ${m.id}  ${m.label}  types=${m.typeIds.join(',')}${wins ? `  win=${wins}` : ''}${attacks ? `  attack=${attacks}` : ''}${counters ? `  counter=${counters}` : ''}`
             )
           }
         })
@@ -589,4 +595,128 @@ export function registerGameSettingsCommands(gamesCmd: Command, characterCmd: Co
         process.exit(1)
       }
     })
+
+  const attackKindCmd = moduleCmd.command('attack-kind').description('Manage module attack kinds (2b)')
+  attackKindCmd
+    .command('add')
+    .description('Add an attack kind to a module')
+    .argument('<moduleId>', 'Module slug')
+    .requiredOption('--game <id>', 'Game ID')
+    .requiredOption('--key <key>', 'Kind key (camelCase)')
+    .option('--label <label>', 'Display label')
+    .option('--param <spec>', 'Param spec key:number[:min[:max]] (repeatable)', collect, [])
+    .option('--dry-run', 'Validate without writing')
+    .action(async (moduleId, options, cmd) => {
+      const opts = { ...program.opts(), ...collectOpts(cmd, options) }
+      try {
+        const params = (options.param as string[] | undefined || []).map(parseParamSpec)
+        const def = await addModuleAttackKind(
+          opts.game!,
+          String(moduleId),
+          { key: String(options.key), label: options.label ? String(options.label) : undefined, params },
+          { dataDirOverride: dir(opts), dryRun: Boolean(opts.dryRun) }
+        )
+        printOrJson({ module: def, dryRun: Boolean(opts.dryRun) }, opts, () => {
+          console.log(`${opts.dryRun ? 'Would add' : 'Added'} attack kind '${options.key}' on ${def.id}`)
+        })
+      } catch (err) {
+        outputError(err, opts)
+        process.exit(1)
+      }
+    })
+  attackKindCmd
+    .command('remove')
+    .description('Remove an attack kind (refused while a row uses it)')
+    .argument('<moduleId>', 'Module slug')
+    .requiredOption('--game <id>', 'Game ID')
+    .requiredOption('--key <key>', 'Kind key')
+    .option('--dry-run', 'Validate without writing')
+    .action(async (moduleId, options, cmd) => {
+      const opts = { ...program.opts(), ...collectOpts(cmd, options) }
+      try {
+        const def = await removeModuleAttackKind(opts.game!, String(moduleId), String(options.key), {
+          dataDirOverride: dir(opts),
+          dryRun: Boolean(opts.dryRun)
+        })
+        printOrJson({ module: def, dryRun: Boolean(opts.dryRun) }, opts, () => {
+          console.log(`${opts.dryRun ? 'Would remove' : 'Removed'} attack kind '${options.key}' from ${def.id}`)
+        })
+      } catch (err) {
+        outputError(err, opts)
+        process.exit(1)
+      }
+    })
+
+  const counterKindCmd = moduleCmd.command('counter-kind').description('Manage module counter kinds (2b)')
+  counterKindCmd
+    .command('add')
+    .description('Add a counter kind to a module')
+    .argument('<moduleId>', 'Module slug')
+    .requiredOption('--game <id>', 'Game ID')
+    .requiredOption('--key <key>', 'Kind key (camelCase)')
+    .option('--label <label>', 'Display label')
+    .option('--dry-run', 'Validate without writing')
+    .action(async (moduleId, options, cmd) => {
+      const opts = { ...program.opts(), ...collectOpts(cmd, options) }
+      try {
+        const def = await addModuleCounterKind(
+          opts.game!,
+          String(moduleId),
+          { key: String(options.key), label: options.label ? String(options.label) : undefined },
+          { dataDirOverride: dir(opts), dryRun: Boolean(opts.dryRun) }
+        )
+        printOrJson({ module: def, dryRun: Boolean(opts.dryRun) }, opts, () => {
+          console.log(`${opts.dryRun ? 'Would add' : 'Added'} counter kind '${options.key}' on ${def.id}`)
+        })
+      } catch (err) {
+        outputError(err, opts)
+        process.exit(1)
+      }
+    })
+  counterKindCmd
+    .command('remove')
+    .description('Remove a counter kind (refused while a row uses it)')
+    .argument('<moduleId>', 'Module slug')
+    .requiredOption('--game <id>', 'Game ID')
+    .requiredOption('--key <key>', 'Kind key')
+    .option('--dry-run', 'Validate without writing')
+    .action(async (moduleId, options, cmd) => {
+      const opts = { ...program.opts(), ...collectOpts(cmd, options) }
+      try {
+        const def = await removeModuleCounterKind(opts.game!, String(moduleId), String(options.key), {
+          dataDirOverride: dir(opts),
+          dryRun: Boolean(opts.dryRun)
+        })
+        printOrJson({ module: def, dryRun: Boolean(opts.dryRun) }, opts, () => {
+          console.log(`${opts.dryRun ? 'Would remove' : 'Removed'} counter kind '${options.key}' from ${def.id}`)
+        })
+      } catch (err) {
+        outputError(err, opts)
+        process.exit(1)
+      }
+    })
+}
+
+function collect(value: string, previous: string[]): string[] {
+  return [...previous, value]
+}
+
+function parseParamSpec(raw: string): { key: string; type: 'number'; min?: number; max?: number } {
+  const parts = String(raw || '').split(':')
+  const key = (parts[0] || '').trim()
+  const type = (parts[1] || 'number').trim()
+  if (!key) throw new Error('--param must be key:number[:min[:max]]')
+  if (type !== 'number') throw new Error(`--param type must be number, got '${type}'`)
+  const def: { key: string; type: 'number'; min?: number; max?: number } = { key, type: 'number' }
+  if (parts[2] !== undefined && parts[2] !== '') {
+    const min = Number(parts[2])
+    if (!Number.isFinite(min)) throw new Error(`--param min must be a number, got '${parts[2]}'`)
+    def.min = min
+  }
+  if (parts[3] !== undefined && parts[3] !== '') {
+    const max = Number(parts[3])
+    if (!Number.isFinite(max)) throw new Error(`--param max must be a number, got '${parts[3]}'`)
+    def.max = max
+  }
+  return def
 }

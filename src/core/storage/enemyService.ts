@@ -30,6 +30,7 @@ import {
   type EnemyChecklist
 } from '@shared/enemies/validate'
 import { findModule } from '@shared/gameSettings/encounterSettings'
+import { resolveAttackTableRef } from '@shared/attackTables/validate'
 
 export interface WriteOptions {
   dataDirOverride?: string
@@ -170,7 +171,11 @@ export async function createEnemy(
     const key = assertRecordKey(input.key, 'Enemy')
     if (key) known.key = key
     assertEnemyKeyUnique(pipeline, gameId, key, known.id)
-    if (input.attackTableId) known.attackTableId = String(input.attackTableId).trim()
+    if (input.attackTableId) {
+      const resolved = resolveAttackTableRef(pipeline, gameId, String(input.attackTableId).trim())
+      if (resolved.error || !resolved.id) throw new Error(resolved.error || 'attackTableId is required')
+      known.attackTableId = resolved.id
+    }
     if (assets.length) known.assets = assets
     if (input.notes) known.notes = String(input.notes)
     throwIssues(validateEnemy(pipeline, known))
@@ -237,8 +242,11 @@ export async function updateEnemy(
       if (!next.assets.length) delete next.assets
     }
     if (patch.attackTableId !== undefined) {
-      if (patch.attackTableId) next.attackTableId = String(patch.attackTableId).trim()
-      else delete next.attackTableId
+      if (patch.attackTableId) {
+        const resolved = resolveAttackTableRef(pipeline, gameId, String(patch.attackTableId).trim())
+        if (resolved.error || !resolved.id) throw new Error(resolved.error || 'attackTableId is required')
+        next.attackTableId = resolved.id
+      } else delete next.attackTableId
     }
     if (patch.notes !== undefined) {
       if (patch.notes) next.notes = String(patch.notes)

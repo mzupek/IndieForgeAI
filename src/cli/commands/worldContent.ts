@@ -413,7 +413,7 @@ export function registerWorldContentCommands(program: Command): void {
 
   contentCmd
     .command('apply')
-    .description('All-or-nothing apply of a worlds/stages/regions/encounters/enemies bundle (match by key)')
+    .description('All-or-nothing apply of a worlds/stages/regions/encounters/enemies/attackTables bundle (match by key)')
     .requiredOption('--game <id>', 'Game ID')
     .requiredOption('--file <path>', 'Bundle JSON')
     .option('--dry-run', 'Print alias map / creates / updates / issues; write nothing')
