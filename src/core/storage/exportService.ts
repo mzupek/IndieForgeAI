@@ -12,8 +12,12 @@ import type {
   ExportManifestStoryboard
 } from '@shared/types/exportManifest'
 import { EXPORT_MANIFEST_SCHEMA_VERSION } from '@shared/types/exportManifest'
-import { getAssetPipeline, saveStudio, updateAssetPipeline } from './studioStorage'
+import { getAssetPipeline, updateAssetPipeline } from './studioStorage'
+import { getDataDir } from './dataDir'
+import { resolveBackgroundStillRefs, resolveShotBackgroundImagePath } from '../../shared/storyboard/shotBackground'
+import { backgroundKeyRefs } from '../../shared/storyboard/backgroundKeys'
 import type { Game } from '@shared/types/assetPipeline'
+import { requiredPoseSlots } from '../../shared/gameSettings/poseSlots'
 import { generateStoryboardThumbnails } from '../export/storyboardThumbnails'
 import { homedir } from 'os'
 
@@ -45,59 +49,67 @@ function getDefaultExportTarget(game: Game): string {
 }
 
 /**
- * Ensure game has a valid absolute export target, migrating if needed
+ * Resolve an absolute export root for a game. Never writes.
  */
-async function ensureExportTarget(gameId: string, dataDirOverride?: string): Promise<string> {
+function resolveExportRoot(game: Game): string {
+  const target = game.exportTarget
+  if (!target || !isAbsolute(expandHome(target))) {
+    return getDefaultExportTarget(game)
+  }
+  return expandHome(target)
+}
+
+/**
+ * Persist a default absolute exportTarget when missing/relative. Write path only
+ * (real `forge export`, not `--dry-run`).
+ */
+async function persistExportTarget(gameId: string, dataDirOverride?: string): Promise<string> {
   const pipeline = await getAssetPipeline(dataDirOverride)
   const game = pipeline.games.find(g => g.id === gameId)
-  
+
   if (!game) {
     throw new Error(`Game not found: ${gameId}`)
   }
-  
+
   let target = game.exportTarget
-  
-  // If no exportTarget or it's relative, set default and save
   if (!target || !isAbsolute(expandHome(target))) {
     target = getDefaultExportTarget(game)
-    
-    // Update the game in the pipeline
     game.exportTarget = target
     game.updatedAt = new Date().toISOString()
-    
-    // Save the migration
     await updateAssetPipeline(pipeline, dataDirOverride)
   }
-  
+
   return expandHome(target)
 }
 
 /**
  * Get the export target directory for a game
  */
-async function getExportTargetDir(gameId: string, dataDirOverride?: string): Promise<string> {
-  const target = await ensureExportTarget(gameId, dataDirOverride)
-  
-  // Validate it's absolute
-  if (!isAbsolute(target)) {
-    throw new Error(`Export target must be an absolute path: ${target}`)
-  }
-  
-  // Get game to determine engine
+async function getExportTargetDir(
+  gameId: string,
+  dataDirOverride?: string,
+  persist = true
+): Promise<string> {
   const pipeline = await getAssetPipeline(dataDirOverride)
   const game = pipeline.games.find(g => g.id === gameId)
-  
   if (!game) {
     throw new Error(`Game not found: ${gameId}`)
   }
-  
-  // Add engine-specific subfolder
+  const target = persist
+    ? await persistExportTarget(gameId, dataDirOverride)
+    : resolveExportRoot(game)
+
+  if (!isAbsolute(target)) {
+    throw new Error(`Export target must be an absolute path: ${target}`)
+  }
+
   if (game.engine === 'unity') {
     return join(target, 'Assets', 'IndieForge', gameId)
-  } else if (game.engine === 'godot') {
+  }
+  if (game.engine === 'godot') {
     return join(target, 'assets', 'indie_forge', gameId)
   }
-  
+
   return target
 }
 
@@ -131,7 +143,8 @@ export async function validateExport(
     const poses = pipeline.poses.filter(p => p.characterId === character.id)
     const approvedPoses = poses.filter(p => p.status === 'approved')
     
-    const slots = ['ready', 'success', 'hurt', 'win', 'defeat']
+    const gameForSlots = pipeline.games.find((g) => g.id === gameId)
+    const slots = requiredPoseSlots(gameForSlots, character).map((s) => s.key)
     const missingSlots = slots.filter(slot => 
       !approvedPoses.some(p => p.slot === slot)
     )
@@ -206,7 +219,7 @@ async function needsCopy(source: string, destination: string): Promise<'new' | '
 /**
  * Generate export manifest
  */
-async function generateManifest(
+export async function generateManifest(
   game: Game,
   dataDirOverride?: string
 ): Promise<ExportManifest> {
@@ -254,7 +267,7 @@ async function generateManifest(
   }))
   
   // Build storyboards for export (v2)
-  const storyboards = pipeline.storyboards?.filter(sb => sb.gameId === gameId) ?? []
+  const storyboards = pipeline.storyboards?.filter(sb => sb.gameId === game.id) ?? []
   const manifestStoryboards = storyboards.map(sb => {
     const shots = pipeline.storyboardShots?.filter(shot => sb.shotIds.includes(shot.id)) ?? []
     
@@ -294,10 +307,41 @@ async function generateManifest(
             }
           }
           if (layer.imagePath) resolved.imagePath = layer.imagePath
+          if (layer.visible === false) resolved.visible = false
+          if (layer.visibleFromSec !== undefined) resolved.visibleFromSec = layer.visibleFromSec
+          if (layer.visibleToSec !== undefined) resolved.visibleToSec = layer.visibleToSec
           
           return resolved
         })
+
+        const clipTrack = (shot.clipTrack || []).map((block) => {
+          const blockClip = pipeline.clips.find((c) => c.id === block.clipId)
+          return {
+            id: block.id,
+            clipId: block.clipId,
+            clipFile: blockClip ? `clips/${basename(blockClip.file)}` : undefined,
+            role: block.role,
+            layerId: block.layerId ?? null,
+            t: block.t,
+            durationSec: block.durationSec,
+            sourceInSec: block.sourceInSec,
+            sourceOutSec: block.sourceOutSec
+          }
+        })
         
+        const bgResolved = resolveShotBackgroundImagePath(shot, pipeline)
+        let backgroundFile: string | undefined
+        if (bgResolved.path) {
+          const dataDir = getDataDir(dataDirOverride)
+          const normalized = bgResolved.path.replace(/\\/g, '/')
+          const dataPrefix = dataDir.replace(/\\/g, '/')
+          if (normalized.startsWith(dataPrefix)) {
+            backgroundFile = normalized.slice(dataPrefix.length).replace(/^[/\\]+/, '')
+          } else {
+            backgroundFile = shot.backgroundImage || normalized
+          }
+        }
+
         return {
           id: shot.id,
           name: shot.name,
@@ -305,9 +349,35 @@ async function generateManifest(
           aspectRatio: shot.aspectRatio,
           backgroundImage: shot.backgroundImage,
           backgroundClipId: shot.backgroundClipId,
+          backgroundVisualAssetId: shot.backgroundVisualAssetId,
+          backgroundAssetStateId: shot.backgroundAssetStateId,
+          backgroundFile,
+          backgroundKeys: (shot.backgroundKeys || []).map((key) => {
+            const keyResolved = resolveBackgroundStillRefs(backgroundKeyRefs(key), pipeline, shot.id)
+            let keyFile: string | undefined
+            if (keyResolved.path) {
+              const dataDir = getDataDir(dataDirOverride)
+              const normalized = keyResolved.path.replace(/\\/g, '/')
+              const dataPrefix = dataDir.replace(/\\/g, '/')
+              if (normalized.startsWith(dataPrefix)) {
+                keyFile = normalized.slice(dataPrefix.length).replace(/^[/\\]+/, '')
+              } else {
+                keyFile = key.backgroundImage || normalized
+              }
+            }
+            return {
+              id: key.id,
+              t: key.t,
+              backgroundVisualAssetId: key.backgroundVisualAssetId,
+              backgroundAssetStateId: key.backgroundAssetStateId,
+              backgroundImage: key.backgroundImage,
+              backgroundFile: keyFile
+            }
+          }),
           layers,
           cameraTrack: shot.cameraTrack,
           effectsTrack: shot.effectsTrack,
+          clipTrack: clipTrack.length > 0 ? clipTrack : undefined,
           notes: shot.notes,
           thumbnail: shot.thumbnail
         }
@@ -353,7 +423,9 @@ export async function dryRunExport(
     }
   }
   
-  const targetDir = targetDirOverride ? expandHome(targetDirOverride) : await getExportTargetDir(gameId, dataDirOverride)
+  const targetDir = targetDirOverride
+    ? expandHome(targetDirOverride)
+    : await getExportTargetDir(gameId, dataDirOverride, false)
   const filesToCopy: ExportDryRun['filesToCopy'] = []
   let totalSize = 0
   

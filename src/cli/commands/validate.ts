@@ -1,5 +1,5 @@
 import type { Character } from '@shared/types/assetPipeline'
-import { checkPoseCompleteness, POSE_SLOTS, type PoseMetadata } from '@shared/poseValidation'
+import { checkPoseCompleteness, type PoseMetadata } from '@shared/poseValidation'
 import { validatePoseImage } from '../../main/storage/poseService'
 import { getAssetPipeline } from '@core/storage/studioStorage'
 import { output, outputError } from '../utils/output'
@@ -58,7 +58,8 @@ export async function run(characterId: string | undefined, options: Options): Pr
         }
       }
       
-      const completeness = checkPoseCompleteness(character, poses, metadataMap)
+      const game = pipeline.games.find((g) => g.id === character.gameId)
+      const completeness = checkPoseCompleteness(character, poses, metadataMap, { game })
       
       results.push({
         characterId: character.id,

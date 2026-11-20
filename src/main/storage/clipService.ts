@@ -8,6 +8,7 @@ import ffprobePath from 'ffprobe-static'
 import type { Clip, ClipMoment } from '@shared/types/assetPipeline'
 import { getAssetPipeline, updateAssetPipeline } from '@core/storage/studioStorage'
 import { getDataDir } from '@core/storage/dataDir'
+import { collectClipUsage, formatClipInUseError } from '../../shared/storyboard/clipBlocks'
 
 // Set ffmpeg and ffprobe paths
 if (ffmpegPath) {
@@ -133,7 +134,12 @@ export async function removeClip(
   dataDirOverride?: string
 ): Promise<void> {
   const pipeline = await getAssetPipeline(dataDirOverride)
-  
+  const clip = pipeline.clips.find((c) => c.id === clipId)
+  if (!clip) throw new Error(`Clip not found: ${clipId}`)
+  const usage = collectClipUsage(pipeline, clipId)
+  if (usage.labels.length > 0) {
+    throw new Error(formatClipInUseError(clip.moment, usage.labels))
+  }
   pipeline.clips = pipeline.clips.filter(c => c.id !== clipId)
   
   await updateAssetPipeline(pipeline, dataDirOverride)

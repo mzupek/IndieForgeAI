@@ -208,6 +208,18 @@ export async function deleteCharacter(characterId: string, options: Options): Pr
     if (!character) {
       throw new Error(`Character not found: ${characterId}`)
     }
+
+    const enemyUsers = (pipeline.enemies || []).filter((e) => e.characterId === characterId)
+    if (enemyUsers.length > 0) {
+      const preview = enemyUsers
+        .slice(0, 5)
+        .map((e) => `enemy ${e.name} (${e.id})`)
+        .join(', ')
+      const extra = enemyUsers.length > 5 ? ` and ${enemyUsers.length - 5} more` : ''
+      throw new Error(
+        `Cannot remove character '${character.name}': in use by ${enemyUsers.length} record(s): ${preview}${extra}`
+      )
+    }
     
     pipeline.characters = pipeline.characters.filter(c => c.id !== characterId)
     

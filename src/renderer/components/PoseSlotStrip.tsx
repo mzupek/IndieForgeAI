@@ -1,21 +1,24 @@
 import { useState } from 'react'
 import { useLocalFilePreview } from '../hooks/useLocalFilePreview'
-import type { Pose, PoseSlot, Character } from '@shared/types/assetPipeline'
-import { POSE_SLOTS, checkPoseCompleteness, formatValidationIssues } from '@shared/poseValidation'
+import type { Pose, Character, Game } from '@shared/types/assetPipeline'
+import { checkPoseCompleteness } from '@shared/poseValidation'
 import type { PoseMetadata } from '@shared/poseValidation'
+import { CORE_POSE_SLOT_KEYS, effectivePoseSlots } from '@shared/gameSettings/poseSlots'
 
 interface PoseSlotStripProps {
   character: Character
   poses: Pose[]
+  game?: Game | null
   poseMetadata?: Record<string, PoseMetadata>
   size?: 'small' | 'large'
-  onSlotClick?: (slot: PoseSlot) => void
+  onSlotClick?: (slot: string) => void
   showBadge?: boolean
 }
 
 export function PoseSlotStrip({
   character,
   poses,
+  game,
   poseMetadata,
   size = 'small',
   onSlotClick,
@@ -25,6 +28,8 @@ export function PoseSlotStrip({
   
   const slotSize = size === 'small' ? 48 : 128
   const characterPoses = poses.filter((p) => p.characterId === character.id)
+  const slots = effectivePoseSlots(game, character)
+  const slotKeys = slots.length > 0 ? slots.map((s) => s.key) : CORE_POSE_SLOT_KEYS
 
   // Build metadata map
   const metadataMap = new Map<string, PoseMetadata>()
@@ -34,12 +39,12 @@ export function PoseSlotStrip({
     })
   }
 
-  const completeness = checkPoseCompleteness(character, poses, metadataMap)
+  const completeness = checkPoseCompleteness(character, poses, metadataMap, { game })
 
   return (
     <div>
-      <div style={{ display: 'flex', gap: size === 'small' ? '0.5rem' : '1rem', alignItems: 'flex-start' }}>
-        {POSE_SLOTS.map((slot) => {
+      <div style={{ display: 'flex', gap: size === 'small' ? '0.5rem' : '1rem', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+        {slotKeys.map((slot) => {
           const pose = characterPoses.find((p) => p.slot === slot)
           return (
             <PoseSlot
@@ -92,7 +97,7 @@ function PoseSlot({
   size,
   onClick
 }: {
-  slot: PoseSlot
+  slot: string
   pose?: Pose
   size: number
   onClick?: () => void

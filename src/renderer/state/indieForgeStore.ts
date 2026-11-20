@@ -18,9 +18,12 @@ interface ProjectState {
   activeProject: IndieForgeProject | null
   pendingPlan: AIAssetPlan | null
   openaiConfigured: boolean
+  /** Last Game picker selection; default routes use this, else the first game. */
+  selectedGameId: string | null
   loadProjects: () => Promise<void>
   openProject: (projectId: string) => Promise<void>
   setActiveProject: (project: IndieForgeProject | null) => void
+  setSelectedGameId: (gameId: string | null) => void
   setPendingPlan: (plan: AIAssetPlan | null) => void
   refreshOpenAIConfig: () => Promise<void>
   updateActiveAsset: (asset: GameAsset) => void
@@ -38,6 +41,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   activeProject: null,
   pendingPlan: null,
   openaiConfigured: false,
+  selectedGameId: null,
 
   loadProjects: async () => {
     useUIStore.getState().setLoading(true)
@@ -64,6 +68,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   setActiveProject: (project) => set({ activeProject: project }),
+  setSelectedGameId: (gameId) => set({ selectedGameId: gameId }),
   setPendingPlan: (plan) => set({ pendingPlan: plan }),
 
   refreshOpenAIConfig: async () => {

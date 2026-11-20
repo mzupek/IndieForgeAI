@@ -542,10 +542,190 @@ export interface IndieForgeAPI {
     addLayer: (projectId: string, shotId: string, layer: any) => Promise<any>
     updateLayer: (projectId: string, shotId: string, layerId: string, updates: any) => Promise<any>
     deleteLayer: (projectId: string, shotId: string, layerId: string) => Promise<any>
+    addLayerTimedKey: (
+      projectId: string,
+      shotId: string,
+      layerId: string,
+      input: {
+        t: number
+        action: { type: 'setPose'; poseId: string } | { type: 'setState'; stateId: string }
+      }
+    ) => Promise<any>
+    listLayerTimedKeys: (
+      shotId: string,
+      layerId?: string
+    ) => Promise<Array<{ key: any; layerId: string }>>
+    getLayerTimedKey: (
+      keyId: string
+    ) => Promise<{ key: any; shotId: string; layerId: string } | null>
+    updateLayerTimedKey: (
+      projectId: string,
+      keyId: string,
+      updates: {
+        t?: number
+        action?: { type: 'setPose'; poseId: string } | { type: 'setState'; stateId: string }
+      }
+    ) => Promise<any>
+    deleteLayerTimedKey: (projectId: string, keyId: string) => Promise<any>
     addCameraKeyframe: (projectId: string, shotId: string, keyframe: any) => Promise<any>
     removeCameraKeyframe: (projectId: string, shotId: string, time: number) => Promise<any>
     addEffectMarker: (projectId: string, shotId: string, effect: any) => Promise<any>
     removeEffectMarker: (projectId: string, shotId: string, time: number) => Promise<any>
+    addShotClipBlock: (
+      projectId: string,
+      shotId: string,
+      input: {
+        clipId: string
+        role?: 'layer' | 'background'
+        layerId?: string | null
+        t: number
+        sourceInSec?: number
+        sourceOutSec?: number
+        extendShot?: boolean
+      }
+    ) => Promise<any>
+    listShotClipBlocks: (shotId: string) => Promise<any[]>
+    getShotClipBlock: (blockId: string) => Promise<any>
+    updateShotClipBlock: (
+      projectId: string,
+      blockId: string,
+      updates: { t?: number; sourceInSec?: number; sourceOutSec?: number; extendShot?: boolean }
+    ) => Promise<any>
+    deleteShotClipBlock: (projectId: string, blockId: string) => Promise<any>
+    addShotAudioBlock: (
+      projectId: string,
+      shotId: string,
+      input: {
+        audioId: string
+        role?: 'music' | 'sfx'
+        t: number
+        sourceInSec?: number
+        sourceOutSec?: number
+        durationSec?: number
+        loop?: boolean
+        volume?: number
+        fadeInSec?: number
+        fadeOutSec?: number
+        extendShot?: boolean
+        fitShot?: boolean
+      }
+    ) => Promise<any>
+    listShotAudioBlocks: (shotId: string) => Promise<any[]>
+    getShotAudioBlock: (blockId: string) => Promise<any>
+    updateShotAudioBlock: (
+      projectId: string,
+      blockId: string,
+      updates: {
+        t?: number
+        sourceInSec?: number
+        sourceOutSec?: number
+        durationSec?: number
+        loop?: boolean
+        volume?: number
+        fadeInSec?: number
+        fadeOutSec?: number
+        extendShot?: boolean
+        fitShot?: boolean
+      }
+    ) => Promise<any>
+    deleteShotAudioBlock: (projectId: string, blockId: string) => Promise<any>
+    addShotEventCue: (
+      projectId: string,
+      shotId: string,
+      input: { t: number; eventId: string }
+    ) => Promise<any>
+    listShotEventCues: (shotId: string) => Promise<any[]>
+    getShotEventCue: (cueId: string) => Promise<any>
+    updateShotEventCue: (
+      projectId: string,
+      cueId: string,
+      updates: { t?: number; eventId?: string }
+    ) => Promise<any>
+    deleteShotEventCue: (projectId: string, cueId: string) => Promise<any>
+    addShotBackgroundKey: (
+      projectId: string,
+      shotId: string,
+      input: {
+        t: number
+        backgroundVisualAssetId?: string | null
+        backgroundAssetStateId?: string | null
+        backgroundImage?: string | null
+      }
+    ) => Promise<any>
+    listShotBackgroundKeys: (shotId: string) => Promise<any[]>
+    getShotBackgroundKey: (keyId: string) => Promise<any>
+    updateShotBackgroundKey: (
+      projectId: string,
+      keyId: string,
+      updates: {
+        t?: number
+        backgroundVisualAssetId?: string | null
+        backgroundAssetStateId?: string | null
+        backgroundImage?: string | null
+      }
+    ) => Promise<any>
+    deleteShotBackgroundKey: (projectId: string, keyId: string) => Promise<any>
+    createScene: (gameId: string, input: any) => Promise<any>
+    getScene: (sceneId: string) => Promise<any | undefined>
+    listScenes: (gameId: string) => Promise<any[]>
+    updateScene: (sceneId: string, updates: any) => Promise<any>
+    deleteScene: (sceneId: string, removeStoryboard?: boolean) => Promise<{ ok: true }>
+    addCharacterToScene: (sceneId: string, characterId: string) => Promise<any>
+    removeCharacterFromScene: (sceneId: string, characterId: string) => Promise<any>
+    attachPresetToScene: (sceneId: string, presetId: string) => Promise<any>
+    detachPresetFromScene: (sceneId: string, presetId: string) => Promise<any>
+    createSceneStoryboard: (sceneId: string, input: any) => Promise<{ scene: any; storyboardId: string }>
+  }
+  audioAssets: {
+    list: (gameId: string) => Promise<any[]>
+    get: (audioId: string) => Promise<any | undefined>
+    importFile: (
+      sourcePath: string,
+      options: { gameId: string; kind: string; name?: string; tags?: string[]; engineNotes?: string }
+    ) => Promise<any>
+    update: (
+      audioId: string,
+      gameId: string,
+      patch: {
+        name?: string
+        kind?: string
+        tags?: string[]
+        engineNotes?: string | null
+        file?: string
+      }
+    ) => Promise<any>
+    remove: (audioId: string, gameId: string) => Promise<{ ok: true }>
+  }
+  visualAssets: {
+    list: (gameId: string) => Promise<any[]>
+    get: (assetId: string) => Promise<any | undefined>
+    create: (asset: any) => Promise<any>
+    update: (asset: any) => Promise<any>
+    delete: (assetId: string) => Promise<{ ok: true; statesDeleted: number }>
+    importImage: (assetId: string, sourcePath: string) => Promise<any>
+  }
+  assetStates: {
+    list: (assetId: string) => Promise<any[]>
+    listForGame: (gameId: string) => Promise<any[]>
+    get: (stateId: string) => Promise<any | undefined>
+    create: (assetId: string, name: string, sourcePath: string) => Promise<any>
+    update: (state: any) => Promise<any>
+    delete: (stateId: string) => Promise<{ ok: true }>
+    setDefault: (assetId: string, stateId: string) => Promise<any>
+  }
+  events: {
+    list: (gameId: string) => Promise<any[]>
+    get: (eventId: string) => Promise<any | undefined>
+    create: (input: { gameId: string; name: string; description?: string }) => Promise<any>
+    update: (eventId: string, patch: { name?: string; description?: string }) => Promise<any>
+    remove: (eventId: string) => Promise<{ ok: true }>
+  }
+  bindings: {
+    list: (shotId: string) => Promise<any[]>
+    get: (bindingId: string) => Promise<any | undefined>
+    create: (input: any) => Promise<any>
+    update: (bindingId: string, patch: any) => Promise<any>
+    remove: (bindingId: string) => Promise<{ ok: true }>
   }
   gameDefinitions: {
     list: () => Promise<any[]>
@@ -554,6 +734,126 @@ export interface IndieForgeAPI {
     create: (gameId: string) => Promise<any>
     update: (id: string, updates: any) => Promise<any>
     delete: (id: string) => Promise<{ ok: true }>
+  }
+  gameSettings: {
+    addPoseSlot: (
+      projectId: string,
+      gameId: string,
+      input: { key: string; label: string; group?: string; required?: boolean }
+    ) => Promise<IndieForgeProject>
+    removePoseSlot: (projectId: string, gameId: string, key: string) => Promise<IndieForgeProject>
+    addAssetCategory: (
+      projectId: string,
+      gameId: string,
+      input: { key: string; label: string; base?: string }
+    ) => Promise<IndieForgeProject>
+    removeAssetCategory: (projectId: string, gameId: string, key: string) => Promise<IndieForgeProject>
+    addCharacterPoseSlot: (
+      projectId: string,
+      characterId: string,
+      gameId: string,
+      input: { key: string; label: string; group?: string; required?: boolean }
+    ) => Promise<IndieForgeProject>
+    removeCharacterPoseSlot: (
+      projectId: string,
+      characterId: string,
+      gameId: string,
+      key: string
+    ) => Promise<IndieForgeProject>
+    setCharacterCorePosesRequired: (
+      projectId: string,
+      characterId: string,
+      gameId: string,
+      required: boolean
+    ) => Promise<IndieForgeProject>
+    addEncounterType: (projectId: string, gameId: string, typeId: string) => Promise<IndieForgeProject>
+    removeEncounterType: (projectId: string, gameId: string, typeId: string) => Promise<IndieForgeProject>
+    addModule: (
+      projectId: string,
+      gameId: string,
+      input: { id: string; label: string; typeIds: string[]; starKinds?: string[]; winConditions?: string[] }
+    ) => Promise<IndieForgeProject>
+    updateModule: (
+      projectId: string,
+      gameId: string,
+      moduleId: string,
+      input: { label?: string; typeIds?: string[]; starKinds?: string[]; winConditions?: string[] }
+    ) => Promise<IndieForgeProject>
+    removeModule: (projectId: string, gameId: string, moduleId: string) => Promise<IndieForgeProject>
+    addAttackKind: (
+      projectId: string,
+      gameId: string,
+      moduleId: string,
+      input: { key: string; label?: string; params?: { key: string; type?: string; min?: number; max?: number }[] }
+    ) => Promise<IndieForgeProject>
+    removeAttackKind: (projectId: string, gameId: string, moduleId: string, key: string) => Promise<IndieForgeProject>
+    addCounterKind: (
+      projectId: string,
+      gameId: string,
+      moduleId: string,
+      input: { key: string; label?: string }
+    ) => Promise<IndieForgeProject>
+    removeCounterKind: (projectId: string, gameId: string, moduleId: string, key: string) => Promise<IndieForgeProject>
+  }
+  worldContent: {
+    createWorld: (projectId: string, gameId: string, input: any) => Promise<IndieForgeProject>
+    updateWorld: (projectId: string, gameId: string, id: string, patch: any) => Promise<IndieForgeProject>
+    removeWorld: (projectId: string, gameId: string, id: string) => Promise<IndieForgeProject>
+    reorderWorlds: (projectId: string, gameId: string, ids: string[]) => Promise<IndieForgeProject>
+    setWorldMap: (projectId: string, gameId: string, worldId: string, input: any) => Promise<IndieForgeProject>
+    addMapNode: (projectId: string, gameId: string, worldId: string, input: any) => Promise<IndieForgeProject>
+    moveMapNode: (
+      projectId: string,
+      gameId: string,
+      worldId: string,
+      nodeId: string,
+      pos: [number, number]
+    ) => Promise<IndieForgeProject>
+    updateMapNode: (
+      projectId: string,
+      gameId: string,
+      worldId: string,
+      nodeId: string,
+      patch: any
+    ) => Promise<IndieForgeProject>
+    removeMapNode: (projectId: string, gameId: string, worldId: string, nodeId: string) => Promise<IndieForgeProject>
+    addMapPath: (projectId: string, gameId: string, worldId: string, input: any) => Promise<IndieForgeProject>
+    removeMapPath: (projectId: string, gameId: string, worldId: string, pathId: string) => Promise<IndieForgeProject>
+    setMapStart: (projectId: string, gameId: string, worldId: string, nodeId: string) => Promise<IndieForgeProject>
+    createStage: (projectId: string, gameId: string, input: any) => Promise<IndieForgeProject>
+    updateStage: (projectId: string, gameId: string, id: string, patch: any) => Promise<IndieForgeProject>
+    removeStage: (projectId: string, gameId: string, id: string) => Promise<IndieForgeProject>
+    reorderStages: (
+      projectId: string,
+      gameId: string,
+      worldId: string,
+      ids: string[]
+    ) => Promise<IndieForgeProject>
+    createEncounter: (projectId: string, gameId: string, input: any) => Promise<IndieForgeProject>
+    updateEncounter: (projectId: string, gameId: string, id: string, patch: any) => Promise<IndieForgeProject>
+    removeEncounter: (projectId: string, gameId: string, id: string) => Promise<IndieForgeProject>
+    createRegion: (projectId: string, gameId: string, input: any) => Promise<IndieForgeProject>
+    updateRegion: (projectId: string, gameId: string, id: string, patch: any) => Promise<IndieForgeProject>
+    removeRegion: (projectId: string, gameId: string, id: string) => Promise<IndieForgeProject>
+  }
+  enemies: {
+    create: (projectId: string, gameId: string, input: any) => Promise<IndieForgeProject>
+    update: (projectId: string, gameId: string, id: string, patch: any) => Promise<IndieForgeProject>
+    remove: (projectId: string, gameId: string, id: string) => Promise<IndieForgeProject>
+  }
+  attackTables: {
+    create: (projectId: string, gameId: string, input: any) => Promise<IndieForgeProject>
+    update: (projectId: string, gameId: string, id: string, patch: any) => Promise<IndieForgeProject>
+    remove: (projectId: string, gameId: string, id: string) => Promise<IndieForgeProject>
+    addRow: (projectId: string, gameId: string, tableId: string, input: any) => Promise<IndieForgeProject>
+    updateRow: (
+      projectId: string,
+      gameId: string,
+      tableId: string,
+      rowId: string,
+      input: any
+    ) => Promise<IndieForgeProject>
+    removeRow: (projectId: string, gameId: string, tableId: string, rowId: string) => Promise<IndieForgeProject>
   }
 }
 

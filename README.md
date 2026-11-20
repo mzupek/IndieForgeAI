@@ -14,7 +14,11 @@ Indie Forge does **not** try to replace Aseprite, Godot, or Unity — or ship fi
 ## What Indie Forge owns
 
 - Project profile: `engine` + `craftPath`
-- Scenes, slots, contracts
+- **Game Definitions** (Phase B): living design docs with structured data + markdown
+- **Scenes** (Phase C): narrative moments with cast, story, attached storyboards, FX recipe refs
+- Characters, Poses (1024×1024 PNG), Clips (video)
+- **Storyboards** (Phase 4.5): shot-by-shot animatics with effect markers (juice in context)
+- FX recipe library (behind-the-scenes; created/edited from storyboard timeline)
 - **Craft Studio** (pixel silhouette / paint / guide photo)
 - **Motion Studio** (rig, key poses, Motion Blueprint JSON — no art)
 - **Animation Studio** (Craft guide + Motion Blueprint skeleton frames → Aseprite)
@@ -45,6 +49,71 @@ cp .env.example .env
 # Optional: OPENAI_API_KEY for AI Plan
 npm run dev
 ```
+
+`npm run dev` serves the renderer on **port 5180** (not Vite’s default 5173) so it does not collide with other Electron/Vite apps on the same Mac. If 5180 is already taken, the process **fails** instead of silently moving. Override with `INDIE_FORGE_DEV_PORT=5181 npm run dev`. Electron loads `ELECTRON_RENDERER_URL` from electron-vite (not a hardcoded localhost port).
+
+## CLI Agent Scaffold Path
+
+Engineering agents can scaffold MVP scenes + storyboards via CLI; humans polish assets in UI:
+
+```bash
+# 1. Create scene with cast
+forge scene create --game game-neon-recall --name "Gate Drone Battle" \
+  --description "Player encounters Gate Drone" \
+  --story-text "Warning: Memory fragment detected." \
+  --json > scene.json
+
+SCENE_ID=$(jq -r .id scene.json)
+
+# 2. Attach storyboard
+forge scene attach-storyboard --id $SCENE_ID --name "Battle Animatic" --json > board.json
+BOARD_ID=$(jq -r .storyboardId board.json)
+
+# 3. Add shots with layers, camera, effects
+SHOT_ID=$(forge shot add --storyboard $BOARD_ID --name "Establish" --duration 2.5 --json | jq -r .id)
+
+# Add pose layer (character + pose)
+forge layer add --shot $SHOT_ID --z 1 --character char-drone-001 --pose pose-ready-001 \
+  --x 0.5 --y 0.4 --scale 1.0
+
+# Timed pose/state keys on that same layer (P4 step/hold; not a duplicate layer)
+forge layer key add --shot $SHOT_ID --layer $LAYER_ID --time 1.0 --pose pose-hurt-001
+
+# Timed clip block (range playback on the shot; not an instantaneous key)
+forge shot clip add --shot $SHOT_ID --clip $CLIP_ID --time 0.5 --source-in 0 --source-out 1.2
+
+# Add camera keyframe (framing example)
+forge camera add --shot $SHOT_ID --time 0.0 --target char-drone-001 --zoom 1.5
+
+# Add effect at hit moment
+forge effect add --shot $SHOT_ID --time 1.2 --moment hit --preset shake-impact-001
+
+# Human then imports poses/clips in UI and polishes
+```
+
+### Quick Reference
+- **game/games** - Both `forge game list` and `forge games list` work
+- **Moments** - `intro`, `hit`, `finisher`, `defeat`, `miss`, `story_beat`
+- **Layers** - Use `--pose` for character poses, `--clip` for animations, `--image` for statics
+- **Camera** - Target layers by ID or explicit `{x, y}` point; zoom 1.0 = normal, 2.0 = 2x
+- **Stage Treatment** (Phase C.1) - `--bg-dim 0.35 --vignette 0.4` darkens background (0-1) without affecting character layers
+- **Layer Effects** (Phase C.2) - `--glow-blur 12 --glow-alpha 0.8 --glow-color '#00ffff'` for outer glow; `--shadow-x 4 --shadow-y 6 --shadow-blur 10 --shadow-alpha 0.5` for drop shadow
+
+World structure (1c) and world map (1d):
+
+```bash
+forge game module add --game <id> --id pad --label Pad --type-ids battle --star-kinds win,noMisses
+forge world create --game <id> --name "World 1" --key world-1 --json
+forge stage create --game <id> --world @world-1 --name "The Gate" --key stage-gate --json
+forge stage reorder --game <id> --world @world-1 --ids @stage-b,@stage-gate --json
+forge world map set --game <id> @world-1 --background "World 1 map" --json
+forge world map node add --game <id> @world-1 --stage @stage-gate --pos 0.18,0.72 --id n-gate --json
+forge world flow --game <id> @world-1 --json
+forge content apply --game <id> --file docs/samples/gate-drone-content.json --dry-run --json
+forge content export --game <id> --out ./export-content --json
+```
+
+See `forge scene --help`, `forge world --help`, `forge content --help`, `forge storyboard --help`, `forge shot --help`, `forge shot clip --help`, `forge layer --help`, `forge layer key --help` for full CLI.
 
 ## Workflow
 

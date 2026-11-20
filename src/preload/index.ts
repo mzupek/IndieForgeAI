@@ -177,6 +177,16 @@ const api: IndieForgeAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.LAYER_UPDATE, projectId, shotId, layerId, updates),
     deleteLayer: (projectId, shotId, layerId) =>
       ipcRenderer.invoke(IPC_CHANNELS.LAYER_DELETE, projectId, shotId, layerId),
+    addLayerTimedKey: (projectId, shotId, layerId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.LAYER_KEY_ADD, projectId, shotId, layerId, input),
+    listLayerTimedKeys: (shotId, layerId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.LAYER_KEY_LIST, shotId, layerId),
+    getLayerTimedKey: (keyId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.LAYER_KEY_GET, keyId),
+    updateLayerTimedKey: (projectId, keyId, updates) =>
+      ipcRenderer.invoke(IPC_CHANNELS.LAYER_KEY_UPDATE, projectId, keyId, updates),
+    deleteLayerTimedKey: (projectId, keyId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.LAYER_KEY_DELETE, projectId, keyId),
     addCameraKeyframe: (projectId, shotId, keyframe) =>
       ipcRenderer.invoke(IPC_CHANNELS.CAMERA_KEYFRAME_ADD, projectId, shotId, keyframe),
     removeCameraKeyframe: (projectId, shotId, t) =>
@@ -184,7 +194,121 @@ const api: IndieForgeAPI = {
     addEffectMarker: (projectId, shotId, effect) =>
       ipcRenderer.invoke(IPC_CHANNELS.EFFECT_MARKER_ADD, projectId, shotId, effect),
     removeEffectMarker: (projectId, shotId, t) =>
-      ipcRenderer.invoke(IPC_CHANNELS.EFFECT_MARKER_REMOVE, projectId, shotId, t)
+      ipcRenderer.invoke(IPC_CHANNELS.EFFECT_MARKER_REMOVE, projectId, shotId, t),
+    addShotClipBlock: (projectId, shotId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_CLIP_ADD, projectId, shotId, input),
+    listShotClipBlocks: (shotId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_CLIP_LIST, shotId),
+    getShotClipBlock: (blockId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_CLIP_GET, blockId),
+    updateShotClipBlock: (projectId, blockId, updates) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_CLIP_UPDATE, projectId, blockId, updates),
+    deleteShotClipBlock: (projectId, blockId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_CLIP_DELETE, projectId, blockId),
+    addShotAudioBlock: (projectId, shotId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_AUDIO_ADD, projectId, shotId, input),
+    listShotAudioBlocks: (shotId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_AUDIO_LIST, shotId),
+    getShotAudioBlock: (blockId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_AUDIO_GET, blockId),
+    updateShotAudioBlock: (projectId, blockId, updates) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_AUDIO_UPDATE, projectId, blockId, updates),
+    deleteShotAudioBlock: (projectId, blockId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_AUDIO_DELETE, projectId, blockId),
+    addShotEventCue: (projectId, shotId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_EVENT_CUE_ADD, projectId, shotId, input),
+    listShotEventCues: (shotId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_EVENT_CUE_LIST, shotId),
+    getShotEventCue: (cueId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_EVENT_CUE_GET, cueId),
+    updateShotEventCue: (projectId, cueId, updates) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_EVENT_CUE_UPDATE, projectId, cueId, updates),
+    deleteShotEventCue: (projectId, cueId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_EVENT_CUE_DELETE, projectId, cueId),
+    addShotBackgroundKey: (projectId, shotId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_BACKGROUND_KEY_ADD, projectId, shotId, input),
+    listShotBackgroundKeys: (shotId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_BACKGROUND_KEY_LIST, shotId),
+    getShotBackgroundKey: (keyId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_BACKGROUND_KEY_GET, keyId),
+    updateShotBackgroundKey: (projectId, keyId, updates) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_BACKGROUND_KEY_UPDATE, projectId, keyId, updates),
+    deleteShotBackgroundKey: (projectId, keyId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SHOT_BACKGROUND_KEY_DELETE, projectId, keyId),
+    createScene: (gameId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SCENE_CREATE, gameId, input),
+    getScene: (sceneId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SCENE_GET, sceneId),
+    listScenes: (gameId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SCENE_LIST, gameId),
+    updateScene: (sceneId, updates) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SCENE_UPDATE, sceneId, updates),
+    deleteScene: (sceneId, removeStoryboard) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SCENE_DELETE, sceneId, removeStoryboard),
+    addCharacterToScene: (sceneId, characterId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SCENE_ADD_CHARACTER, sceneId, characterId),
+    removeCharacterFromScene: (sceneId, characterId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SCENE_REMOVE_CHARACTER, sceneId, characterId),
+    attachPresetToScene: (sceneId, presetId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SCENE_ATTACH_PRESET, sceneId, presetId),
+    detachPresetFromScene: (sceneId, presetId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SCENE_DETACH_PRESET, sceneId, presetId),
+    createSceneStoryboard: (sceneId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SCENE_CREATE_STORYBOARD, sceneId, input)
+  },
+  visualAssets: {
+    list: (gameId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.VISUAL_ASSET_LIST, gameId),
+    get: (assetId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.VISUAL_ASSET_GET, assetId),
+    create: (asset) =>
+      ipcRenderer.invoke(IPC_CHANNELS.VISUAL_ASSET_CREATE, asset),
+    update: (asset) =>
+      ipcRenderer.invoke(IPC_CHANNELS.VISUAL_ASSET_UPDATE, asset),
+    delete: (assetId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.VISUAL_ASSET_DELETE, assetId),
+    importImage: (assetId, sourcePath) =>
+      ipcRenderer.invoke(IPC_CHANNELS.VISUAL_ASSET_IMPORT_IMAGE, assetId, sourcePath)
+  },
+  assetStates: {
+    list: (assetId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.ASSET_STATE_LIST, assetId),
+    listForGame: (gameId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.ASSET_STATE_LIST_FOR_GAME, gameId),
+    get: (stateId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.ASSET_STATE_GET, stateId),
+    create: (assetId, name, sourcePath) =>
+      ipcRenderer.invoke(IPC_CHANNELS.ASSET_STATE_CREATE, assetId, name, sourcePath),
+    update: (state) =>
+      ipcRenderer.invoke(IPC_CHANNELS.ASSET_STATE_UPDATE, state),
+    delete: (stateId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.ASSET_STATE_DELETE, stateId),
+    setDefault: (assetId, stateId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.ASSET_STATE_SET_DEFAULT, assetId, stateId)
+  },
+  audioAssets: {
+    list: (gameId) => ipcRenderer.invoke(IPC_CHANNELS.AUDIO_ASSET_LIST, gameId),
+    get: (audioId) => ipcRenderer.invoke(IPC_CHANNELS.AUDIO_ASSET_GET, audioId),
+    importFile: (sourcePath, options) =>
+      ipcRenderer.invoke(IPC_CHANNELS.AUDIO_ASSET_IMPORT, sourcePath, options),
+    update: (audioId, gameId, patch) =>
+      ipcRenderer.invoke(IPC_CHANNELS.AUDIO_ASSET_UPDATE, audioId, gameId, patch),
+    remove: (audioId, gameId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.AUDIO_ASSET_DELETE, audioId, gameId)
+  },
+  events: {
+    list: (gameId) => ipcRenderer.invoke(IPC_CHANNELS.EVENT_LIST, gameId),
+    get: (eventId) => ipcRenderer.invoke(IPC_CHANNELS.EVENT_GET, eventId),
+    create: (input) => ipcRenderer.invoke(IPC_CHANNELS.EVENT_CREATE, input),
+    update: (eventId, patch) => ipcRenderer.invoke(IPC_CHANNELS.EVENT_UPDATE, eventId, patch),
+    remove: (eventId) => ipcRenderer.invoke(IPC_CHANNELS.EVENT_DELETE, eventId)
+  },
+  bindings: {
+    list: (shotId) => ipcRenderer.invoke(IPC_CHANNELS.BINDING_LIST, shotId),
+    get: (bindingId) => ipcRenderer.invoke(IPC_CHANNELS.BINDING_GET, bindingId),
+    create: (input) => ipcRenderer.invoke(IPC_CHANNELS.BINDING_CREATE, input),
+    update: (bindingId, patch) => ipcRenderer.invoke(IPC_CHANNELS.BINDING_UPDATE, bindingId, patch),
+    remove: (bindingId) => ipcRenderer.invoke(IPC_CHANNELS.BINDING_DELETE, bindingId)
   },
   gameDefinitions: {
     list: () =>
@@ -199,6 +323,108 @@ const api: IndieForgeAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.GAME_DEFINITION_UPDATE, id, updates),
     delete: (id) =>
       ipcRenderer.invoke(IPC_CHANNELS.GAME_DEFINITION_DELETE, id)
+  },
+  gameSettings: {
+    addPoseSlot: (projectId, gameId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.GAME_SETTINGS_ADD_POSE_SLOT, projectId, gameId, input),
+    removePoseSlot: (projectId, gameId, key) =>
+      ipcRenderer.invoke(IPC_CHANNELS.GAME_SETTINGS_REMOVE_POSE_SLOT, projectId, gameId, key),
+    addAssetCategory: (projectId, gameId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.GAME_SETTINGS_ADD_ASSET_CATEGORY, projectId, gameId, input),
+    removeAssetCategory: (projectId, gameId, key) =>
+      ipcRenderer.invoke(IPC_CHANNELS.GAME_SETTINGS_REMOVE_ASSET_CATEGORY, projectId, gameId, key),
+    addCharacterPoseSlot: (projectId, characterId, gameId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.CHARACTER_POSE_SLOT_ADD, projectId, characterId, gameId, input),
+    removeCharacterPoseSlot: (projectId, characterId, gameId, key) =>
+      ipcRenderer.invoke(IPC_CHANNELS.CHARACTER_POSE_SLOT_REMOVE, projectId, characterId, gameId, key),
+    setCharacterCorePosesRequired: (projectId, characterId, gameId, required) =>
+      ipcRenderer.invoke(IPC_CHANNELS.CHARACTER_CORE_POSES_REQUIRED, projectId, characterId, gameId, required),
+    addEncounterType: (projectId, gameId, typeId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.GAME_SETTINGS_ADD_ENCOUNTER_TYPE, projectId, gameId, typeId),
+    removeEncounterType: (projectId, gameId, typeId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.GAME_SETTINGS_REMOVE_ENCOUNTER_TYPE, projectId, gameId, typeId),
+    addModule: (projectId, gameId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.GAME_SETTINGS_ADD_MODULE, projectId, gameId, input),
+    updateModule: (projectId, gameId, moduleId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.GAME_SETTINGS_UPDATE_MODULE, projectId, gameId, moduleId, input),
+    removeModule: (projectId, gameId, moduleId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.GAME_SETTINGS_REMOVE_MODULE, projectId, gameId, moduleId),
+    addAttackKind: (projectId, gameId, moduleId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.GAME_SETTINGS_ADD_ATTACK_KIND, projectId, gameId, moduleId, input),
+    removeAttackKind: (projectId, gameId, moduleId, key) =>
+      ipcRenderer.invoke(IPC_CHANNELS.GAME_SETTINGS_REMOVE_ATTACK_KIND, projectId, gameId, moduleId, key),
+    addCounterKind: (projectId, gameId, moduleId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.GAME_SETTINGS_ADD_COUNTER_KIND, projectId, gameId, moduleId, input),
+    removeCounterKind: (projectId, gameId, moduleId, key) =>
+      ipcRenderer.invoke(IPC_CHANNELS.GAME_SETTINGS_REMOVE_COUNTER_KIND, projectId, gameId, moduleId, key)
+  },
+  worldContent: {
+    createWorld: (projectId, gameId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.WORLD_CREATE, projectId, gameId, input),
+    updateWorld: (projectId, gameId, id, patch) =>
+      ipcRenderer.invoke(IPC_CHANNELS.WORLD_UPDATE, projectId, gameId, id, patch),
+    removeWorld: (projectId, gameId, id) =>
+      ipcRenderer.invoke(IPC_CHANNELS.WORLD_REMOVE, projectId, gameId, id),
+    reorderWorlds: (projectId, gameId, ids) =>
+      ipcRenderer.invoke(IPC_CHANNELS.WORLD_REORDER, projectId, gameId, ids),
+    setWorldMap: (projectId, gameId, worldId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.WORLD_MAP_SET, projectId, gameId, worldId, input),
+    addMapNode: (projectId, gameId, worldId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.WORLD_MAP_NODE_ADD, projectId, gameId, worldId, input),
+    moveMapNode: (projectId, gameId, worldId, nodeId, pos) =>
+      ipcRenderer.invoke(IPC_CHANNELS.WORLD_MAP_NODE_MOVE, projectId, gameId, worldId, nodeId, pos),
+    updateMapNode: (projectId, gameId, worldId, nodeId, patch) =>
+      ipcRenderer.invoke(IPC_CHANNELS.WORLD_MAP_NODE_UPDATE, projectId, gameId, worldId, nodeId, patch),
+    removeMapNode: (projectId, gameId, worldId, nodeId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.WORLD_MAP_NODE_REMOVE, projectId, gameId, worldId, nodeId),
+    addMapPath: (projectId, gameId, worldId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.WORLD_MAP_PATH_ADD, projectId, gameId, worldId, input),
+    removeMapPath: (projectId, gameId, worldId, pathId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.WORLD_MAP_PATH_REMOVE, projectId, gameId, worldId, pathId),
+    setMapStart: (projectId, gameId, worldId, nodeId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.WORLD_MAP_START, projectId, gameId, worldId, nodeId),
+    createStage: (projectId, gameId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.STAGE_CREATE, projectId, gameId, input),
+    updateStage: (projectId, gameId, id, patch) =>
+      ipcRenderer.invoke(IPC_CHANNELS.STAGE_UPDATE, projectId, gameId, id, patch),
+    removeStage: (projectId, gameId, id) =>
+      ipcRenderer.invoke(IPC_CHANNELS.STAGE_REMOVE, projectId, gameId, id),
+    reorderStages: (projectId, gameId, worldId, ids) =>
+      ipcRenderer.invoke(IPC_CHANNELS.STAGE_REORDER, projectId, gameId, worldId, ids),
+    createEncounter: (projectId, gameId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.ENCOUNTER_CREATE, projectId, gameId, input),
+    updateEncounter: (projectId, gameId, id, patch) =>
+      ipcRenderer.invoke(IPC_CHANNELS.ENCOUNTER_UPDATE, projectId, gameId, id, patch),
+    removeEncounter: (projectId, gameId, id) =>
+      ipcRenderer.invoke(IPC_CHANNELS.ENCOUNTER_REMOVE, projectId, gameId, id),
+    createRegion: (projectId, gameId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.REGION_CREATE, projectId, gameId, input),
+    updateRegion: (projectId, gameId, id, patch) =>
+      ipcRenderer.invoke(IPC_CHANNELS.REGION_UPDATE, projectId, gameId, id, patch),
+    removeRegion: (projectId, gameId, id) =>
+      ipcRenderer.invoke(IPC_CHANNELS.REGION_REMOVE, projectId, gameId, id)
+  },
+  enemies: {
+    create: (projectId, gameId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.ENEMY_CREATE, projectId, gameId, input),
+    update: (projectId, gameId, id, patch) =>
+      ipcRenderer.invoke(IPC_CHANNELS.ENEMY_UPDATE, projectId, gameId, id, patch),
+    remove: (projectId, gameId, id) =>
+      ipcRenderer.invoke(IPC_CHANNELS.ENEMY_REMOVE, projectId, gameId, id)
+  },
+  attackTables: {
+    create: (projectId, gameId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.ATTACK_TABLE_CREATE, projectId, gameId, input),
+    update: (projectId, gameId, id, patch) =>
+      ipcRenderer.invoke(IPC_CHANNELS.ATTACK_TABLE_UPDATE, projectId, gameId, id, patch),
+    remove: (projectId, gameId, id) =>
+      ipcRenderer.invoke(IPC_CHANNELS.ATTACK_TABLE_REMOVE, projectId, gameId, id),
+    addRow: (projectId, gameId, tableId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.ATTACK_TABLE_ROW_ADD, projectId, gameId, tableId, input),
+    updateRow: (projectId, gameId, tableId, rowId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.ATTACK_TABLE_ROW_UPDATE, projectId, gameId, tableId, rowId, input),
+    removeRow: (projectId, gameId, tableId, rowId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.ATTACK_TABLE_ROW_REMOVE, projectId, gameId, tableId, rowId)
   }
 }
 
