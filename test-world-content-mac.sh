@@ -342,4 +342,45 @@ PY
 pass "content export sidecar"
 
 echo ""
+echo "----------------------------------------"
+echo "Stage reorder 1..N; unknown/missing refused; other worlds untouched"
+echo "----------------------------------------"
+$CLI stage create --game game-a --world @world-1 --name "Stage B" --key stage-b --order 2 >/tmp/forge-1c-sb.json
+$CLI stage create --game game-a --world @world-1 --name "Stage C" --key stage-c --order 3 >/tmp/forge-1c-sc.json
+$CLI world create --game game-a --name "World 2" --key world-2 --order 2 >/tmp/forge-1c-w2.json
+$CLI stage create --game game-a --world @world-2 --name "Other" --key stage-other --order 1 >/tmp/forge-1c-so.json
+$CLI stage reorder --game game-a --world @world-1 --ids @stage-c,@stage-gate,@stage-b >/tmp/forge-1c-reorder.json
+python3 - <<'PY'
+import json, os
+studio = json.load(open(os.environ["FORGE_DATA_DIR"] + "/studio.json"))
+stages = studio["assetPipeline"]["stages"]
+w1 = [s for s in stages if s.get("key") in ("stage-c", "stage-gate", "stage-b")]
+w1.sort(key=lambda s: s["order"])
+assert [s["key"] for s in w1] == ["stage-c", "stage-gate", "stage-b"], w1
+assert [s["order"] for s in w1] == [1, 2, 3], w1
+other = [s for s in stages if s.get("key") == "stage-other"]
+assert len(other) == 1 and other[0]["order"] == 1
+out = json.load(open("/tmp/forge-1c-reorder.json"))
+assert [s["key"] for s in out["records"]] == ["stage-c", "stage-gate", "stage-b"]
+assert [s["order"] for s in out["records"]] == [1, 2, 3]
+print("renumbered 1..N; other world untouched")
+PY
+pass "reorder renumbers 1..N"
+
+if $CLI stage reorder --game game-a --world @world-1 --ids @stage-c,@stage-gate,missing >/tmp/forge-1c-re-unknown.json 2>/tmp/forge-1c-re-unknown.err; then
+  fail "unknown id should be refused"
+fi
+pass "unknown id refused"
+
+if $CLI stage reorder --game game-a --world @world-1 --ids @stage-c,@stage-gate >/tmp/forge-1c-re-missing.json 2>/tmp/forge-1c-re-missing.err; then
+  fail "missing id should be refused"
+fi
+pass "missing ids refused"
+
+if $CLI stage reorder --game game-a --world @world-1 --ids @stage-c,@stage-gate,@stage-other >/tmp/forge-1c-re-other.json 2>/tmp/forge-1c-re-other.err; then
+  fail "stage from another world should be refused"
+fi
+pass "other-world id refused"
+
+echo ""
 echo -e "${GREEN}All 1c world-content checks passed${NC}"

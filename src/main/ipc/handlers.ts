@@ -201,6 +201,8 @@ import {
   removeWorld,
   removeWorldMapNode,
   removeWorldMapPath,
+  reorderStages,
+  reorderWorlds,
   setWorldMap,
   setWorldMapStart,
   updateEncounter,
@@ -1607,6 +1609,10 @@ export function registerIpcHandlers(): void {
     await removeWorld(gameId, id)
     return await loadProject(projectId)
   })
+  ipcMain.handle(IPC_CHANNELS.WORLD_REORDER, async (_e, projectId: string, gameId: string, ids: string[]) => {
+    await reorderWorlds(gameId, ids)
+    return await loadProject(projectId)
+  })
   ipcMain.handle(
     IPC_CHANNELS.WORLD_MAP_SET,
     async (_e, projectId: string, gameId: string, worldId: string, input: any) => {
@@ -1675,6 +1681,13 @@ export function registerIpcHandlers(): void {
     await removeStage(gameId, id)
     return await loadProject(projectId)
   })
+  ipcMain.handle(
+    IPC_CHANNELS.STAGE_REORDER,
+    async (_e, projectId: string, gameId: string, worldId: string, ids: string[]) => {
+      await reorderStages(gameId, worldId, ids)
+      return await loadProject(projectId)
+    }
+  )
   ipcMain.handle(IPC_CHANNELS.ENCOUNTER_CREATE, async (_e, projectId: string, gameId: string, input: any) => {
     await createEncounter(gameId, input)
     return await loadProject(projectId)

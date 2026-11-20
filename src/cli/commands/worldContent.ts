@@ -28,6 +28,8 @@ import {
   removeWorld,
   removeWorldMapNode,
   removeWorldMapPath,
+  reorderStages,
+  reorderWorlds,
   setWorldMap,
   showEncounter,
   showRegion,
@@ -138,6 +140,31 @@ export function registerWorldContentCommands(program: Command): void {
         .option('--order <n>', 'Sort order')
   })
 
+  worldCmd
+    .command('reorder')
+    .description('Renumber worlds in a game to 1..N (one save)')
+    .requiredOption('--game <id>', 'Game ID')
+    .requiredOption('--ids <ids>', 'Comma-separated world ids or @keys in the new order')
+    .option('--dry-run', 'Validate without writing')
+    .action(async (options, cmd) => {
+      const opts = { ...program.opts(), ...collectOpts(cmd, options) }
+      try {
+        const { records } = await reorderWorlds(opts.game!, csvIds(String(options.ids)), {
+          dataDirOverride: dir(opts),
+          dryRun: Boolean(opts.dryRun)
+        })
+        printOrJson({ records, dryRun: Boolean(opts.dryRun) }, opts, () => {
+          console.log(`${opts.dryRun ? 'Would reorder' : 'Reordered'} ${records.length} world(s)`)
+          for (const row of records) {
+            console.log(`${row.order}. ${row.id}${row.key ? ` @${row.key}` : ''}  ${row.name}`)
+          }
+        })
+      } catch (err) {
+        outputError(err, opts)
+        process.exit(1)
+      }
+    })
+
   const stageCmd = program.command('stage').description('Manage stages (1c)')
   registerCrud(stageCmd, 'stage', program, {
     list: async (opts) => listStages(opts.game!, opts.world, dir(opts)),
@@ -195,6 +222,32 @@ export function registerWorldContentCommands(program: Command): void {
         .option('--cleared-by <ids>', 'Comma-separated encounter ids or @keys')
         .option('--return-to-node <id>', 'Map node id to return to')
   })
+
+  stageCmd
+    .command('reorder')
+    .description('Renumber stages in a world to 1..N (one save)')
+    .requiredOption('--game <id>', 'Game ID')
+    .requiredOption('--world <id>', 'World id or @key')
+    .requiredOption('--ids <ids>', 'Comma-separated stage ids or @keys in the new order')
+    .option('--dry-run', 'Validate without writing')
+    .action(async (options, cmd) => {
+      const opts = { ...program.opts(), ...collectOpts(cmd, options) }
+      try {
+        const { records } = await reorderStages(opts.game!, String(options.world), csvIds(String(options.ids)), {
+          dataDirOverride: dir(opts),
+          dryRun: Boolean(opts.dryRun)
+        })
+        printOrJson({ records, dryRun: Boolean(opts.dryRun) }, opts, () => {
+          console.log(`${opts.dryRun ? 'Would reorder' : 'Reordered'} ${records.length} stage(s)`)
+          for (const row of records) {
+            console.log(`${row.order}. ${row.id}${row.key ? ` @${row.key}` : ''}  ${row.name}`)
+          }
+        })
+      } catch (err) {
+        outputError(err, opts)
+        process.exit(1)
+      }
+    })
 
   const encounterCmd = program.command('encounter').description('Manage encounters (1c)')
   registerCrud(encounterCmd, 'encounter', program, {

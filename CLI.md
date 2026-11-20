@@ -136,10 +136,10 @@ Filename auto-map uses the character's effective slots, **longest key first** (`
 World, Stage, Encounter, and Region records are per-game. Types and modules come from `game.settings` (no title-specific unions). `show` / `update` / `remove` accept a uuid or `@key`. Optional `key` slugs are unique per game and record type.
 
 ```bash
-forge world     list|show|create|update|remove|apply --game <id> --json
+forge world     list|show|create|update|remove|reorder|apply --game <id> --json
 forge world     map show|set|node add|node move|node remove|path add|path remove --game <id> --json
 forge world     flow --game <id> <world> --json
-forge stage     list|show|create|update|remove|apply --game <id> --json [--world <id|@key>]
+forge stage     list|show|create|update|remove|reorder|apply --game <id> --json [--world <id|@key>]
 forge encounter list|show|create|update|remove|apply --game <id> --json [--stage <id|@key>]
 forge region    list|show|create|update|remove|apply --game <id> --json [--stage <id|@key>]
 forge content   apply  --game <id> --file bundle.json [--dry-run] --json
@@ -157,6 +157,8 @@ Removal is refused while other records reference the target. Removing an encount
 `content export` is read-only (`contentSchemaVersion: 1` sidecar). Export manifest v2 is unchanged. 1d map / entry / hotspot / exit fields are included; the sidecar version stays 1.
 
 World map writes take `--dry-run`. `show` / `update` / `remove` / map / flow accept a uuid or `@key` for the world. Removing a node also drops its paths and is refused for the start node. Cutting a path that strands a node is allowed; `forge world flow` flags it.
+
+`forge stage reorder --game <id> --world <id|@key> --ids <id|@key,...>` (and `forge world reorder --game <id> --ids <id|@key,...>`) renumbers `order` to 1..N in one save. The list must be a complete permutation: unknown, duplicate, or missing ids are refused. Other worlds / games are untouched. Reordering does not change `unlockAfter`, map nodes, or paths. `--dry-run` validates without writing.
 
 Example bundle: `docs/samples/gate-drone-content.json`.
 

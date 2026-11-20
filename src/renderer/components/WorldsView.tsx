@@ -3,7 +3,7 @@
  * Refreshes the project store after every create/update/remove.
  */
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type DragEvent } from 'react'
 import { useOutletContext } from 'react-router-dom'
 import { useProjectStore } from '../state/indieForgeStore'
 import { useLocalFilePreview } from '../hooks/useLocalFilePreview'
@@ -22,6 +22,30 @@ import { WorldMapPanel } from './WorldMapPanel'
 import { WorldFlowPreview, type FlowOpenTarget } from './WorldFlowPreview'
 
 type TabId = 'structure' | 'encounters' | 'regions' | 'map' | 'flow'
+type FormMode = 'idle' | 'new' | 'edit'
+
+function moveIdToIndex(ids: string[], fromId: string, toIndex: number): string[] {
+  const from = ids.indexOf(fromId)
+  if (from < 0) return ids
+  const next = ids.filter((id) => id !== fromId)
+  next.splice(Math.max(0, Math.min(toIndex, next.length)), 0, fromId)
+  return next
+}
+
+function swapId(ids: string[], id: string, dir: -1 | 1): string[] | null {
+  const i = ids.indexOf(id)
+  const j = i + dir
+  if (i < 0 || j < 0 || j >= ids.length) return null
+  const next = ids.slice()
+  const tmp = next[i]
+  next[i] = next[j]!
+  next[j] = tmp!
+  return next
+}
+
+function sameOrder(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((id, i) => id === b[i])
+}
 
 export function WorldsView() {
   const { projectId, gameId } = useOutletContext<{ projectId: string; gameId: string }>()
@@ -203,6 +227,60 @@ export function WorldsView() {
   )
 }
 
+function OrderControls({
+  disabled,
+  isFirst,
+  isLast,
+  onDragStart,
+  onMove
+}: {
+  disabled: boolean
+  isFirst: boolean
+  isLast: boolean
+  onDragStart: (e: DragEvent) => void
+  onMove: (dir: -1 | 1) => void
+}) {
+  return (
+    <span style={{ display: 'flex', alignItems: 'center', gap: '0.15rem', flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
+      <span
+        draggable={!disabled}
+        title="Drag to reorder"
+        onDragStart={onDragStart}
+        style={{
+          cursor: disabled ? 'default' : 'grab',
+          color: 'var(--muted)',
+          userSelect: 'none',
+          padding: '0 0.2rem',
+          letterSpacing: '-0.12em',
+          fontSize: '0.95rem'
+        }}
+      >
+        ⋮⋮
+      </span>
+      <button
+        type="button"
+        className="ghost"
+        title="Move up"
+        disabled={disabled || isFirst}
+        onClick={() => onMove(-1)}
+        style={{ padding: '0 0.28rem', lineHeight: 1.1, fontSize: '0.7rem' }}
+      >
+        ▲
+      </button>
+      <button
+        type="button"
+        className="ghost"
+        title="Move down"
+        disabled={disabled || isLast}
+        onClick={() => onMove(1)}
+        style={{ padding: '0 0.28rem', lineHeight: 1.1, fontSize: '0.7rem' }}
+      >
+        ▼
+      </button>
+    </span>
+  )
+}
+
 function WorldStagePanel({
   projectId,
   gameId,
@@ -232,19 +310,16 @@ function WorldStagePanel({
   const worldStages = stages.filter((s) => s.worldId === selectedWorldId)
   const initialStage = worldStages.find((s) => s.id === focusStageId) || null
 
-  const [worldFormMode, setWorldFormMode] = useState<'edit' | 'new'>(selectedWorld ? 'edit' : 'new')
-  const [wName, setWName] = useState(selectedWorld?.name || '')
-  const [wKey, setWKey] = useState(selectedWorld?.key || '')
-  const [wDesc, setWDesc] = useState(selectedWorld?.description || '')
-  const [wOrder, setWOrder] = useState(String(selectedWorld?.order ?? 1))
+  const [worldFormMode, setWorldFormMode] = useState<FormMode>('idle')
+  const [wName, setWName] = useState('')
+  const [wKey, setWKey] = useState('')
+  const [wDesc, setWDesc] = useState('')
+  const [wOrder, setWOrder] = useState('1')
+  const [stageFormMode, setStageFormMode] = useState<FormMode>(initialStage ? 'edit' : 'idle')
   const [selectedStageId, setSelectedStageId] = useState<string | null>(initialStage?.id || null)
   const [sName, setSName] = useState(initialStage?.name || '')
   const [sKey, setSKey] = useState(initialStage?.key || '')
-  const [sOrder, setSOrder] = useState(
-    initialStage
-      ? String(initialStage.order)
-      : String(worldStages.reduce((max, s) => Math.max(max, s.order), 0) + 1)
-  )
+  const [sOrder, setSOrder] = useState(initialStage ? String(initialStage.order) : '1')
   const [sLevel, setSLevel] = useState(
     initialStage?.recommendedLevel !== undefined ? String(initialStage.recommendedLevel) : ''
   )
@@ -253,12 +328,16 @@ function WorldStagePanel({
   const [entryAnchor, setEntryAnchor] = useState(initialStage?.entryAnchor || '')
   const [returnToNode, setReturnToNode] = useState(initialStage?.returnToNode || '')
   const [clearedBy, setClearedBy] = useState<string[]>(initialStage?.clearedBy || [])
+  const [worldDragOverId, setWorldDragOverId] = useState<string | null>(null)
+  const [stageDragOverId, setStageDragOverId] = useState<string | null>(null)
 
   const editingWorld = worldFormMode === 'edit' ? selectedWorld : null
-  const selectedStage = worldStages.find((s) => s.id === selectedStageId) || null
+  const selectedStage = stageFormMode === 'edit' ? worldStages.find((s) => s.id === selectedStageId) || null : null
   const stageRegions = regions.filter((r) => r.stageId === selectedStage?.id)
   const stageEncounters = encounters.filter((e) => e.stageId === selectedStage?.id)
   const mapNodes = selectedWorld?.map?.nodes || []
+  const worldIds = worlds.map((w) => w.id)
+  const stageIds = worldStages.map((s) => s.id)
 
   function nextWorldOrder() {
     return worlds.reduce((max, w) => Math.max(max, w.order), 0) + 1
@@ -286,6 +365,14 @@ function WorldStagePanel({
     setWOrder(String(w.order))
   }
 
+  function hideWorldForm() {
+    setWorldFormMode('idle')
+    setWName('')
+    setWKey('')
+    setWDesc('')
+    setWOrder(String(nextWorldOrder()))
+  }
+
   function beginNewWorld() {
     setWorldFormMode('new')
     setWName('')
@@ -296,17 +383,18 @@ function WorldStagePanel({
 
   function selectWorldRow(w: World) {
     if (worldFormMode === 'edit' && w.id === selectedWorldId) {
-      beginNewWorld()
+      hideWorldForm()
       return
     }
     const switching = w.id !== selectedWorldId
     onSelectWorld(w.id)
     setWorldFormMode('edit')
     fillWorld(w)
-    if (switching) beginNewStage()
+    if (switching) hideStageForm()
   }
 
   function loadStage(s: Stage) {
+    setStageFormMode('edit')
     setSelectedStageId(s.id)
     setSName(s.name)
     setSKey(s.key || '')
@@ -319,7 +407,8 @@ function WorldStagePanel({
     setClearedBy(s.clearedBy || [])
   }
 
-  function beginNewStage(list = worldStages) {
+  function hideStageForm(list = worldStages) {
+    setStageFormMode('idle')
     setSelectedStageId(null)
     setSName('')
     setSKey('')
@@ -332,12 +421,80 @@ function WorldStagePanel({
     setClearedBy([])
   }
 
+  function beginNewStage(list = worldStages) {
+    hideStageForm(list)
+    setStageFormMode('new')
+    setSOrder(String(nextStageOrder(list)))
+  }
+
   function selectStageRow(s: Stage) {
-    if (s.id === selectedStageId) {
-      beginNewStage()
+    if (stageFormMode === 'edit' && s.id === selectedStageId) {
+      hideStageForm()
       return
     }
     loadStage(s)
+  }
+
+  function persistWorldOrder(ids: string[]) {
+    if (ids.length !== worldIds.length || sameOrder(ids, worldIds)) return
+    void refreshAfter(async () => {
+      const updated = await window.indieForge.worldContent.reorderWorlds(projectId, gameId, ids)
+      if (editingWorld) {
+        const idx = ids.indexOf(editingWorld.id)
+        if (idx >= 0) setWOrder(String(idx + 1))
+      }
+      return updated
+    })
+  }
+
+  function persistStageOrder(ids: string[]) {
+    if (!selectedWorld) return
+    if (ids.length !== stageIds.length || sameOrder(ids, stageIds)) return
+    void refreshAfter(async () => {
+      const updated = await window.indieForge.worldContent.reorderStages(
+        projectId,
+        gameId,
+        selectedWorld.id,
+        ids
+      )
+      if (selectedStageId) {
+        const idx = ids.indexOf(selectedStageId)
+        if (idx >= 0) setSOrder(String(idx + 1))
+      }
+      return updated
+    })
+  }
+
+  function onRowDragStart(e: DragEvent, id: string) {
+    e.stopPropagation()
+    e.dataTransfer.setData('text/plain', id)
+    e.dataTransfer.setData('text/forge-order-id', id)
+    e.dataTransfer.effectAllowed = 'move'
+  }
+
+  function onRowDragOver(e: DragEvent, id: string, kind: 'world' | 'stage') {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    if (kind === 'world') setWorldDragOverId(id)
+    else setStageDragOverId(id)
+  }
+
+  function onWorldDrop(e: DragEvent, toIndex: number) {
+    e.preventDefault()
+    e.stopPropagation()
+    setWorldDragOverId(null)
+    const fromId = e.dataTransfer.getData('text/forge-order-id') || e.dataTransfer.getData('text/plain')
+    if (!fromId) return
+    persistWorldOrder(moveIdToIndex(worldIds, fromId, toIndex))
+  }
+
+  function onStageDrop(e: DragEvent, toIndex: number) {
+    e.preventDefault()
+    e.stopPropagation()
+    setStageDragOverId(null)
+    const fromId = e.dataTransfer.getData('text/forge-order-id') || e.dataTransfer.getData('text/plain')
+    if (!fromId) return
+    persistStageOrder(moveIdToIndex(stageIds, fromId, toIndex))
   }
 
   useEffect(() => {
@@ -348,7 +505,7 @@ function WorldStagePanel({
 
   useEffect(() => {
     const still = worldStages.find((s) => s.id === selectedStageId)
-    if (!still) beginNewStage()
+    if (!still) hideStageForm()
   }, [selectedWorldId])
 
   return (
@@ -361,8 +518,9 @@ function WorldStagePanel({
           </button>
         </div>
         <ul style={{ listStyle: 'none', padding: 0 }}>
-          {worlds.map((w) => {
-            const selected = Boolean(editingWorld && w.id === editingWorld.id)
+          {worlds.map((w, index) => {
+            const selected = w.id === selectedWorldId && worldFormMode === 'edit'
+            const dragOver = worldDragOverId === w.id
             return (
               <li
                 key={w.id}
@@ -370,17 +528,37 @@ function WorldStagePanel({
                   padding: '0.4rem 0.5rem',
                   cursor: 'pointer',
                   background: selected ? 'var(--bg-secondary)' : 'transparent',
-                  boxShadow: selected ? 'inset 3px 0 0 var(--forge-gold)' : 'none',
+                  boxShadow: selected
+                    ? 'inset 3px 0 0 var(--forge-gold)'
+                    : dragOver
+                      ? 'inset 0 2px 0 var(--forge-gold)'
+                      : 'none',
                   borderRadius: 4,
                   display: 'flex',
                   justifyContent: 'space-between',
+                  alignItems: 'center',
                   gap: '0.5rem'
                 }}
                 onClick={() => selectWorldRow(w)}
+                onDragOver={(e) => onRowDragOver(e, w.id, 'world')}
+                onDragLeave={() => setWorldDragOverId((cur) => (cur === w.id ? null : cur))}
+                onDrop={(e) => onWorldDrop(e, index)}
               >
-                <span>
-                  {w.order}. {w.name}
-                  {w.key ? <code style={{ marginLeft: '0.5rem' }}>@{w.key}</code> : null}
+                <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', minWidth: 0 }}>
+                  <OrderControls
+                    disabled={busy}
+                    isFirst={index === 0}
+                    isLast={index === worlds.length - 1}
+                    onDragStart={(e) => onRowDragStart(e, w.id)}
+                    onMove={(dir) => {
+                      const next = swapId(worldIds, w.id, dir)
+                      if (next) persistWorldOrder(next)
+                    }}
+                  />
+                  <span>
+                    {w.order}. {w.name}
+                    {w.key ? <code style={{ marginLeft: '0.5rem' }}>@{w.key}</code> : null}
+                  </span>
                 </span>
                 <button
                   type="button"
@@ -392,7 +570,7 @@ function WorldStagePanel({
                     const removingSelected = w.id === selectedWorldId
                     void refreshAfter(async () => {
                       const updated = await window.indieForge.worldContent.removeWorld(projectId, gameId, w.id)
-                      if (removingSelected) beginNewWorld()
+                      if (removingSelected) hideWorldForm()
                       return updated
                     })
                   }}
@@ -404,6 +582,12 @@ function WorldStagePanel({
           })}
           {worlds.length === 0 && <li style={{ color: 'var(--muted)' }}>No worlds yet</li>}
         </ul>
+        {worldFormMode === 'idle' && (
+          <p style={{ color: 'var(--muted)', fontSize: '0.85rem', marginTop: '0.75rem' }}>
+            Select a world to edit, or click + New world
+          </p>
+        )}
+        {worldFormMode !== 'idle' && (
         <form
           onSubmit={(e) => {
             e.preventDefault()
@@ -456,11 +640,12 @@ function WorldStagePanel({
             <button type="submit" disabled={busy || !wName.trim()}>
               {editingWorld ? 'Save world' : 'Create world'}
             </button>
-            <button type="button" className="ghost" disabled={busy} onClick={beginNewWorld}>
+            <button type="button" className="ghost" disabled={busy} onClick={hideWorldForm}>
               Cancel
             </button>
           </div>
         </form>
+        )}
       </div>
 
       <div className="panel-section">
@@ -476,8 +661,9 @@ function WorldStagePanel({
         {selectedWorld && (
           <>
             <ul style={{ listStyle: 'none', padding: 0 }}>
-              {worldStages.map((s) => {
-                const selected = s.id === selectedStageId
+              {worldStages.map((s, index) => {
+                const selected = stageFormMode === 'edit' && s.id === selectedStageId
+                const dragOver = stageDragOverId === s.id
                 return (
                   <li
                     key={s.id}
@@ -485,17 +671,38 @@ function WorldStagePanel({
                       padding: '0.35rem 0.5rem',
                       display: 'flex',
                       justifyContent: 'space-between',
+                      alignItems: 'center',
                       cursor: 'pointer',
                       background: selected ? 'var(--bg-secondary)' : 'transparent',
-                      boxShadow: selected ? 'inset 3px 0 0 var(--forge-gold)' : 'none',
-                      borderRadius: 4
+                      boxShadow: selected
+                        ? 'inset 3px 0 0 var(--forge-gold)'
+                        : dragOver
+                          ? 'inset 0 2px 0 var(--forge-gold)'
+                          : 'none',
+                      borderRadius: 4,
+                      gap: '0.5rem'
                     }}
                     onClick={() => selectStageRow(s)}
+                    onDragOver={(e) => onRowDragOver(e, s.id, 'stage')}
+                    onDragLeave={() => setStageDragOverId((cur) => (cur === s.id ? null : cur))}
+                    onDrop={(e) => onStageDrop(e, index)}
                   >
-                    <span>
-                      {s.order}. {s.name}
-                      {s.key ? <code style={{ marginLeft: '0.5rem' }}>@{s.key}</code> : null}
-                      {s.optional ? ' (optional)' : ''}
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', minWidth: 0 }}>
+                      <OrderControls
+                        disabled={busy}
+                        isFirst={index === 0}
+                        isLast={index === worldStages.length - 1}
+                        onDragStart={(e) => onRowDragStart(e, s.id)}
+                        onMove={(dir) => {
+                          const next = swapId(stageIds, s.id, dir)
+                          if (next) persistStageOrder(next)
+                        }}
+                      />
+                      <span>
+                        {s.order}. {s.name}
+                        {s.key ? <code style={{ marginLeft: '0.5rem' }}>@{s.key}</code> : null}
+                        {s.optional ? ' (optional)' : ''}
+                      </span>
                     </span>
                     <button
                       type="button"
@@ -507,7 +714,7 @@ function WorldStagePanel({
                         const removingSelected = s.id === selectedStageId
                         void refreshAfter(async () => {
                           const updated = await window.indieForge.worldContent.removeStage(projectId, gameId, s.id)
-                          if (removingSelected) beginNewStage(worldStages.filter((row) => row.id !== s.id))
+                          if (removingSelected) hideStageForm(worldStages.filter((row) => row.id !== s.id))
                           return updated
                         })
                       }}
@@ -519,6 +726,12 @@ function WorldStagePanel({
               })}
               {worldStages.length === 0 && <li style={{ color: 'var(--muted)' }}>No stages</li>}
             </ul>
+            {stageFormMode === 'idle' && (
+              <p style={{ color: 'var(--muted)', fontSize: '0.85rem', marginTop: '0.75rem' }}>
+                Select a stage to edit, or click + New stage
+              </p>
+            )}
+            {stageFormMode !== 'idle' && (
             <form
               onSubmit={(e) => {
                 e.preventDefault()
@@ -648,11 +861,12 @@ function WorldStagePanel({
                 <button type="submit" disabled={busy || !sName.trim()}>
                   {selectedStage ? 'Save stage' : 'Create stage'}
                 </button>
-                <button type="button" className="ghost" disabled={busy} onClick={() => beginNewStage()}>
+                <button type="button" className="ghost" disabled={busy} onClick={() => hideStageForm()}>
                   Cancel
                 </button>
               </div>
             </form>
+            )}
           </>
         )}
       </div>

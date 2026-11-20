@@ -785,6 +785,7 @@ export interface IndieForgeAPI {
     createWorld: (projectId: string, gameId: string, input: any) => Promise<IndieForgeProject>
     updateWorld: (projectId: string, gameId: string, id: string, patch: any) => Promise<IndieForgeProject>
     removeWorld: (projectId: string, gameId: string, id: string) => Promise<IndieForgeProject>
+    reorderWorlds: (projectId: string, gameId: string, ids: string[]) => Promise<IndieForgeProject>
     setWorldMap: (projectId: string, gameId: string, worldId: string, input: any) => Promise<IndieForgeProject>
     addMapNode: (projectId: string, gameId: string, worldId: string, input: any) => Promise<IndieForgeProject>
     moveMapNode: (
@@ -808,6 +809,12 @@ export interface IndieForgeAPI {
     createStage: (projectId: string, gameId: string, input: any) => Promise<IndieForgeProject>
     updateStage: (projectId: string, gameId: string, id: string, patch: any) => Promise<IndieForgeProject>
     removeStage: (projectId: string, gameId: string, id: string) => Promise<IndieForgeProject>
+    reorderStages: (
+      projectId: string,
+      gameId: string,
+      worldId: string,
+      ids: string[]
+    ) => Promise<IndieForgeProject>
     createEncounter: (projectId: string, gameId: string, input: any) => Promise<IndieForgeProject>
     updateEncounter: (projectId: string, gameId: string, id: string, patch: any) => Promise<IndieForgeProject>
     removeEncounter: (projectId: string, gameId: string, id: string) => Promise<IndieForgeProject>

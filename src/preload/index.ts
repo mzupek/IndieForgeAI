@@ -357,6 +357,8 @@ const api: IndieForgeAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.WORLD_UPDATE, projectId, gameId, id, patch),
     removeWorld: (projectId, gameId, id) =>
       ipcRenderer.invoke(IPC_CHANNELS.WORLD_REMOVE, projectId, gameId, id),
+    reorderWorlds: (projectId, gameId, ids) =>
+      ipcRenderer.invoke(IPC_CHANNELS.WORLD_REORDER, projectId, gameId, ids),
     setWorldMap: (projectId, gameId, worldId, input) =>
       ipcRenderer.invoke(IPC_CHANNELS.WORLD_MAP_SET, projectId, gameId, worldId, input),
     addMapNode: (projectId, gameId, worldId, input) =>
@@ -379,6 +381,8 @@ const api: IndieForgeAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.STAGE_UPDATE, projectId, gameId, id, patch),
     removeStage: (projectId, gameId, id) =>
       ipcRenderer.invoke(IPC_CHANNELS.STAGE_REMOVE, projectId, gameId, id),
+    reorderStages: (projectId, gameId, worldId, ids) =>
+      ipcRenderer.invoke(IPC_CHANNELS.STAGE_REORDER, projectId, gameId, worldId, ids),
     createEncounter: (projectId, gameId, input) =>
       ipcRenderer.invoke(IPC_CHANNELS.ENCOUNTER_CREATE, projectId, gameId, input),
     updateEncounter: (projectId, gameId, id, patch) =>

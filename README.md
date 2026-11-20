@@ -105,6 +105,7 @@ World structure (1c) and world map (1d):
 forge game module add --game <id> --id pad --label Pad --type-ids battle --star-kinds win,noMisses
 forge world create --game <id> --name "World 1" --key world-1 --json
 forge stage create --game <id> --world @world-1 --name "The Gate" --key stage-gate --json
+forge stage reorder --game <id> --world @world-1 --ids @stage-b,@stage-gate --json
 forge world map set --game <id> @world-1 --background "World 1 map" --json
 forge world map node add --game <id> @world-1 --stage @stage-gate --pos 0.18,0.72 --id n-gate --json
 forge world flow --game <id> @world-1 --json

@@ -18,9 +18,12 @@ import {
   createStage,
   createWorld,
   exportContent,
+  listStages,
   listWorlds,
   removeWorld,
   removeWorldMapNode,
+  reorderStages,
+  reorderWorlds,
   setWorldMap,
   updateWorld,
   worldFlow
@@ -181,6 +184,107 @@ await withDir(async (dir) => {
   assert.equal(other.length, 0)
 
   await assert.rejects(() => removeWorld('game-a', '@world-1', { dataDirOverride: dir }), /in use/)
+})
+
+await withDir(async (dir) => {
+  await createWorld('game-a', { name: 'World 1', key: 'world-1', order: 1 }, { dataDirOverride: dir })
+  await createWorld('game-a', { name: 'World 2', key: 'world-2', order: 2 }, { dataDirOverride: dir })
+  const a = await createStage(
+    'game-a',
+    { worldId: '@world-1', name: 'A', key: 'sa', order: 1 },
+    { dataDirOverride: dir }
+  )
+  await createStage(
+    'game-a',
+    { worldId: '@world-1', name: 'B', key: 'sb', order: 2 },
+    { dataDirOverride: dir }
+  )
+  await createStage(
+    'game-a',
+    { worldId: '@world-1', name: 'C', key: 'sc', order: 3, unlockAfter: ['@sa'] },
+    { dataDirOverride: dir }
+  )
+  await createStage(
+    'game-a',
+    { worldId: '@world-2', name: 'Other', key: 'so', order: 1 },
+    { dataDirOverride: dir }
+  )
+  await setWorldMap('game-a', '@world-1', { backgroundAssetId: 'bg-a' }, { dataDirOverride: dir })
+  await addWorldMapNode(
+    'game-a',
+    '@world-1',
+    { stageId: '@sa', pos: [0.2, 0.3], id: 'n-a' },
+    { dataDirOverride: dir }
+  )
+  await addWorldMapNode(
+    'game-a',
+    '@world-1',
+    { stageId: '@sb', pos: [0.6, 0.4], id: 'n-b' },
+    { dataDirOverride: dir }
+  )
+  await addWorldMapPath('game-a', '@world-1', { from: 'n-a', to: 'n-b', id: 'p-ab' }, { dataDirOverride: dir })
+
+  const reordered = await reorderStages(
+    'game-a',
+    '@world-1',
+    ['@sc', '@sa', '@sb'],
+    { dataDirOverride: dir }
+  )
+  assert.deepEqual(
+    reordered.records.map((s) => [s.key, s.order]),
+    [
+      ['sc', 1],
+      ['sa', 2],
+      ['sb', 3]
+    ]
+  )
+  const listed = await listStages('game-a', '@world-1', dir)
+  assert.deepEqual(
+    listed.map((s) => [s.key, s.order]),
+    [
+      ['sc', 1],
+      ['sa', 2],
+      ['sb', 3]
+    ]
+  )
+  const cAfter = listed.find((s) => s.key === 'sc')
+  assert.deepEqual(cAfter?.unlockAfter, [a.record.id])
+  const worlds = await listWorlds('game-a', dir)
+  const mapped = worlds.find((w) => w.key === 'world-1')
+  assert.deepEqual(
+    (mapped?.map?.nodes || []).map((n) => n.id),
+    ['n-a', 'n-b']
+  )
+  assert.deepEqual(
+    (mapped?.map?.paths || []).map((p) => p.id),
+    ['p-ab']
+  )
+  const otherListed = await listStages('game-a', '@world-2', dir)
+  assert.equal(otherListed.length, 1)
+  assert.equal(otherListed[0].key, 'so')
+  assert.equal(otherListed[0].order, 1)
+
+  await assert.rejects(
+    () => reorderStages('game-a', '@world-1', ['@sc', '@sa', 'missing'], { dataDirOverride: dir }),
+    /not found/
+  )
+  await assert.rejects(
+    () => reorderStages('game-a', '@world-1', ['@sc', '@sa'], { dataDirOverride: dir }),
+    /missing/
+  )
+  await assert.rejects(
+    () => reorderStages('game-a', '@world-1', ['@sc', '@sa', '@so'], { dataDirOverride: dir }),
+    /not in this world/
+  )
+
+  const worldOrder = await reorderWorlds('game-a', ['@world-2', '@world-1'], { dataDirOverride: dir })
+  assert.deepEqual(
+    worldOrder.records.map((w) => [w.key, w.order]),
+    [
+      ['world-2', 1],
+      ['world-1', 2]
+    ]
+  )
 })
 
 await withDir(async (dir) => {

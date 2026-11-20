@@ -377,6 +377,93 @@ export async function updateStage(
   return { record: value, warnings: [] }
 }
 
+function reorderScoped<T extends { id: string; key?: string; gameId: string; order: number; updatedAt: string }>(
+  records: T[],
+  gameId: string,
+  kind: string,
+  idsOrKeys: string[],
+  inScope: (row: T) => boolean,
+  dryRun: boolean | undefined,
+  missingScopeMessage: (token: string) => string
+): T[] {
+  const current = records.filter((row) => row.gameId === gameId && inScope(row))
+  const raw = (Array.isArray(idsOrKeys) ? idsOrKeys : []).map((token) => String(token || '').trim()).filter(Boolean)
+  if (raw.length === 0) {
+    if (current.length === 0) return []
+    throw new Error(`Reorder list must include every ${kind.toLowerCase()} (got 0, expected ${current.length})`)
+  }
+  const resolved: T[] = []
+  const seen = new Set<string>()
+  for (const token of raw) {
+    const row = requireIdOrKey(records, token, gameId, kind)
+    if (!inScope(row)) throw new Error(missingScopeMessage(token))
+    if (seen.has(row.id)) throw new Error(`Duplicate ${kind.toLowerCase()} '${token}' in reorder list`)
+    seen.add(row.id)
+    resolved.push(row)
+  }
+  const missing = current.filter((row) => !seen.has(row.id))
+  if (missing.length > 0) {
+    const labels = missing.map((row) => (row.key ? `@${row.key}` : row.id)).join(', ')
+    throw new Error(`Reorder list is missing ${kind.toLowerCase()} '${labels}'`)
+  }
+  if (resolved.length !== current.length) {
+    throw new Error(
+      `Reorder list must include every ${kind.toLowerCase()} (got ${resolved.length}, expected ${current.length})`
+    )
+  }
+  const now = nowIso()
+  return resolved.map((row, i) => {
+    if (!dryRun) {
+      row.order = i + 1
+      row.updatedAt = now
+      return row
+    }
+    return { ...row, order: i + 1 }
+  })
+}
+
+export async function reorderWorlds(
+  gameId: string,
+  idsOrKeys: string[],
+  options?: WriteOptions
+): Promise<{ records: World[] }> {
+  const { value } = await mutatePipeline(options, (pipeline) => {
+    requireGame(pipeline, gameId)
+    return reorderScoped(
+      pipeline.worlds || [],
+      gameId,
+      'World',
+      idsOrKeys,
+      () => true,
+      options?.dryRun,
+      (token) => `World '${token}' is not in this game`
+    )
+  })
+  return { records: value }
+}
+
+export async function reorderStages(
+  gameId: string,
+  worldIdOrKey: string,
+  idsOrKeys: string[],
+  options?: WriteOptions
+): Promise<{ records: Stage[] }> {
+  const { value } = await mutatePipeline(options, (pipeline) => {
+    requireGame(pipeline, gameId)
+    const world = requireIdOrKey(pipeline.worlds || [], worldIdOrKey, gameId, 'World')
+    return reorderScoped(
+      pipeline.stages || [],
+      gameId,
+      'Stage',
+      idsOrKeys,
+      (row) => row.worldId === world.id,
+      options?.dryRun,
+      (token) => `Stage '${token}' is not in this world`
+    )
+  })
+  return { records: value }
+}
+
 function resolveStageIdList(
   pipeline: AssetPipelineProject,
   gameId: string,
