@@ -5,7 +5,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useLocalFilePreview } from '../hooks/useLocalFilePreview'
-import { resolveLibraryPreviewPath } from '@shared/storyboard/layerValidation'
+import { mapSurfaceAspect, resolveWorldMapBackgroundPath } from '@shared/worldContent/mapBackground'
 import type { AssetPipelineProject, Stage, World, WorldMapNode, WorldMapPath } from '@shared/types/assetPipeline'
 
 export function WorldMapPanel({
@@ -38,10 +38,19 @@ export function WorldMapPanel({
   const worldStages = stages.filter((s) => s.worldId === world?.id)
   const unmapped = worldStages.filter((s) => !(map?.nodes || []).some((n) => n.stageId === s.id))
   const asset = (pipeline.visualAssets || []).find((a) => a.id === map?.backgroundAssetId)
-  const previewPath = asset
-    ? resolveLibraryPreviewPath(asset, pipeline.assetStates || [], { gameId }).path
-    : undefined
-  const previewSrc = useLocalFilePreview(previewPath)
+  const backgroundPath = resolveWorldMapBackgroundPath(asset, pipeline.assetStates || [], {
+    gameId
+  }).path
+  const previewSrc = useLocalFilePreview(backgroundPath)
+  const [naturalSize, setNaturalSize] = useState<{
+    path?: string
+    width: number
+    height: number
+  } | null>(null)
+  const aspect = mapSurfaceAspect(
+    asset?.pixelSize,
+    naturalSize && naturalSize.path === backgroundPath ? naturalSize : null
+  )
 
   const [backgroundId, setBackgroundId] = useState(map?.backgroundAssetId || backgrounds[0]?.id || '')
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(focusNodeId || map?.startNodeId || null)
@@ -334,7 +343,7 @@ export function WorldMapPanel({
           style={{
             position: 'relative',
             width: '100%',
-            paddingBottom: '62%',
+            aspectRatio: `${aspect.width} / ${aspect.height}`,
             background: 'var(--bg)',
             border: '1px solid var(--border)',
             overflow: 'hidden',
@@ -347,7 +356,24 @@ export function WorldMapPanel({
               src={previewSrc}
               alt=""
               draggable={false}
-              style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'fill', pointerEvents: 'none' }}
+              onLoad={(e) => {
+                const img = e.currentTarget
+                if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+                  setNaturalSize({
+                    path: backgroundPath,
+                    width: img.naturalWidth,
+                    height: img.naturalHeight
+                  })
+                }
+              }}
+              style={{
+                position: 'absolute',
+                inset: 0,
+                width: '100%',
+                height: '100%',
+                objectFit: 'contain',
+                pointerEvents: 'none'
+              }}
             />
           )}
           <svg

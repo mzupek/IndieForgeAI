@@ -17,6 +17,8 @@ echo "Unit (tsx, isolated tmpdir, no Electron)"
 echo "----------------------------------------"
 npx tsx src/shared/worldContent/validate.test.ts
 echo ""
+npx tsx src/shared/worldContent/mapBackground.test.ts
+echo ""
 npx tsx --tsconfig tsconfig.node.json src/core/storage/worldContentService.test.ts
 echo ""
 
@@ -127,6 +129,33 @@ if grep -RInE 'memory_pad|game-neon-recall|Gate Drone|ride_boost' \
   fail "game-specific strings leaked into 1d app modules"
 fi
 pass "no game-specific strings in 1d modules"
+
+echo ""
+echo "----------------------------------------"
+echo "Map panel: full-res image + native aspect; no dim"
+echo "----------------------------------------"
+if grep -n 'resolveLibraryPreviewPath' src/renderer/components/WorldMapPanel.tsx >/dev/null 2>&1; then
+  fail "WorldMapPanel must not use the 256² library thumbnail preview"
+fi
+if grep -n "paddingBottom: '62%'" src/renderer/components/WorldMapPanel.tsx >/dev/null 2>&1; then
+  fail "WorldMapPanel must not squash into a 62% box"
+fi
+if grep -nE "objectFit: ['\"]fill['\"]" src/renderer/components/WorldMapPanel.tsx >/dev/null 2>&1; then
+  fail "WorldMapPanel must not stretch with objectFit fill"
+fi
+if grep -nE 'filter:|brightness\(' src/renderer/components/WorldMapPanel.tsx >/dev/null 2>&1; then
+  fail "WorldMapPanel must not dim/filter the map"
+fi
+grep -q 'resolveWorldMapBackgroundPath' src/renderer/components/WorldMapPanel.tsx \
+  || fail "WorldMapPanel must resolve the full-resolution map image"
+grep -q "objectFit: 'contain'" src/renderer/components/WorldMapPanel.tsx \
+  || fail "WorldMapPanel must use objectFit contain"
+grep -q 'mapSurfaceAspect' src/renderer/components/WorldMapPanel.tsx \
+  || fail "WorldMapPanel must size the surface to the image aspect"
+if grep -nE '<img|backgroundAssetId|objectFit' src/renderer/components/WorldFlowPreview.tsx >/dev/null 2>&1; then
+  fail "WorldFlowPreview should not draw the map background"
+fi
+pass "full-res native-aspect map; Flow preview has no map image"
 
 echo ""
 echo "----------------------------------------"
