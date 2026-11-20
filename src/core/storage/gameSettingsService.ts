@@ -437,12 +437,17 @@ export async function listEncounterModules(
 ): Promise<GameEncounterModule[]> {
   const pipeline = await getAssetPipeline(dataDirOverride)
   const game = requireGame(pipeline, gameId)
-  return gameModules(game).map((m) => ({ ...m, typeIds: [...m.typeIds], starKinds: m.starKinds ? [...m.starKinds] : undefined }))
+  return gameModules(game).map((m) => ({
+    ...m,
+    typeIds: [...m.typeIds],
+    starKinds: m.starKinds ? [...m.starKinds] : undefined,
+    winConditions: m.winConditions ? [...m.winConditions] : undefined
+  }))
 }
 
 export async function addEncounterModule(
   gameId: string,
-  input: { id: string; label: string; typeIds: string[]; starKinds?: string[] },
+  input: { id: string; label: string; typeIds: string[]; starKinds?: string[]; winConditions?: string[] },
   options?: SlotCategoryWriteOptions
 ): Promise<GameEncounterModule> {
   const pipeline = await getAssetPipeline(options?.dataDirOverride)
@@ -467,7 +472,7 @@ export async function addEncounterModule(
 export async function updateEncounterModule(
   gameId: string,
   moduleId: string,
-  input: { label?: string; typeIds?: string[]; starKinds?: string[] },
+  input: { label?: string; typeIds?: string[]; starKinds?: string[]; winConditions?: string[] },
   options?: SlotCategoryWriteOptions
 ): Promise<GameEncounterModule> {
   const pipeline = await getAssetPipeline(options?.dataDirOverride)
@@ -480,7 +485,8 @@ export async function updateEncounterModule(
     id: previous.id,
     label: input.label ?? previous.label,
     typeIds: input.typeIds ?? previous.typeIds,
-    starKinds: input.starKinds !== undefined ? input.starKinds : previous.starKinds
+    starKinds: input.starKinds !== undefined ? input.starKinds : previous.starKinds,
+    winConditions: input.winConditions !== undefined ? input.winConditions : previous.winConditions
   })
   for (const t of next.typeIds) {
     if (!settings.encounterTypes.includes(t)) {

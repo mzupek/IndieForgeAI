@@ -29,6 +29,8 @@ export function GameSettingsView() {
   const [modLabel, setModLabel] = useState('')
   const [modTypeIds, setModTypeIds] = useState('battle')
   const [modStarKinds, setModStarKinds] = useState('')
+  const [modWinConditions, setModWinConditions] = useState('')
+  const [winDraft, setWinDraft] = useState<Record<string, string>>({})
 
   if (!activeProject || !gameId) {
     return <p style={{ color: 'var(--muted)' }}>Loading...</p>
@@ -316,7 +318,8 @@ export function GameSettingsView() {
       <div className="panel-section" style={{ marginTop: '2rem' }}>
         <h3>Encounter modules</h3>
         <p style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>
-          Each module lists the types it supports and optional star kinds. Removal is refused while an encounter uses it.
+          Each module lists the types it supports, optional star kinds, and optional win conditions.
+          Removal of a module or a win condition is refused while an encounter or enemy uses it.
         </p>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
           <thead>
@@ -325,18 +328,32 @@ export function GameSettingsView() {
               <th>Label</th>
               <th>Types</th>
               <th>Star kinds</th>
+              <th>Win conditions</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
             {modules.map((m) => (
-              <tr key={m.id}>
+              <tr key={m.id} style={{ verticalAlign: 'top' }}>
                 <td style={{ padding: '0.35rem 0' }}>
                   <code>{m.id}</code>
                 </td>
                 <td>{m.label}</td>
                 <td>{m.typeIds.join(', ')}</td>
                 <td>{(m.starKinds || []).join(', ') || '(any)'}</td>
+                <td style={{ minWidth: '16rem' }}>
+                  <ModuleWinConditions
+                    module={m}
+                    draft={winDraft[m.id] || ''}
+                    busy={busy}
+                    onDraftChange={(value) => setWinDraft((cur) => ({ ...cur, [m.id]: value }))}
+                    onSave={(winConditions) =>
+                      refreshAfter(() =>
+                        window.indieForge.gameSettings.updateModule(projectId, gameId, m.id, { winConditions })
+                      )
+                    }
+                  />
+                </td>
                 <td>
                   <button
                     type="button"
@@ -367,16 +384,22 @@ export function GameSettingsView() {
               .split(',')
               .map((s) => s.trim())
               .filter(Boolean)
+            const winConditions = modWinConditions
+              .split(',')
+              .map((s) => s.trim())
+              .filter(Boolean)
             void refreshAfter(async () => {
               const updated = await window.indieForge.gameSettings.addModule(projectId, gameId, {
                 id: modId.trim(),
                 label: modLabel.trim(),
                 typeIds,
-                starKinds: starKinds.length ? starKinds : undefined
+                starKinds: starKinds.length ? starKinds : undefined,
+                winConditions: winConditions.length ? winConditions : undefined
               })
               setModId('')
               setModLabel('')
               setModStarKinds('')
+              setModWinConditions('')
               return updated
             })
           }}
@@ -395,11 +418,100 @@ export function GameSettingsView() {
             onChange={(e) => setModStarKinds(e.target.value)}
             disabled={busy}
           />
+          <input
+            placeholder="win conditions (optional)"
+            value={modWinConditions}
+            onChange={(e) => setModWinConditions(e.target.value)}
+            disabled={busy}
+          />
           <button type="submit" disabled={busy || !modId.trim() || !modLabel.trim()}>
             Add module
           </button>
         </form>
       </div>
+    </div>
+  )
+}
+
+function splitKinds(raw: string): string[] {
+  return raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+}
+
+function ModuleWinConditions({
+  module,
+  draft,
+  busy,
+  onDraftChange,
+  onSave
+}: {
+  module: GameEncounterModule
+  draft: string
+  busy: boolean
+  onDraftChange: (value: string) => void
+  onSave: (winConditions: string[]) => void
+}) {
+  const kinds = module.winConditions || []
+  return (
+    <div style={{ display: 'grid', gap: '0.35rem' }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
+        {kinds.length === 0 && <span style={{ color: 'var(--muted)' }}>(none)</span>}
+        {kinds.map((kind) => (
+          <span
+            key={kind}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.25rem',
+              padding: '0.1rem 0.4rem',
+              border: '1px solid var(--border)',
+              borderRadius: 4,
+              fontSize: '0.8rem'
+            }}
+          >
+            {kind}
+            <button
+              type="button"
+              className="ghost"
+              disabled={busy}
+              style={{ color: 'var(--error)', padding: 0 }}
+              onClick={() => onSave(kinds.filter((k) => k !== kind))}
+              aria-label={`Remove ${kind}`}
+            >
+              ×
+            </button>
+          </span>
+        ))}
+      </div>
+      <form
+        style={{ display: 'flex', gap: '0.35rem', alignItems: 'center' }}
+        onSubmit={(e) => {
+          e.preventDefault()
+          const added = splitKinds(draft)
+          if (!added.length) return
+          const seen = new Set(kinds.map((k) => k.toLowerCase()))
+          const next = [...kinds]
+          for (const kind of added) {
+            if (seen.has(kind.toLowerCase())) continue
+            seen.add(kind.toLowerCase())
+            next.push(kind)
+          }
+          onSave(next)
+          onDraftChange('')
+        }}
+      >
+        <input
+          placeholder="add kinds (comma)"
+          value={draft}
+          onChange={(e) => onDraftChange(e.target.value)}
+          disabled={busy}
+        />
+        <button type="submit" className="ghost" disabled={busy || !draft.trim()}>
+          Add
+        </button>
+      </form>
     </div>
   )
 }

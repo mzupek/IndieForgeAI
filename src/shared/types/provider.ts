@@ -771,13 +771,13 @@ export interface IndieForgeAPI {
     addModule: (
       projectId: string,
       gameId: string,
-      input: { id: string; label: string; typeIds: string[]; starKinds?: string[] }
+      input: { id: string; label: string; typeIds: string[]; starKinds?: string[]; winConditions?: string[] }
     ) => Promise<IndieForgeProject>
     updateModule: (
       projectId: string,
       gameId: string,
       moduleId: string,
-      input: { label?: string; typeIds?: string[]; starKinds?: string[] }
+      input: { label?: string; typeIds?: string[]; starKinds?: string[]; winConditions?: string[] }
     ) => Promise<IndieForgeProject>
     removeModule: (projectId: string, gameId: string, moduleId: string) => Promise<IndieForgeProject>
   }
@@ -821,6 +821,11 @@ export interface IndieForgeAPI {
     createRegion: (projectId: string, gameId: string, input: any) => Promise<IndieForgeProject>
     updateRegion: (projectId: string, gameId: string, id: string, patch: any) => Promise<IndieForgeProject>
     removeRegion: (projectId: string, gameId: string, id: string) => Promise<IndieForgeProject>
+  }
+  enemies: {
+    create: (projectId: string, gameId: string, input: any) => Promise<IndieForgeProject>
+    update: (projectId: string, gameId: string, id: string, patch: any) => Promise<IndieForgeProject>
+    remove: (projectId: string, gameId: string, id: string) => Promise<IndieForgeProject>
   }
 }
 

@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto'
 import { copyFile, mkdir } from 'fs/promises'
 import { basename, extname, join } from 'path'
 import sharp from 'sharp'
-import type { Character } from '@shared/types/assetPipeline'
+import type { AssetPipelineProject, Character } from '@shared/types/assetPipeline'
 import { loadProject, saveProject } from './projectStore'
 
 function getCharacterAssetsDir(projectId: string): string {
@@ -100,6 +100,20 @@ export async function deleteCharacter(
   
   if (!project.assetPipeline) {
     throw new Error('Project has no asset pipeline data')
+  }
+
+  const character = project.assetPipeline.characters.find((c) => c.id === characterId)
+  const pipeline = project.assetPipeline as AssetPipelineProject
+  const users = (pipeline.enemies || []).filter((e) => e.characterId === characterId)
+  if (users.length > 0) {
+    const preview = users
+      .slice(0, 5)
+      .map((e) => `enemy ${e.name} (${e.id})`)
+      .join(', ')
+    const extra = users.length > 5 ? ` and ${users.length - 5} more` : ''
+    throw new Error(
+      `Cannot remove character '${character?.name || characterId}': in use by ${users.length} record(s): ${preview}${extra}`
+    )
   }
 
   project.assetPipeline.characters = project.assetPipeline.characters.filter(

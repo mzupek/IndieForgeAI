@@ -7,6 +7,7 @@ import type {
   AssetPipelineProject,
   Encounter,
   EncounterStar,
+  Enemy,
   Region,
   RegionEdge,
   RegionExit,
@@ -35,6 +36,16 @@ import {
   validateWorld,
   worldsOf
 } from './validate'
+import {
+  enemiesOf,
+  parseAssetRefs,
+  parseFlatNumbers,
+  parsePoseMap,
+  parseWinCondition,
+  resolveCharacterRef,
+  resolveVisualAssetRef,
+  validateEnemy
+} from '../enemies/validate'
 import { resolveSceneId, resolveTuningProfileId } from './validate'
 
 export interface ContentBundle {
@@ -42,12 +53,13 @@ export interface ContentBundle {
   stages?: Record<string, unknown>[]
   encounters?: Record<string, unknown>[]
   regions?: Record<string, unknown>[]
+  enemies?: Record<string, unknown>[]
 }
 
 export type ApplyAction = 'create' | 'update' | 'unchanged'
 
 export interface ApplyRecordResult {
-  type: 'world' | 'stage' | 'encounter' | 'region'
+  type: 'world' | 'stage' | 'encounter' | 'region' | 'enemy'
   action: ApplyAction
   id: string
   key?: string
@@ -84,6 +96,10 @@ function seedAliasMap(pipeline: AssetPipelineProject, gameId: string): Record<st
   for (const s of stagesOf(pipeline, gameId)) add('stage', s.key, s.id)
   for (const e of encountersOf(pipeline, gameId)) add('encounter', e.key, e.id)
   for (const r of regionsOf(pipeline, gameId)) add('region', r.key, r.id)
+  for (const e of enemiesOf(pipeline, gameId)) add('enemy', e.key, e.id)
+  for (const c of (pipeline.characters || []).filter((x) => x.gameId === gameId)) {
+    add('character', c.key, c.id)
+  }
   for (const a of (pipeline.visualAssets || []).filter((x) => x.gameId === gameId)) {
     add('asset', a.key, a.id)
   }
@@ -157,7 +173,7 @@ interface Planned {
 }
 
 function planIncoming(
-  kind: 'world' | 'stage' | 'encounter' | 'region',
+  kind: 'world' | 'stage' | 'encounter' | 'region' | 'enemy',
   inputs: Record<string, unknown>[],
   existing: { id: string; key?: string; gameId: string }[],
   gameId: string,
@@ -374,10 +390,12 @@ export function applyContentBundle(
   if (!pipeline.stages) pipeline.stages = []
   if (!pipeline.encounters) pipeline.encounters = []
   if (!pipeline.regions) pipeline.regions = []
+  if (!pipeline.enemies) pipeline.enemies = []
 
   const worldPlan = planIncoming('world', bundle.worlds || [], pipeline.worlds, gameId, aliasMap, issues)
   const stagePlan = planIncoming('stage', bundle.stages || [], pipeline.stages, gameId, aliasMap, issues)
   const regionPlan = planIncoming('region', bundle.regions || [], pipeline.regions, gameId, aliasMap, issues)
+  const enemyPlan = planIncoming('enemy', bundle.enemies || [], pipeline.enemies, gameId, aliasMap, issues)
   const encounterPlan = planIncoming(
     'encounter',
     bundle.encounters || [],
@@ -650,6 +668,68 @@ export function applyContentBundle(
     else pipeline.encounters.push(e)
   }
 
+  const nextEnemies: Enemy[] = []
+  for (const p of enemyPlan) {
+    const path = `enemies[${p.index}]`
+    const existing = pipeline.enemies.find((e) => e.id === p.id)
+    const charRaw = optionalStr(p.input.characterId) ?? existing?.characterId
+    const char = resolveCharacterRef(pipeline, gameId, charRaw)
+    if (char.error) issues.push(errorIssue(`${path}.characterId`, char.error))
+    const winRaw = p.input.winCondition ?? (p.input.winKind
+      ? { kind: p.input.winKind, params: p.input.winParams || {} }
+      : undefined)
+    const win = parseWinCondition(winRaw ?? existing?.winCondition, `${path}.winCondition`, issues)
+    const stats = parseFlatNumbers(
+      p.input.stats !== undefined ? p.input.stats : existing?.stats || {},
+      `${path}.stats`,
+      issues
+    )
+    const poses = parsePoseMap(
+      p.input.poses !== undefined ? p.input.poses : existing?.poses || {},
+      `${path}.poses`,
+      issues
+    )
+    const assetsIn = parseAssetRefs(
+      p.input.assets !== undefined ? p.input.assets : existing?.assets || [],
+      `${path}.assets`,
+      issues
+    )
+    const assets = assetsIn.map((a, i) => {
+      const resolved = resolveVisualAssetRef(pipeline, gameId, a.assetId)
+      if (resolved.error) {
+        issues.push(errorIssue(`${path}.assets[${i}].assetId`, resolved.error))
+        return a
+      }
+      return { ...a, assetId: resolved.id || a.assetId }
+    })
+    const known: Enemy = {
+      id: p.id,
+      gameId,
+      name: str(p.input.name) || existing?.name || '',
+      characterId: char.id || existing?.characterId || '',
+      moduleId: str(p.input.moduleId) || existing?.moduleId || '',
+      winCondition: win || existing?.winCondition || { kind: '', params: {} },
+      stats,
+      poses,
+      schemaVersion: RECORD_SCHEMA_VERSION,
+      createdAt: existing?.createdAt || now,
+      updatedAt: now
+    }
+    const key = p.key ?? existing?.key
+    if (key) known.key = key
+    if (assets.length) known.assets = assets
+    const notes = optionalStr(p.input.notes) ?? existing?.notes
+    if (notes) known.notes = notes
+    const table = optionalStr(p.input.attackTableId) ?? existing?.attackTableId
+    if (table) known.attackTableId = table
+    nextEnemies.push(overlayRecord(existing, known))
+  }
+  for (const e of nextEnemies) {
+    const idx = pipeline.enemies.findIndex((x) => x.id === e.id)
+    if (idx >= 0) pipeline.enemies[idx] = e
+    else pipeline.enemies.push(e)
+  }
+
   for (const p of worldPlan) {
     const rec = pipeline.worlds.find((w) => w.id === p.id)!
     issues.push(...validateWorld(pipeline, rec, `worlds[${p.index}]`))
@@ -665,6 +745,10 @@ export function applyContentBundle(
   for (const p of encounterPlan) {
     const rec = pipeline.encounters.find((e) => e.id === p.id)!
     issues.push(...validateEncounter(pipeline, rec, `encounters[${p.index}]`))
+  }
+  for (const p of enemyPlan) {
+    const rec = pipeline.enemies.find((e) => e.id === p.id)!
+    issues.push(...validateEnemy(pipeline, rec, `enemies[${p.index}]`))
   }
 
   result.issues = issues
@@ -720,6 +804,7 @@ export function applyContentBundle(
   pack('stage', stagePlan, pipeline.stages)
   pack('region', regionPlan, pipeline.regions)
   pack('encounter', encounterPlan, pipeline.encounters)
+  pack('enemy', enemyPlan, pipeline.enemies)
 
   return result
 }
@@ -736,13 +821,15 @@ export function classifyApplyActions(
     world: before.worlds || [],
     stage: before.stages || [],
     encounter: before.encounters || [],
-    region: before.regions || []
+    region: before.regions || [],
+    enemy: before.enemies || []
   }
   const afterLookup = {
     world: after.worlds || [],
     stage: after.stages || [],
     encounter: after.encounters || [],
-    region: after.regions || []
+    region: after.regions || [],
+    enemy: after.enemies || []
   }
   const all = [...result.creates, ...result.updates, ...result.unchanged]
   result.creates = []

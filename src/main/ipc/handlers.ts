@@ -211,6 +211,7 @@ import {
   updateWorld,
   updateWorldMapNode
 } from '../../core/storage/worldContentService'
+import { createEnemy, removeEnemy, updateEnemy } from '../../core/storage/enemyService'
 import {
   applyDesignerAssetPrompt,
   applyDesignerStyleGuide,
@@ -1571,7 +1572,7 @@ export function registerIpcHandlers(): void {
       _e,
       projectId: string,
       gameId: string,
-      input: { id: string; label: string; typeIds: string[]; starKinds?: string[] }
+      input: { id: string; label: string; typeIds: string[]; starKinds?: string[]; winConditions?: string[] }
     ) => {
       await addEncounterModule(gameId, input)
       return await loadProject(projectId)
@@ -1584,7 +1585,7 @@ export function registerIpcHandlers(): void {
       projectId: string,
       gameId: string,
       moduleId: string,
-      input: { label?: string; typeIds?: string[]; starKinds?: string[] }
+      input: { label?: string; typeIds?: string[]; starKinds?: string[]; winConditions?: string[] }
     ) => {
       await updateEncounterModule(gameId, moduleId, input)
       return await loadProject(projectId)
@@ -1713,6 +1714,21 @@ export function registerIpcHandlers(): void {
   })
   ipcMain.handle(IPC_CHANNELS.REGION_REMOVE, async (_e, projectId: string, gameId: string, id: string) => {
     await removeRegion(gameId, id)
+    return await loadProject(projectId)
+  })
+  ipcMain.handle(IPC_CHANNELS.ENEMY_CREATE, async (_e, projectId: string, gameId: string, input: any) => {
+    await createEnemy(gameId, input)
+    return await loadProject(projectId)
+  })
+  ipcMain.handle(
+    IPC_CHANNELS.ENEMY_UPDATE,
+    async (_e, projectId: string, gameId: string, id: string, patch: any) => {
+      await updateEnemy(gameId, id, patch)
+      return await loadProject(projectId)
+    }
+  )
+  ipcMain.handle(IPC_CHANNELS.ENEMY_REMOVE, async (_e, projectId: string, gameId: string, id: string) => {
+    await removeEnemy(gameId, id)
     return await loadProject(projectId)
   })
 }

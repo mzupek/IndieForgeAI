@@ -86,9 +86,18 @@ Removing a record is refused while something points at it (including a map node,
 
 Save paths keep fields they do not know about (in-place updates plus apply overlay), so later optional keys survive a name-only update or a bundle that omits them.
 
-## Out of 1a / 1b / 1c / 1d
+## 2a (same schema v2 — no bump)
 
-- Enemies and attack tables (step 2)
+Optional top-level `enemies` array, filled in memory when missing (same as `worlds`). No migrate. No freemium / currency / reward fields. Still poses only.
+
+- **Game.settings.modules[].winConditions:** optional unique string keys (camelCase allowed). Removal is refused while an enemy in this game uses that kind.
+- **Enemy:** `id`, optional `key`, `gameId`, `name`, `characterId` (same game), `moduleId` (exists and supports `battle`), `winCondition: { kind, params }` (`kind` must be in that module's `winConditions`; `params` are flat numbers), `stats` (flat numbers), `poses` (built-in moments `idle` / `telegraph` / `attack` / `hit` / `defeat` / `win` → a pose slot of that character: core, game, or character), optional reserved `attackTableId` (stored, not validated), optional `assets[]` `{ role, assetId, states? }` (states must exist), optional `notes`.
+- Character removal is refused while an enemy uses it (message names the enemy).
+- `content apply` / `content export` include `enemies`. **`contentSchemaVersion` stays 1**. Export **manifest v2 is unchanged**. Saves overlay unknown fields so extra keys survive an update.
+
+## Out of 1a / 1b / 1c / 1d / 2a
+
+- Attack tables and difficulty (2b / 2c)
 - A4 portable export package
 - `seedDefaultGames` and the Neon Recall Game Definition markdown special case (flagged only)
 - ScenesView / StoryboardEditor store-refresh bug (deferred)

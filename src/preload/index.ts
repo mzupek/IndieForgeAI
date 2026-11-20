@@ -395,6 +395,14 @@ const api: IndieForgeAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.REGION_UPDATE, projectId, gameId, id, patch),
     removeRegion: (projectId, gameId, id) =>
       ipcRenderer.invoke(IPC_CHANNELS.REGION_REMOVE, projectId, gameId, id)
+  },
+  enemies: {
+    create: (projectId, gameId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.ENEMY_CREATE, projectId, gameId, input),
+    update: (projectId, gameId, id, patch) =>
+      ipcRenderer.invoke(IPC_CHANNELS.ENEMY_UPDATE, projectId, gameId, id, patch),
+    remove: (projectId, gameId, id) =>
+      ipcRenderer.invoke(IPC_CHANNELS.ENEMY_REMOVE, projectId, gameId, id)
   }
 }
 

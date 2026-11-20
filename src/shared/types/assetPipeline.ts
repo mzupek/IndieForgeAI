@@ -152,6 +152,8 @@ export interface GameEncounterModule {
   label: string
   typeIds: string[]
   starKinds?: string[]
+  /** 2a: allowed enemy win-condition kinds for this module (data, not code). */
+  winConditions?: string[]
 }
 
 export interface GameSettings {
@@ -886,6 +888,45 @@ export interface RegionExit {
 
 export type RegionEdge = [string, string] | { from: string; to: string; requires?: string; hint?: string }
 
+/** Built-in battle moments. Missing mappings fall back to the character's ready slot. */
+export const BATTLE_MOMENTS = ['idle', 'telegraph', 'attack', 'hit', 'defeat', 'win'] as const
+export type BattleMoment = (typeof BATTLE_MOMENTS)[number]
+
+export interface EnemyWinCondition {
+  kind: string
+  params: Record<string, number>
+}
+
+export interface EnemyAssetRef {
+  role: string
+  assetId: string
+  states?: string[]
+}
+
+/**
+ * Game-level enemy: wraps a Character with still poses, a module win condition, and stats.
+ * Reused by any number of encounters (links land in 2c). Still poses only; no rigs.
+ */
+export interface Enemy {
+  id: string
+  gameId: string
+  key?: string
+  name: string
+  characterId: string
+  moduleId: string
+  winCondition: EnemyWinCondition
+  stats: Record<string, number>
+  /** Battle moment -> a pose slot of the character (core, game, or character). */
+  poses: Partial<Record<BattleMoment, string>>
+  /** Reserved for 2b. Stored when present; not required in 2a. */
+  attackTableId?: string
+  assets?: EnemyAssetRef[]
+  notes?: string
+  schemaVersion: number
+  createdAt: string
+  updatedAt: string
+}
+
 export interface Region {
   id: string
   gameId: string
@@ -942,6 +983,8 @@ export interface AssetPipelineProject {
   stages?: Stage[]
   encounters?: Encounter[]
   regions?: Region[]
+  /** 2a: game-level enemy records. Optional on disk; filled in memory when missing. */
+  enemies?: Enemy[]
   createdAt: string
   updatedAt: string
 }

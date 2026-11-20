@@ -12,14 +12,17 @@ import { readStudio } from './studioStorage'
 import { generateManifest } from './exportService'
 import {
   addCharacterPoseSlot,
+  addEncounterModule,
   addGameAssetCategory,
   addGamePoseSlot,
   listCharacterPoseSlots,
+  listEncounterModules,
   listGameAssetCategories,
   listGamePoseSlots,
   removeCharacterPoseSlot,
   removeGameAssetCategory,
-  removeGamePoseSlot
+  removeGamePoseSlot,
+  updateEncounterModule
 } from './gameSettingsService'
 
 const now = '2026-01-01T00:00:00.000Z'
@@ -352,12 +355,48 @@ async function testExportCompatibility() {
   console.log('✓ export manifest v2 additive custom slots; core poses unchanged')
 }
 
+async function testWinConditions() {
+  await withDir(async (dir) => {
+    await addEncounterModule(
+      'game-a',
+      { id: 'pad', label: 'Pad', typeIds: ['battle'], winConditions: ['locks'] },
+      { dataDirOverride: dir }
+    )
+    const listed = await listEncounterModules('game-a', dir)
+    assert.deepEqual(listed.find((m) => m.id === 'pad')?.winConditions, ['locks'])
+
+    const updated = await updateEncounterModule(
+      'game-a',
+      'pad',
+      { winConditions: ['locks', 'enemyHp', 'either'] },
+      { dataDirOverride: dir }
+    )
+    assert.deepEqual(updated.winConditions, ['locks', 'enemyHp', 'either'])
+
+    await assert.rejects(
+      () =>
+        updateEncounterModule(
+          'game-a',
+          'pad',
+          { winConditions: ['locks', 'locks'] },
+          { dataDirOverride: dir }
+        ),
+      /duplicate winCondition/
+    )
+
+    const b = await listEncounterModules('game-b', dir)
+    assert.equal(b.length, 0)
+  })
+  console.log('✓ module winConditions unique + isolated')
+}
+
 async function main() {
   await testLayeredSlotsAndIsolation()
   await testInUseRefuse()
   await testCategoriesAndBackground()
   await testReadPathNoWriteAndDryRun()
   await testExportCompatibility()
+  await testWinConditions()
   console.log('\n✓ gameSettingsService tests passed')
 }
 

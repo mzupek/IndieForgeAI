@@ -187,5 +187,8 @@ export const IPC_CHANNELS = {
   ENCOUNTER_REMOVE: 'encounter:remove',
   REGION_CREATE: 'region:create',
   REGION_UPDATE: 'region:update',
-  REGION_REMOVE: 'region:remove'
+  REGION_REMOVE: 'region:remove',
+  ENEMY_CREATE: 'enemy:create',
+  ENEMY_UPDATE: 'enemy:update',
+  ENEMY_REMOVE: 'enemy:remove'
 } as const

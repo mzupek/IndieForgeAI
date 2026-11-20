@@ -147,10 +147,14 @@ forge content   export --game <id> --out <dir> [--dry-run] --json   # writes <di
 
 forge game type list|add|remove --game <id>
 forge game module list|add|update|remove --game <id>
+forge game module update --game <id> <moduleId> --win-conditions a,b,c [--dry-run]
 forge game settings update --game <id> --file settings.json [--dry-run] --json
+
+forge enemy list|show|create|update|remove --game <id> [--json] [--dry-run]
+forge enemy checklist <id|@key> --game <id> --json
 ```
 
-`content apply` is all-or-nothing and matches by key (create if new, update if found). Dry-run writes nothing. Re-apply reports 0 changes. Any validation failure writes nothing. JSON includes `aliasMap`, `creates`, `updates`, `unchanged`, `issues`.
+`content apply` is all-or-nothing and matches by key (create if new, update if found). Dry-run writes nothing. Re-apply reports 0 changes. Any validation failure writes nothing. JSON includes `aliasMap`, `creates`, `updates`, `unchanged`, `issues`. `content apply` / `content export` include the optional `enemies` array (additive; `contentSchemaVersion` stays 1).
 
 Removal is refused while other records reference the target. Removing an encounter type or module is refused while an encounter uses it.
 
@@ -161,6 +165,91 @@ World map writes take `--dry-run`. `show` / `update` / `remove` / map / flow acc
 `forge stage reorder --game <id> --world <id|@key> --ids <id|@key,...>` (and `forge world reorder --game <id> --ids <id|@key,...>`) renumbers `order` to 1..N in one save. The list must be a complete permutation: unknown, duplicate, or missing ids are refused. Other worlds / games are untouched. Reordering does not change `unlockAfter`, map nodes, or paths. `--dry-run` validates without writing.
 
 Example bundle: `docs/samples/gate-drone-content.json`.
+
+---
+
+### Enemies (2a)
+
+Game-level enemy records wrap a **character** (still poses only) plus a **module win condition**. No game names are hardcoded: character, module, win kinds, and pose slots come from that game's data. Attack tables (2b) and encounter links (2c) are not here; `attackTableId` is stored when present and not validated.
+
+```bash
+forge enemy list --game <id> [--json]
+forge enemy show <id|@key> --game <id> [--json]
+forge enemy create --game <id> --name "Scout" --character <id|@key|exact name> --module pad --win locks \
+  --win-param count=3 --pose hit=hurt --pose defeat=defeat [--key scout] [--stat hp=20] [--dry-run] [--json]
+forge enemy update <id|@key> --game <id> --win enemyHp --win-param hp=40 [--dry-run] [--json]
+forge enemy remove <id|@key> --game <id> [--dry-run] [--json]
+forge enemy checklist <id|@key> --game <id> --json
+
+forge game module update --game <id> <moduleId> --win-conditions locks,enemyHp,either [--dry-run] [--json]
+```
+
+`show` / `update` / `remove` / `checklist` accept a uuid or `@key`. `--character` accepts id, `@key`, or an exact unique name. `--win-param`, `--stat`, `--pose`, and `--asset` are repeatable (`k=v`, `moment=slot`, `role=assetId[:state,state]`). `--dry-run` validates without writing.
+
+Removing a character is refused while an enemy uses it (the message names the enemy). Removing a win condition from a module is refused while an enemy uses that kind.
+
+#### JSON: `forge enemy list --json`
+
+```json
+{
+  "enemies": [
+    {
+      "id": "uuid",
+      "gameId": "game-a",
+      "key": "scout",
+      "name": "Scout",
+      "characterId": "char-uuid",
+      "moduleId": "pad",
+      "winCondition": { "kind": "locks", "params": { "count": 3 } },
+      "stats": { "hp": 20 },
+      "poses": { "hit": "hurt", "defeat": "defeat" },
+      "assets": [{ "role": "sigil", "assetId": "asset-uuid", "states": ["on"] }],
+      "schemaVersion": 2,
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    }
+  ]
+}
+```
+
+#### JSON: `forge enemy show|create|update --json`
+
+Create / update wrap `{ "record": { ...same enemy... }, "dryRun": false }`. Show wraps `{ "record": { ... } }`.
+
+#### JSON: `forge enemy checklist --json`
+
+```json
+{
+  "enemy": "Scout",
+  "character": "Hero",
+  "ready": false,
+  "poses": [
+    { "slot": "ready", "have": true, "usedBy": "idle (unmapped, falls back to ready), telegraph (unmapped, falls back to ready), attack (unmapped, falls back to ready), win (unmapped, falls back to ready)" },
+    { "slot": "hurt", "have": true, "usedBy": "hit" },
+    { "slot": "defeat", "have": false, "usedBy": "defeat" }
+  ],
+  "assets": [{ "role": "sigil", "have": true, "states": { "on": true } }],
+  "usedBy": []
+}
+```
+
+`usedBy` encounters stay empty until 2c. Pose `have` is true when that character has a pose file for the slot. Unmapped battle moments (`idle`, `telegraph`, `attack`, `hit`, `defeat`, `win`) fall back to `ready`.
+
+#### JSON: `forge game module update --win-conditions --json`
+
+```json
+{
+  "module": {
+    "id": "pad",
+    "label": "Pad",
+    "typeIds": ["battle"],
+    "winConditions": ["locks", "enemyHp", "either"]
+  },
+  "dryRun": false
+}
+```
+
+Win condition keys keep camelCase (`enemyHp`). They must be unique per module (case-insensitive).
 
 ---
 

@@ -20,6 +20,7 @@ import { registerDefinitionCommands } from './commands/definition'
 import { registerMigrateCommand } from './commands/migrate'
 import { registerGameSettingsCommands } from './commands/gameSettings'
 import { registerWorldContentCommands } from './commands/worldContent'
+import { registerEnemyCommands } from './commands/enemy'
 import * as asset from './commands/asset'
 import * as assetState from './commands/asset-state'
 
@@ -404,5 +405,8 @@ registerMigrateCommand(program)
 
 // World / Stage / Encounter / Region + map (1d) + content apply/export
 registerWorldContentCommands(program)
+
+// 2a enemies
+registerEnemyCommands(program)
 
 program.parse()

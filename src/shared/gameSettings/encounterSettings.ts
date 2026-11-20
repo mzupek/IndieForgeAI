@@ -13,6 +13,34 @@ import { assertLabel, assertSettingsKey, normalizeSettingsKey } from './keys'
 import type { NamedUser } from '../worldContent/issues'
 import { formatInUseError } from '../worldContent/issues'
 
+const WIN_KIND_PATTERN = /^[a-zA-Z][a-zA-Z0-9_]*$/
+
+export function assertWinConditionKey(raw: string, kind = 'Win condition'): string {
+  const trimmed = String(raw ?? '').trim()
+  if (!WIN_KIND_PATTERN.test(trimmed)) {
+    throw new Error(
+      `${kind} key must start with a letter and contain only letters, digits, or underscore. Got '${raw}'`
+    )
+  }
+  return trimmed
+}
+
+export function normalizeWinConditions(raw: string[] | undefined, moduleId: string): string[] | undefined {
+  if (!raw || raw.length === 0) return undefined
+  const kinds: string[] = []
+  const seen = new Set<string>()
+  for (const item of raw) {
+    const key = assertWinConditionKey(item)
+    const lower = key.toLowerCase()
+    if (seen.has(lower)) {
+      throw new Error(`Module '${moduleId}' has duplicate winCondition '${key}'`)
+    }
+    seen.add(lower)
+    kinds.push(key)
+  }
+  return kinds
+}
+
 export { DEFAULT_ENCOUNTER_TYPES }
 
 export function ensureGameSettings(game: Game): NonNullable<Game['settings']> {
@@ -50,6 +78,7 @@ export function normalizeModule(input: {
   label: string
   typeIds: string[]
   starKinds?: string[]
+  winConditions?: string[]
 }): GameEncounterModule {
   const id = assertSettingsKey(input.id, 'Module')
   const label = assertLabel(input.label, 'Module')
@@ -74,6 +103,8 @@ export function normalizeModule(input: {
     }
     def.starKinds = kinds
   }
+  const win = normalizeWinConditions(input.winConditions, id)
+  if (win) def.winConditions = win
   return def
 }
 
@@ -127,9 +158,13 @@ export function collectModuleUsers(
   gameId: string
 ): NamedUser[] {
   const key = normalizeSettingsKey(moduleId)
-  return (pipeline.encounters || [])
+  const encounters = (pipeline.encounters || [])
     .filter((e) => e.gameId === gameId && e.moduleId === key)
     .map((e) => ({ id: e.id, name: e.name, kind: 'encounter' }))
+  const enemies = (pipeline.enemies || [])
+    .filter((e) => e.gameId === gameId && e.moduleId === key)
+    .map((e) => ({ id: e.id, name: e.name, kind: 'enemy' }))
+  return [...encounters, ...enemies]
 }
 
 export function assertCanRemoveEncounterType(
@@ -181,6 +216,25 @@ export function assertModuleUpdateCompatible(
           )
         }
       }
+    }
+  }
+  const nextWins = new Set((next.winConditions || []).map((k) => k.toLowerCase()))
+  for (const kind of previous.winConditions || []) {
+    if (nextWins.has(kind.toLowerCase())) continue
+    const users = (pipeline.enemies || []).filter(
+      (e) =>
+        e.gameId === gameId &&
+        e.moduleId === previous.id &&
+        e.winCondition?.kind?.toLowerCase() === kind.toLowerCase()
+    )
+    if (users.length > 0) {
+      throw new Error(
+        formatInUseError(
+          'win condition',
+          kind,
+          users.map((e) => ({ id: e.id, name: e.name, kind: 'enemy' }))
+        )
+      )
     }
   }
 }

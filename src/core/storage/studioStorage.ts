@@ -77,6 +77,7 @@ function createEmptyStudioData(): StudioData {
       stages: [],
       encounters: [],
       regions: [],
+      enemies: [],
       createdAt: now,
       updatedAt: now
     },

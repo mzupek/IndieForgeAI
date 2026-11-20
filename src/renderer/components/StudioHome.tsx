@@ -86,6 +86,8 @@ export function StudioHome() {
       navigate(tab ? `/studio/library/${gameId}?tab=${encodeURIComponent(tab)}` : `/studio/library/${gameId}`)
     } else if (path.startsWith('/studio/world/')) {
       navigate(`/studio/world/${gameId}`)
+    } else if (path.startsWith('/studio/enemies/')) {
+      navigate(`/studio/enemies/${gameId}`)
     } else if (path.startsWith('/studio/scenes/')) {
       navigate(`/studio/scenes/${gameId}`)
     } else if (path.startsWith('/studio/storyboards/')) {

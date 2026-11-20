@@ -467,7 +467,10 @@ export function registerGameSettingsCommands(gamesCmd: Command, characterCmd: Co
           console.log('\nModules:')
           if (modules.length === 0) console.log('  (none)')
           for (const m of modules) {
-            console.log(`  ${m.id}  ${m.label}  types=${m.typeIds.join(',')}`)
+            const wins = (m.winConditions || []).join(',')
+            console.log(
+              `  ${m.id}  ${m.label}  types=${m.typeIds.join(',')}${wins ? `  win=${wins}` : ''}`
+            )
           }
         })
       } catch (err) {
@@ -483,6 +486,7 @@ export function registerGameSettingsCommands(gamesCmd: Command, characterCmd: Co
     .requiredOption('--label <label>', 'Display label')
     .requiredOption('--type-ids <ids>', 'Comma-separated type ids this module supports')
     .option('--star-kinds <kinds>', 'Comma-separated star kinds (optional; omit = any)')
+    .option('--win-conditions <kinds>', 'Comma-separated win condition kinds (optional)')
     .option('--dry-run', 'Validate without writing')
     .action(async (options, cmd) => {
       const opts = { ...program.opts(), ...collectOpts(cmd, options) }
@@ -497,9 +501,15 @@ export function registerGameSettingsCommands(gamesCmd: Command, characterCmd: Co
               .map((s: string) => s.trim())
               .filter(Boolean)
           : undefined
+        const winConditions = options.winConditions
+          ? String(options.winConditions)
+              .split(',')
+              .map((s: string) => s.trim())
+              .filter(Boolean)
+          : undefined
         const def = await addEncounterModule(
           opts.game!,
-          { id: String(options.id), label: String(options.label), typeIds, starKinds },
+          { id: String(options.id), label: String(options.label), typeIds, starKinds, winConditions },
           { dataDirOverride: dir(opts), dryRun: Boolean(opts.dryRun) }
         )
         printOrJson({ module: def, dryRun: Boolean(opts.dryRun) }, opts, () => {
@@ -513,16 +523,20 @@ export function registerGameSettingsCommands(gamesCmd: Command, characterCmd: Co
   moduleCmd
     .command('update')
     .description('Update an encounter module')
+    .argument('[moduleId]', 'Module slug')
     .requiredOption('--game <id>', 'Game ID')
-    .requiredOption('--id <id>', 'Module slug')
+    .option('--id <id>', 'Module slug')
     .option('--label <label>', 'Display label')
     .option('--type-ids <ids>', 'Comma-separated type ids')
     .option('--star-kinds <kinds>', 'Comma-separated star kinds (empty string clears the list)')
+    .option('--win-conditions <kinds>', 'Comma-separated win condition kinds (empty string clears)')
     .option('--dry-run', 'Validate without writing')
-    .action(async (options, cmd) => {
+    .action(async (moduleId, options, cmd) => {
       const opts = { ...program.opts(), ...collectOpts(cmd, options) }
       try {
-        const patch: { label?: string; typeIds?: string[]; starKinds?: string[] } = {}
+        const id = String(moduleId || options.id || '').trim()
+        if (!id) throw new Error('Module id is required')
+        const patch: { label?: string; typeIds?: string[]; starKinds?: string[]; winConditions?: string[] } = {}
         if (options.label !== undefined) patch.label = String(options.label)
         if (options.typeIds !== undefined) {
           patch.typeIds = String(options.typeIds)
@@ -536,7 +550,13 @@ export function registerGameSettingsCommands(gamesCmd: Command, characterCmd: Co
             .map((s: string) => s.trim())
             .filter(Boolean)
         }
-        const def = await updateEncounterModule(opts.game!, String(options.id), patch, {
+        if (options.winConditions !== undefined) {
+          patch.winConditions = String(options.winConditions)
+            .split(',')
+            .map((s: string) => s.trim())
+            .filter(Boolean)
+        }
+        const def = await updateEncounterModule(opts.game!, id, patch, {
           dataDirOverride: dir(opts),
           dryRun: Boolean(opts.dryRun)
         })
