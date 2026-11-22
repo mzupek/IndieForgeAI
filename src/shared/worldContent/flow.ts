@@ -19,8 +19,9 @@ import { encounterFlowExtras } from './encounterLinks'
 import { summarizeCondition } from '../story/conditions'
 import { collectFlagUsageWarnings } from '../story/flags'
 import { triggersOf, validateTrigger } from '../story/triggers'
+import { npcsInRegion, validateNpc } from '../story/npcs'
 
-export type FlowKind = 'world' | 'node' | 'stage' | 'region' | 'hotspot' | 'encounter' | 'exit'
+export type FlowKind = 'world' | 'node' | 'stage' | 'region' | 'hotspot' | 'encounter' | 'exit' | 'npc'
 
 export interface FlowLine {
   id: string
@@ -296,6 +297,20 @@ export function buildWorldFlow(pipeline: AssetPipelineProject, world: World): Wo
         }
       }
       line.children.push(hsLine)
+    }
+    for (const { npc, placement } of npcsInRegion(pipeline, region.id)) {
+      const npcIssues = validateNpc(pipeline, npc, `npcs.${npc.key || npc.id}`)
+      const cond = placement.condition ? ` if ${summarizeCondition(pipeline, world.gameId, placement.condition)}` : ''
+      line.children.push({
+        id: `npc:${npc.id}:${region.id}:${placement.anchorId}`,
+        kind: 'npc',
+        label: `${npc.displayName} @ ${placement.anchorId}${cond}`,
+        status: worst(npcIssues),
+        issues: npcIssues,
+        recordKind: 'region',
+        recordId: region.id,
+        children: []
+      })
     }
     for (const ex of region.exits || []) {
       if (ex.toWorldMap) {

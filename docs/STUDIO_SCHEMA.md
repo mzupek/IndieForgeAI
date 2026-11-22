@@ -141,7 +141,20 @@ Optional top-level `flags` and `triggers` arrays, filled in memory when missing.
 - Flow warnings: flag read but never set, flag set but never read, unlock condition that can never pass, missing trigger source.
 - `content apply` / `content export` include `flags`, `triggers`, and the new stage/encounter fields. `@key` aliases work. **`contentSchemaVersion` stays 1**. Export **manifest v2 is unchanged**. Saves overlay unknown fields so extra keys survive an update.
 
-## Out of 1a / 1b / 1c / 1d / 2a / 2b / 2c / 2d / Step 3
+## Step 4 (same schema v2 — no bump)
+
+Optional top-level `npcs` and `dialogues` arrays, filled in memory when missing. No migrate. No freemium / currency / reward / XP / energy / price fields. Still poses only.
+
+- **Npc:** `id`, optional `key`, `gameId`, `characterId` (existing Character; `corePosesRequired` may be false), `displayName`, `role`, `placements[]` `{ regionId, anchorId, condition?, interactTriggerId? }`, optional `defaultDialogueId`, optional `notes`.
+- **Dialogue:** `id`, optional `key`, `gameId`, `name`, `startNodeId`, `nodes[]`, optional `entryVariants[]` `{ condition, startNodeId }`, optional `notes`.
+- **DialogueNode:** local slug `id`, `speaker` (`npc` id, `hero`, or `narrator`), `text`, optional `poseSlot` (speaker character slots), optional `effects[]`, optional `next` **or** `choices[]` (not both).
+- **DialogueChoice:** `text`, optional `condition`, optional `effects[]`, `next`.
+- Validation: every `next` resolves; unreachable nodes are warnings; at least one end node; speakers and pose slots exist.
+- `startDialogue` missing dialogue is an **error**. `onDialogueEnd` source is a dialogue.
+- Deleting an NPC or dialogue that is in use is refused (message names the users).
+- `content apply` / `content export` include `npcs` and `dialogues`. `@key` aliases work. **`contentSchemaVersion` stays 1**. Export **manifest v2 is unchanged**.
+
+## Out of 1a / 1b / 1c / 1d / 2a / 2b / 2c / 2d / Step 3 / Step 4
 
 - A4 portable export package
 - `seedDefaultGames` and the Neon Recall Game Definition markdown special case (flagged only)

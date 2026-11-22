@@ -211,5 +211,11 @@ export const IPC_CHANNELS = {
   FLAG_REMOVE: 'flag:remove',
   TRIGGER_CREATE: 'trigger:create',
   TRIGGER_UPDATE: 'trigger:update',
-  TRIGGER_REMOVE: 'trigger:remove'
+  TRIGGER_REMOVE: 'trigger:remove',
+  NPC_CREATE: 'npc:create',
+  NPC_UPDATE: 'npc:update',
+  NPC_REMOVE: 'npc:remove',
+  DIALOGUE_CREATE: 'dialogue:create',
+  DIALOGUE_UPDATE: 'dialogue:update',
+  DIALOGUE_REMOVE: 'dialogue:remove'
 } as const

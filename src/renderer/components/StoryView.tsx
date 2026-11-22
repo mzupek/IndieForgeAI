@@ -1,5 +1,5 @@
 /**
- * /studio/story/:gameId — Flags and Triggers (Step 3).
+ * /studio/story/:gameId — Flags, Triggers, NPCs, and Dialogue (Steps 3–4).
  */
 
 import { useState } from 'react'
@@ -9,6 +9,7 @@ import { ConditionBuilder, EffectList } from './ConditionBuilder'
 import { plainErrorMessage } from '@shared/studio/formErrors'
 import { TRIGGER_KINDS } from '@shared/story/conditions'
 import { summarizeCondition, summarizeEffects } from '@shared/story/conditions'
+import { DialoguePanel, NpcPanel } from './NpcDialoguePanels'
 import type {
   AssetPipelineProject,
   Condition,
@@ -20,17 +21,17 @@ import type {
   TriggerKind
 } from '@shared/types/assetPipeline'
 
-type TabId = 'flags' | 'triggers'
+type TabId = 'flags' | 'triggers' | 'npcs' | 'dialogue'
 type FormMode = 'idle' | 'new' | 'edit'
 
 function createdRecord<T extends { id: string; gameId: string }>(
   updated: unknown,
-  collection: 'flags' | 'triggers',
+  collection: 'flags' | 'triggers' | 'npcs' | 'dialogues',
   gameId: string,
   knownIds: Set<string>
 ): T | undefined {
-  const rows =
-    ((updated as { assetPipeline?: AssetPipelineProject } | null)?.assetPipeline?.[collection] || []) as T[]
+  const rows = ((updated as { assetPipeline?: AssetPipelineProject } | null)?.assetPipeline?.[collection] ||
+    []) as unknown as T[]
   return rows.find((row) => row.gameId === gameId && !knownIds.has(row.id))
 }
 
@@ -67,9 +68,9 @@ export function StoryView() {
     <div>
       <div className="page-header">
         <div>
-          <h2>Flags</h2>
+          <h2>Story</h2>
           <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>
-            {game.name} • story flags and triggers. Progress is flags earned through play.
+            {game.name} • flags, triggers, NPCs, and dialogue. Progress is flags earned through play.
           </p>
         </div>
       </div>
@@ -89,7 +90,7 @@ export function StoryView() {
         </div>
       )}
       <div style={{ display: 'flex', gap: '0.5rem', borderBottom: '1px solid var(--border)', marginBottom: '1rem' }}>
-        {(['flags', 'triggers'] as TabId[]).map((id) => (
+        {(['flags', 'triggers', 'npcs', 'dialogue'] as TabId[]).map((id) => (
           <button
             key={id}
             type="button"
@@ -103,7 +104,7 @@ export function StoryView() {
               cursor: 'pointer'
             }}
           >
-            {id === 'flags' ? 'Flags' : 'Triggers'}
+            {id === 'flags' ? 'Flags' : id === 'triggers' ? 'Triggers' : id === 'npcs' ? 'NPCs' : 'Dialogue'}
           </button>
         ))}
       </div>
@@ -112,6 +113,18 @@ export function StoryView() {
       )}
       {tab === 'triggers' && (
         <TriggersPanel
+          projectId={projectId}
+          gameId={gameId}
+          pipeline={pipeline}
+          busy={busy}
+          refreshAfter={refreshAfter}
+        />
+      )}
+      {tab === 'npcs' && (
+        <NpcPanel projectId={projectId} gameId={gameId} pipeline={pipeline} busy={busy} refreshAfter={refreshAfter} />
+      )}
+      {tab === 'dialogue' && (
+        <DialoguePanel
           projectId={projectId}
           gameId={gameId}
           pipeline={pipeline}

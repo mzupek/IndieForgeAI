@@ -86,6 +86,21 @@ export function collectFlagUsageWarnings(
     collectEffectFlagWrites(e.onWin, writes)
     collectEffectFlagWrites(e.onLose, writes)
   }
+  for (const d of pipeline.dialogues || []) {
+    if (d.gameId !== gameId) continue
+    for (const variant of d.entryVariants || []) collectConditionFlagIds(variant.condition, reads)
+    for (const node of d.nodes || []) {
+      collectEffectFlagWrites(node.effects, writes)
+      for (const choice of node.choices || []) {
+        collectConditionFlagIds(choice.condition, reads)
+        collectEffectFlagWrites(choice.effects, writes)
+      }
+    }
+  }
+  for (const n of pipeline.npcs || []) {
+    if (n.gameId !== gameId) continue
+    for (const p of n.placements || []) collectConditionFlagIds(p.condition, reads)
+  }
   const issues: ContentIssue[] = []
   for (const flag of flagsOf(pipeline, gameId)) {
     const read = reads.has(flag.id)

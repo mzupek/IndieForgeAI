@@ -118,7 +118,7 @@ function targetOf(line: FlowLine, worldId: string): FlowOpenTarget {
     return { tab: 'map', worldId, nodeId: line.id.replace(/^node:/, ''), stageId: line.recordId }
   }
   if (line.kind === 'stage') return { tab: 'structure', worldId, stageId: line.recordId }
-  if (line.kind === 'region' || line.kind === 'hotspot' || line.kind === 'exit') {
+  if (line.kind === 'region' || line.kind === 'hotspot' || line.kind === 'exit' || line.kind === 'npc') {
     return { tab: 'regions', worldId, regionId: line.recordId }
   }
   if (line.kind === 'encounter') return { tab: 'encounters', worldId, encounterId: line.recordId }

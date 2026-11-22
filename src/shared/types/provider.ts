@@ -885,6 +885,16 @@ export interface IndieForgeAPI {
     update: (projectId: string, gameId: string, id: string, patch: any) => Promise<IndieForgeProject>
     remove: (projectId: string, gameId: string, id: string) => Promise<IndieForgeProject>
   }
+  npcs: {
+    create: (projectId: string, gameId: string, input: any) => Promise<IndieForgeProject>
+    update: (projectId: string, gameId: string, id: string, patch: any) => Promise<IndieForgeProject>
+    remove: (projectId: string, gameId: string, id: string) => Promise<IndieForgeProject>
+  }
+  dialogues: {
+    create: (projectId: string, gameId: string, input: any) => Promise<IndieForgeProject>
+    update: (projectId: string, gameId: string, id: string, patch: any) => Promise<IndieForgeProject>
+    remove: (projectId: string, gameId: string, id: string) => Promise<IndieForgeProject>
+  }
 }
 
 declare global {

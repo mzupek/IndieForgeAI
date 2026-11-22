@@ -131,6 +131,13 @@ export function collectTriggerUsers(pipeline: AssetPipelineProject, triggerId: s
       }
     }
   }
+  for (const n of pipeline.npcs || []) {
+    for (const p of n.placements || []) {
+      if (p.interactTriggerId === triggerId) {
+        users.push({ id: n.id, name: n.displayName, kind: 'npc' })
+      }
+    }
+  }
   return users
 }
 

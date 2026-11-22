@@ -26,6 +26,7 @@ import type {
   World
 } from '@shared/types/assetPipeline'
 import { ConditionBuilder, EffectList } from './ConditionBuilder'
+import { npcsInRegion } from '@shared/story/npcs'
 import { WorldMapPanel } from './WorldMapPanel'
 import { WorldFlowPreview, type FlowOpenTarget } from './WorldFlowPreview'
 import { validateEncounter } from '@shared/worldContent/validate'
@@ -1609,6 +1610,7 @@ function RegionPanel({
             )}
             busy={busy}
           />
+          <RegionNpcList pipeline={pipeline} regionId={selected?.id || ''} />
           <label>
             Exits JSON
             <textarea rows={4} value={exitsJson} onChange={(e) => setExitsJson(e.target.value)} disabled={busy} />
@@ -1788,6 +1790,23 @@ function ExitWorldMapPickers({
           />
           {ex.id || `exit ${i + 1}`}: back to world map
         </label>
+      ))}
+    </div>
+  )
+}
+
+function RegionNpcList({ pipeline, regionId }: { pipeline: AssetPipelineProject; regionId: string }) {
+  if (!regionId) return null
+  const placed = npcsInRegion(pipeline, regionId)
+  if (placed.length === 0) return null
+  return (
+    <div>
+      <div style={{ fontSize: '0.85rem', color: 'var(--muted)' }}>NPCs in this region</div>
+      {placed.map(({ npc, placement }) => (
+        <div key={`${npc.id}:${placement.anchorId}`} style={{ fontSize: '0.85rem' }}>
+          {npc.displayName} @ {placement.anchorId}
+          {placement.interactTriggerId ? ' (interact trigger)' : ''}
+        </div>
       ))}
     </div>
   )

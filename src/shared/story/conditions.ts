@@ -412,12 +412,7 @@ function validateEffect(
       dialogues.find((d) => d.key === raw.replace(/^@/, '')) ||
       dialogues.find((d) => d.name === raw)
     if (!found) {
-      issues.push(
-        warningIssue(
-          `${path}.startDialogue.dialogueId`,
-          `Dialogue '${raw}' was not found (startDialogue is fully wired in Step 4)`
-        )
-      )
+      issues.push(errorIssue(`${path}.startDialogue.dialogueId`, `Dialogue '${raw}' was not found`))
     }
     return issues
   }
@@ -538,7 +533,10 @@ export function evaluateCondition(condition: Condition | undefined, ctx: EvalCon
   return ctx.wonEncounters.has(condition.encounterWon.encounterId)
 }
 
-function flagLeaves(condition: Condition | undefined, out: { id: string; op: FlagOp; value: boolean | number }[]): void {
+function flagLeaves(
+  condition: Condition | undefined,
+  out: { flagId: string; op: FlagOp; value: boolean | number }[]
+): void {
   if (!condition) return
   if ('all' in condition) condition.all.forEach((c) => flagLeaves(c, out))
   else if ('any' in condition) condition.any.forEach((c) => flagLeaves(c, out))
@@ -562,15 +560,15 @@ export function conditionNeverPasses(condition: Condition | undefined): boolean 
   }
   if ('all' in condition) {
     if (condition.all.some(conditionNeverPasses)) return true
-    const leaves: { id: string; op: FlagOp; value: boolean | number }[] = []
+    const leaves: { flagId: string; op: FlagOp; value: boolean | number }[] = []
     for (const child of condition.all) {
       if ('flag' in child) leaves.push(child.flag)
     }
-    const byId = new Map<string, { id: string; op: FlagOp; value: boolean | number }[]>()
+    const byId = new Map<string, { flagId: string; op: FlagOp; value: boolean | number }[]>()
     for (const leaf of leaves) {
-      const list = byId.get(leaf.id) || []
+      const list = byId.get(leaf.flagId) || []
       list.push(leaf)
-      byId.set(leaf.id, list)
+      byId.set(leaf.flagId, list)
     }
     for (const group of byId.values()) {
       const eqs = group.filter((l) => l.op === 'eq')
@@ -590,7 +588,7 @@ export function conditionNeverPasses(condition: Condition | undefined): boolean 
 }
 
 export function collectConditionFlagIds(condition: Condition | undefined, into: Set<string>): void {
-  const leaves: { id: string; op: FlagOp; value: boolean | number }[] = []
+  const leaves: { flagId: string; op: FlagOp; value: boolean | number }[] = []
   flagLeaves(condition, leaves)
   for (const leaf of leaves) into.add(leaf.flagId)
 }
@@ -630,9 +628,20 @@ export function collectConditionUsers(
   for (const e of pipeline.encounters || []) {
     if (writes(e.onWin) || writes(e.onLose)) add(e.id, e.name, 'encounter')
   }
-  for (const n of ((pipeline as AssetPipelineProject & { npcs?: { id: string; name: string; placements?: { condition?: Condition }[] }[] }).npcs || [])) {
+  for (const n of pipeline.npcs || []) {
     for (const p of n.placements || []) {
-      if (reads(p.condition)) add(n.id, n.name, 'npc')
+      if (reads(p.condition)) add(n.id, n.displayName, 'npc')
+    }
+  }
+  for (const d of pipeline.dialogues || []) {
+    for (const variant of d.entryVariants || []) {
+      if (reads(variant.condition)) add(d.id, d.name, 'dialogue')
+    }
+    for (const node of d.nodes || []) {
+      if (writes(node.effects)) add(d.id, d.name, 'dialogue')
+      for (const choice of node.choices || []) {
+        if (reads(choice.condition) || writes(choice.effects)) add(d.id, d.name, 'dialogue')
+      }
     }
   }
   return users

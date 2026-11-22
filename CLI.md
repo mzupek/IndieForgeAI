@@ -431,7 +431,7 @@ forge encounter update <id|@key> --game <id> --on-win '[{"setFlag":{"flagId":"@p
 forge flow simulate --game <id> --world <id|@key> --flags has_board=true [--json]
 ```
 
-Flag `--type` is `bool` or `int`. `--scope` is `game` or `world`. Trigger kinds: `onHotspot`, `onEnterRegion`, `onStageEnter`, `onEncounterWin`, `onEncounterLose`, `onDialogueEnd`. `--source` is an id, `@key`, or `region:hotspot` (unique hotspot id also works). Missing trigger sources are warnings. `startDialogue` / `onDialogueEnd` are accepted; a missing dialogue is a warning until Step 4.
+Flag `--type` is `bool` or `int`. `--scope` is `game` or `world`. Trigger kinds: `onHotspot`, `onEnterRegion`, `onStageEnter`, `onEncounterWin`, `onEncounterLose`, `onDialogueEnd`. `--source` is an id, `@key`, or `region:hotspot` (unique hotspot id also works). Missing trigger sources are warnings. `startDialogue` requires a real dialogue id (error if missing). `onDialogueEnd` source is a dialogue.
 
 Condition object: `all` / `any` / `not` groups, plus `flag` (`eq` `ne` `gte` `lte`), `stageCleared`, and `encounterWon`. Effect list: `setFlag`, `incFlag`, `clearFlag`, `unlockStage`, `startEncounter`, `startDialogue`, `playScene`, `moveToRegion` (`regionId` + optional `anchorId`), `returnToWorldMap`.
 
@@ -442,6 +442,44 @@ Deleting a flag or trigger that is in use is refused and names the users (`hotsp
 `content apply` / `content export` include `flags` and `triggers` plus `Stage.unlockCondition` and `Encounter.onWin` / `onLose`. `@key` aliases work. Re-apply of unchanged records reports 0 changes.
 
 Create / update wrap `{ "record": { ... }, "dryRun": false }`. List wraps `{ "flags": [ ... ] }` or `{ "triggers": [ ... ] }`. Simulate wraps `{ "result": { ... } }`.
+
+---
+
+### NPCs and dialogue (Step 4)
+
+NPC records wrap an existing character (`corePosesRequired` may be false for portrait-only). Dialogue is a node list (no graph canvas). Speakers are an NPC id, `hero`, or `narrator`. Progress is flags only. No game names are hardcoded. **`contentSchemaVersion` stays 1**. No migrate.
+
+```bash
+forge npc list --game <id> [--json]
+forge npc show <id|@key> --game <id> [--json]
+forge npc create --game <id> --name Mentor --key mentor --character Mentor --role mentor \
+  --placements '[{"regionId":"@region-intro-yard","anchorId":"a-mentor"}]' \
+  --dialogue @dlg-mentor-board [--notes "..."] [--dry-run] [--json]
+forge npc update <id|@key> --game <id> --role guide [--dry-run] [--json]
+forge npc remove <id|@key> --game <id> [--dry-run] [--json]
+
+forge dialogue list --game <id> [--json]
+forge dialogue show <id|@key> --game <id> [--json]
+forge dialogue create --game <id> --name Talk --key mentor-talk --start offer \
+  --nodes '[{"id":"offer","speaker":"narrator","text":"Hello"}]' [--dry-run] [--json]
+forge dialogue node add @mentor-talk --game <id> --id give --speaker @mentor --text "Take it" --next bye
+forge dialogue node update @mentor-talk give --game <id> --text "It is yours"
+forge dialogue node remove @mentor-talk give --game <id>
+forge dialogue choice add @mentor-talk offer --game <id> --text Thanks --next give \
+  --effects '[{"setFlag":{"flagId":"@has_hoverboard","value":true}}]'
+forge dialogue choice update @mentor-talk offer 1 --game <id> --text "Yes"
+forge dialogue choice remove @mentor-talk offer 1 --game <id>
+forge dialogue play @mentor-talk --game <id> --choices 1 --flags has_hoverboard=false --json
+forge dialogue remove <id|@key> --game <id> [--dry-run] [--json]
+```
+
+`forge dialogue play` is deterministic: entry variants pick the start node from flags, then `--choices` are 1-based indexes of currently visible choices. JSON wraps `{ "result": { ... } }`.
+
+Placing an NPC in a region shows on that region's hotspot/anchor list and in Flow preview. `startDialogue` / `onDialogueEnd` are fully wired. Deleting an NPC or dialogue that is in use is refused and names the users.
+
+`content apply` / `content export` include `npcs` and `dialogues`. `@key` aliases work. Re-apply of unchanged records reports 0 changes.
+
+Example bundle (docs only): `docs/samples/world1-intro-content.json` (apply on top of the Gate Drone sample).
 
 ---
 

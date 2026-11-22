@@ -25,6 +25,8 @@ import { registerAttackTableCommands } from './commands/attackTable'
 import { registerDifficultyCommands } from './commands/difficulty'
 import { registerFlagCommands } from './commands/flag'
 import { registerFlowSimulateCommand, registerTriggerCommands } from './commands/trigger'
+import { registerNpcCommands } from './commands/npc'
+import { registerDialogueCommands } from './commands/dialogue'
 import * as asset from './commands/asset'
 import * as assetState from './commands/asset-state'
 
@@ -423,5 +425,7 @@ registerDifficultyCommands(program)
 registerFlagCommands(program)
 registerTriggerCommands(program)
 registerFlowSimulateCommand(program)
+registerNpcCommands(program)
+registerDialogueCommands(program)
 
 program.parse()

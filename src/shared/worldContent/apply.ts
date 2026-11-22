@@ -6,14 +6,18 @@
 import type {
   AssetPipelineProject,
   AttackTable,
-  Condition,
   DifficultyProfile,
   Effect,
   Encounter,
   EncounterEnemyLink,
   EncounterStar,
   Enemy,
+  Dialogue,
+  DialogueEntryVariant,
+  DialogueNode,
   GameFlag,
+  Npc,
+  NpcPlacement,
   Region,
   RegionEdge,
   RegionExit,
@@ -68,6 +72,7 @@ import { parseEncounterEnemies } from './encounterLinks'
 import { resolveEnemyRef } from '../enemies/validate'
 import { resolveSceneId, resolveTuningProfileId } from './validate'
 import {
+  findRecord,
   mapCondition,
   mapEffects,
   parseCondition,
@@ -76,6 +81,8 @@ import {
 } from '../story/conditions'
 import { flagsOf, validateGameFlag } from '../story/flags'
 import { parseTriggerKind, triggersOf, validateTrigger } from '../story/triggers'
+import { npcsOf, validateNpc } from '../story/npcs'
+import { bindDialogueTree, dialoguesOf, validateDialogue } from '../story/dialogue'
 
 export interface ContentBundle {
   worlds?: Record<string, unknown>[]
@@ -87,12 +94,14 @@ export interface ContentBundle {
   difficultyProfiles?: Record<string, unknown>[]
   flags?: Record<string, unknown>[]
   triggers?: Record<string, unknown>[]
+  npcs?: Record<string, unknown>[]
+  dialogues?: Record<string, unknown>[]
 }
 
 export type ApplyAction = 'create' | 'update' | 'unchanged'
 
 export interface ApplyRecordResult {
-  type: 'world' | 'stage' | 'encounter' | 'region' | 'enemy' | 'attackTable' | 'difficultyProfile' | 'flag' | 'trigger'
+  type: 'world' | 'stage' | 'encounter' | 'region' | 'enemy' | 'attackTable' | 'difficultyProfile' | 'flag' | 'trigger' | 'npc' | 'dialogue'
   action: ApplyAction
   id: string
   key?: string
@@ -134,6 +143,8 @@ function seedAliasMap(pipeline: AssetPipelineProject, gameId: string): Record<st
   for (const d of difficultyProfilesOf(pipeline, gameId)) add('difficultyProfile', d.key, d.id)
   for (const f of flagsOf(pipeline, gameId)) add('flag', f.key, f.id)
   for (const t of triggersOf(pipeline, gameId)) add('trigger', t.key, t.id)
+  for (const n of npcsOf(pipeline, gameId)) add('npc', n.key, n.id)
+  for (const d of dialoguesOf(pipeline, gameId)) add('dialogue', d.key, d.id)
   for (const c of (pipeline.characters || []).filter((x) => x.gameId === gameId)) {
     add('character', c.key, c.id)
   }
@@ -162,7 +173,7 @@ function lookupAlias(
 
 function resolveIncomingNamed(
   raw: unknown,
-  kind: 'enemy' | 'attackTable' | 'difficultyProfile' | 'flag' | 'trigger',
+  kind: 'enemy' | 'attackTable' | 'difficultyProfile' | 'flag' | 'trigger' | 'npc' | 'dialogue',
   aliasMap: Record<string, string>,
   path: string,
   issues: ContentIssue[],
@@ -228,7 +239,7 @@ interface Planned {
 }
 
 function planIncoming(
-  kind: 'world' | 'stage' | 'encounter' | 'region' | 'enemy' | 'attackTable' | 'difficultyProfile' | 'flag' | 'trigger',
+  kind: 'world' | 'stage' | 'encounter' | 'region' | 'enemy' | 'attackTable' | 'difficultyProfile' | 'flag' | 'trigger' | 'npc' | 'dialogue',
   inputs: Record<string, unknown>[],
   existing: { id: string; key?: string; gameId: string }[],
   gameId: string,
@@ -443,9 +454,10 @@ function resolveStoryId(
     )
   }
   if (kind === 'dialogue') {
-    const aliased = lookupAlias(aliasMap, raw, 'dialogue')
-    if (aliased) return aliased
-    return raw
+    return resolveIncomingNamed(raw, 'dialogue', aliasMap, path, issues, (value) => {
+      const found = findRecord(pipeline.dialogues || [], value, gameId)
+      return found ? { id: found.id } : { error: `Dialogue '${value}' was not found` }
+    })
   }
   const mapped =
     kind === 'scene' ? 'scene' : kind === 'region' ? 'region' : kind === 'stage' ? 'stage' : 'encounter'
@@ -474,6 +486,8 @@ export function applyContentBundle(
   if (!pipeline.difficultyProfiles) pipeline.difficultyProfiles = []
   if (!pipeline.flags) pipeline.flags = []
   if (!pipeline.triggers) pipeline.triggers = []
+  if (!pipeline.npcs) pipeline.npcs = []
+  if (!pipeline.dialogues) pipeline.dialogues = []
 
   const worldPlan = planIncoming('world', bundle.worlds || [], pipeline.worlds, gameId, aliasMap, issues)
   const flagPlan = planIncoming('flag', bundle.flags || [], pipeline.flags, gameId, aliasMap, issues)
@@ -504,6 +518,8 @@ export function applyContentBundle(
     aliasMap,
     issues
   )
+  const npcPlan = planIncoming('npc', bundle.npcs || [], pipeline.npcs, gameId, aliasMap, issues)
+  const dialoguePlan = planIncoming('dialogue', bundle.dialogues || [], pipeline.dialogues, gameId, aliasMap, issues)
   const triggerPlan = planIncoming('trigger', bundle.triggers || [], pipeline.triggers, gameId, aliasMap, issues)
 
   // Assign region ids into the alias map before validating exits.
@@ -1047,6 +1063,199 @@ export function applyContentBundle(
     else pipeline.encounters.push(e)
   }
 
+  const nextNpcs: Npc[] = []
+  for (const p of npcPlan) {
+    const path = `npcs[${p.index}]`
+    const existing = pipeline.npcs.find((n) => n.id === p.id)
+    const characterRaw = optionalStr(p.input.characterId) ?? existing?.characterId
+    const characterAlias = characterRaw ? lookupAlias(aliasMap, characterRaw, 'character') : undefined
+    const characterResolved = characterRaw ? resolveCharacterRef(pipeline, gameId, characterRaw) : { error: 'characterId is required' }
+    const character = characterAlias || characterResolved.id
+    if (!character) {
+      issues.push(errorIssue(`${path}.characterId`, characterResolved.error || 'Character was not found'))
+    }
+    const dialogueId = optionalStr(p.input.defaultDialogueId)
+    const defaultDialogueId = dialogueId
+      ? resolveStoryId('dialogue', dialogueId, pipeline, gameId, aliasMap, `${path}.defaultDialogueId`, issues)
+      : existing?.defaultDialogueId
+    const placementsRaw = p.input.placements !== undefined ? p.input.placements : existing?.placements
+    const placements: NpcPlacement[] = []
+    if (Array.isArray(placementsRaw)) {
+      for (let i = 0; i < placementsRaw.length; i++) {
+        const row = (placementsRaw[i] || {}) as Record<string, unknown>
+        const regionId = resolveTypedRef(row.regionId, 'region', aliasMap, `${path}.placements[${i}].regionId`, issues, true)
+        const interact = optionalStr(row.interactTriggerId)
+        const interactTriggerId = interact
+          ? resolveIncomingNamed(
+              interact,
+              'trigger',
+              aliasMap,
+              `${path}.placements[${i}].interactTriggerId`,
+              issues,
+              (value) => {
+                const found = findRecord(pipeline.triggers || [], value, gameId)
+                return found ? { id: found.id } : { error: `Trigger '${value}' was not found` }
+              }
+            )
+          : undefined
+        const condIssues: ContentIssue[] = []
+        const condition =
+          row.condition !== undefined
+            ? parseCondition(row.condition, `${path}.placements[${i}].condition`, condIssues)
+            : undefined
+        issues.push(...condIssues)
+        placements.push({
+          regionId: regionId || String(row.regionId || ''),
+          anchorId: str(row.anchorId),
+          condition: condition
+            ? mapCondition(condition, (kind, id) =>
+                resolveStoryId(kind, id, pipeline, gameId, aliasMap, `${path}.placements[${i}].condition`, issues)
+              )
+            : undefined,
+          interactTriggerId
+        })
+      }
+    } else if (existing?.placements) {
+      placements.push(...existing.placements)
+    }
+    const known: Npc = {
+      id: p.id,
+      gameId,
+      characterId: character || existing?.characterId || '',
+      displayName: str(p.input.displayName) || existing?.displayName || '',
+      role: str(p.input.role) || existing?.role || '',
+      placements,
+      schemaVersion: RECORD_SCHEMA_VERSION,
+      createdAt: existing?.createdAt || now,
+      updatedAt: now
+    }
+    const key = p.key ?? existing?.key
+    if (key) known.key = key
+    if (defaultDialogueId) known.defaultDialogueId = defaultDialogueId
+    const notes = optionalStr(p.input.notes) ?? existing?.notes
+    if (notes) known.notes = notes
+    nextNpcs.push(overlayRecord(existing, known))
+  }
+  for (const n of nextNpcs) {
+    const idx = pipeline.npcs.findIndex((x) => x.id === n.id)
+    if (idx >= 0) pipeline.npcs[idx] = n
+    else pipeline.npcs.push(n)
+  }
+
+  const nextDialogues: Dialogue[] = []
+  for (const p of dialoguePlan) {
+    const path = `dialogues[${p.index}]`
+    const existing = pipeline.dialogues.find((d) => d.id === p.id)
+    const nodesRaw = p.input.nodes !== undefined ? p.input.nodes : existing?.nodes
+    const nodes: DialogueNode[] = []
+    if (Array.isArray(nodesRaw)) {
+      for (let i = 0; i < nodesRaw.length; i++) {
+        const row = (nodesRaw[i] || {}) as Record<string, unknown>
+        const speakerRaw = str(row.speaker)
+        const speakerNpc = lookupAlias(aliasMap, speakerRaw, 'npc')
+        const speaker =
+          speakerRaw === 'hero' || speakerRaw === 'narrator'
+            ? speakerRaw
+            : speakerNpc || findRecord(pipeline.npcs || [], speakerRaw, gameId)?.id || speakerRaw
+        const effectIssues: ContentIssue[] = []
+        const effects =
+          row.effects !== undefined ? parseEffects(row.effects, `${path}.nodes[${i}].effects`, effectIssues) : undefined
+        issues.push(...effectIssues)
+        const choicesRaw = row.choices
+        const choices = Array.isArray(choicesRaw)
+          ? choicesRaw.map((c, ci) => {
+              const ch = (c || {}) as Record<string, unknown>
+              const condIssues: ContentIssue[] = []
+              const condition =
+                ch.condition !== undefined
+                  ? parseCondition(ch.condition, `${path}.nodes[${i}].choices[${ci}].condition`, condIssues)
+                  : undefined
+              issues.push(...condIssues)
+              const chEffIssues: ContentIssue[] = []
+              const chEffects =
+                ch.effects !== undefined
+                  ? parseEffects(ch.effects, `${path}.nodes[${i}].choices[${ci}].effects`, chEffIssues)
+                  : undefined
+              issues.push(...chEffIssues)
+              return {
+                text: str(ch.text),
+                next: str(ch.next),
+                condition: condition
+                  ? mapCondition(condition, (kind, id) =>
+                      resolveStoryId(kind, id, pipeline, gameId, aliasMap, `${path}.nodes[${i}].choices[${ci}]`, issues)
+                    )
+                  : undefined,
+                effects: chEffects
+                  ? mapEffects(chEffects, (kind, id) =>
+                      resolveStoryId(kind, id, pipeline, gameId, aliasMap, `${path}.nodes[${i}].choices[${ci}]`, issues)
+                    )
+                  : undefined
+              }
+            })
+          : undefined
+        nodes.push({
+          id: str(row.id),
+          speaker,
+          text: str(row.text),
+          poseSlot: optionalStr(row.poseSlot),
+          next: optionalStr(row.next),
+          effects: effects
+            ? mapEffects(effects, (kind, id) =>
+                resolveStoryId(kind, id, pipeline, gameId, aliasMap, `${path}.nodes[${i}].effects`, issues)
+              )
+            : undefined,
+          choices
+        })
+      }
+    } else if (existing?.nodes) {
+      nodes.push(...existing.nodes)
+    }
+    const variantsRaw = p.input.entryVariants
+    let entryVariants: DialogueEntryVariant[] | undefined
+    if (variantsRaw !== undefined) {
+      entryVariants = []
+      if (Array.isArray(variantsRaw)) {
+        for (let i = 0; i < variantsRaw.length; i++) {
+          const row = (variantsRaw[i] || {}) as Record<string, unknown>
+          const condIssues: ContentIssue[] = []
+          const condition = parseCondition(row.condition, `${path}.entryVariants[${i}].condition`, condIssues)
+          issues.push(...condIssues)
+          if (condition) {
+            entryVariants.push({
+              condition: mapCondition(condition, (kind, id) =>
+                resolveStoryId(kind, id, pipeline, gameId, aliasMap, `${path}.entryVariants[${i}]`, issues)
+              )!,
+              startNodeId: str(row.startNodeId)
+            })
+          }
+        }
+      }
+    } else if (existing?.entryVariants) {
+      entryVariants = existing.entryVariants
+    }
+    const known: Dialogue = {
+      id: p.id,
+      gameId,
+      name: str(p.input.name) || existing?.name || '',
+      startNodeId: str(p.input.startNodeId) || existing?.startNodeId || nodes[0]?.id || '',
+      nodes,
+      schemaVersion: RECORD_SCHEMA_VERSION,
+      createdAt: existing?.createdAt || now,
+      updatedAt: now
+    }
+    const key = p.key ?? existing?.key
+    if (key) known.key = key
+    if (entryVariants && entryVariants.length) known.entryVariants = entryVariants
+    const notes = optionalStr(p.input.notes) ?? existing?.notes
+    if (notes) known.notes = notes
+    nextDialogues.push(overlayRecord(existing, bindDialogueTree(pipeline, gameId, known)))
+  }
+  for (const d of nextDialogues) {
+    const idx = pipeline.dialogues.findIndex((x) => x.id === d.id)
+    if (idx >= 0) pipeline.dialogues[idx] = d
+    else pipeline.dialogues.push(d)
+  }
+
   const nextTriggers: Trigger[] = []
   for (const p of triggerPlan) {
     const path = `triggers[${p.index}]`
@@ -1159,6 +1368,14 @@ export function applyContentBundle(
     const rec = pipeline.flags.find((f) => f.id === p.id)!
     issues.push(...validateGameFlag(pipeline, rec, `flags[${p.index}]`))
   }
+  for (const p of npcPlan) {
+    const rec = pipeline.npcs.find((n) => n.id === p.id)!
+    issues.push(...validateNpc(pipeline, rec, `npcs[${p.index}]`))
+  }
+  for (const p of dialoguePlan) {
+    const rec = pipeline.dialogues.find((d) => d.id === p.id)!
+    issues.push(...validateDialogue(pipeline, rec, `dialogues[${p.index}]`))
+  }
   for (const p of triggerPlan) {
     const rec = pipeline.triggers.find((t) => t.id === p.id)!
     issues.push(...validateTrigger(pipeline, rec, `triggers[${p.index}]`))
@@ -1221,6 +1438,12 @@ export function applyContentBundle(
   pack('enemy', enemyPlan, pipeline.enemies)
   pack('encounter', encounterPlan, pipeline.encounters)
   pack('flag', flagPlan, pipeline.flags)
+  pack(
+    'npc',
+    npcPlan,
+    pipeline.npcs.map((n) => ({ ...n, name: n.displayName }))
+  )
+  pack('dialogue', dialoguePlan, pipeline.dialogues)
   pack('trigger', triggerPlan, pipeline.triggers)
 
   return result
@@ -1243,7 +1466,9 @@ export function classifyApplyActions(
     attackTable: before.attackTables || [],
     difficultyProfile: before.difficultyProfiles || [],
     flag: before.flags || [],
-    trigger: before.triggers || []
+    trigger: before.triggers || [],
+    npc: before.npcs || [],
+    dialogue: before.dialogues || []
   }
   const afterLookup = {
     world: after.worlds || [],
@@ -1254,7 +1479,9 @@ export function classifyApplyActions(
     attackTable: after.attackTables || [],
     difficultyProfile: after.difficultyProfiles || [],
     flag: after.flags || [],
-    trigger: after.triggers || []
+    trigger: after.triggers || [],
+    npc: after.npcs || [],
+    dialogue: after.dialogues || []
   }
   const all = [...result.creates, ...result.updates, ...result.unchanged]
   result.creates = []

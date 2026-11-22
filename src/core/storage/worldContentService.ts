@@ -1086,7 +1086,9 @@ function parseBundle(raw: unknown): ContentBundle {
     'attackTables',
     'difficultyProfiles',
     'flags',
-    'triggers'
+    'triggers',
+    'npcs',
+    'dialogues'
   ] as const) {
     if (obj[name] === undefined) continue
     if (!Array.isArray(obj[name])) {
@@ -1149,6 +1151,8 @@ export interface ContentExportFile {
   difficultyProfiles: DifficultyProfile[]
   flags: import('@shared/types/assetPipeline').GameFlag[]
   triggers: import('@shared/types/assetPipeline').Trigger[]
+  npcs: import('@shared/types/assetPipeline').Npc[]
+  dialogues: import('@shared/types/assetPipeline').Dialogue[]
 }
 
 export async function exportContent(
@@ -1175,7 +1179,9 @@ export async function exportContent(
     attackTables: (pipeline.attackTables || []).filter((t) => t.gameId === gameId),
     difficultyProfiles: (pipeline.difficultyProfiles || []).filter((p) => p.gameId === gameId),
     flags: (pipeline.flags || []).filter((f) => f.gameId === gameId),
-    triggers: (pipeline.triggers || []).filter((t) => t.gameId === gameId)
+    triggers: (pipeline.triggers || []).filter((t) => t.gameId === gameId),
+    npcs: (pipeline.npcs || []).filter((n) => n.gameId === gameId),
+    dialogues: (pipeline.dialogues || []).filter((d) => d.gameId === gameId)
   }
   const target = join(outDir, 'content.json')
   if (options?.dryRun) {

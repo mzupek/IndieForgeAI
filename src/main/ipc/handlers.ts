@@ -233,6 +233,8 @@ import {
 } from '../../core/storage/difficultyService'
 import { createFlag, removeFlag, updateFlag } from '../../core/storage/flagService'
 import { createTrigger, removeTrigger, updateTrigger } from '../../core/storage/triggerService'
+import { createNpc, removeNpc, updateNpc } from '../../core/storage/npcService'
+import { createDialogue, removeDialogue, updateDialogue } from '../../core/storage/dialogueService'
 import {
   applyDesignerAssetPrompt,
   applyDesignerStyleGuide,
@@ -1890,6 +1892,33 @@ export function registerIpcHandlers(): void {
   )
   ipcMain.handle(IPC_CHANNELS.TRIGGER_REMOVE, async (_e, projectId: string, gameId: string, id: string) => {
     await removeTrigger(gameId, id)
+    return await loadProject(projectId)
+  })
+  ipcMain.handle(IPC_CHANNELS.NPC_CREATE, async (_e, projectId: string, gameId: string, input: any) => {
+    await createNpc(gameId, input)
+    return await loadProject(projectId)
+  })
+  ipcMain.handle(IPC_CHANNELS.NPC_UPDATE, async (_e, projectId: string, gameId: string, id: string, patch: any) => {
+    await updateNpc(gameId, id, patch)
+    return await loadProject(projectId)
+  })
+  ipcMain.handle(IPC_CHANNELS.NPC_REMOVE, async (_e, projectId: string, gameId: string, id: string) => {
+    await removeNpc(gameId, id)
+    return await loadProject(projectId)
+  })
+  ipcMain.handle(IPC_CHANNELS.DIALOGUE_CREATE, async (_e, projectId: string, gameId: string, input: any) => {
+    await createDialogue(gameId, input)
+    return await loadProject(projectId)
+  })
+  ipcMain.handle(
+    IPC_CHANNELS.DIALOGUE_UPDATE,
+    async (_e, projectId: string, gameId: string, id: string, patch: any) => {
+      await updateDialogue(gameId, id, patch)
+      return await loadProject(projectId)
+    }
+  )
+  ipcMain.handle(IPC_CHANNELS.DIALOGUE_REMOVE, async (_e, projectId: string, gameId: string, id: string) => {
+    await removeDialogue(gameId, id)
     return await loadProject(projectId)
   })
 }

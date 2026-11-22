@@ -82,6 +82,8 @@ function createEmptyStudioData(): StudioData {
       difficultyProfiles: [],
       flags: [],
       triggers: [],
+      npcs: [],
+      dialogues: [],
       createdAt: now,
       updatedAt: now
     },

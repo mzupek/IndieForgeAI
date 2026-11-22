@@ -913,6 +913,64 @@ export interface Trigger {
   updatedAt: string
 }
 
+export interface NpcPlacement {
+  regionId: string
+  anchorId: string
+  condition?: Condition
+  interactTriggerId?: string
+}
+
+export interface Npc {
+  id: string
+  gameId: string
+  key?: string
+  characterId: string
+  displayName: string
+  role: string
+  placements: NpcPlacement[]
+  defaultDialogueId?: string
+  notes?: string
+  schemaVersion: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface DialogueChoice {
+  text: string
+  condition?: Condition
+  effects?: Effect[]
+  next: string
+}
+
+export interface DialogueNode {
+  id: string
+  speaker: string
+  text: string
+  poseSlot?: string
+  effects?: Effect[]
+  next?: string
+  choices?: DialogueChoice[]
+}
+
+export interface DialogueEntryVariant {
+  condition: Condition
+  startNodeId: string
+}
+
+export interface Dialogue {
+  id: string
+  gameId: string
+  key?: string
+  name: string
+  startNodeId: string
+  nodes: DialogueNode[]
+  entryVariants?: DialogueEntryVariant[]
+  notes?: string
+  schemaVersion: number
+  createdAt: string
+  updatedAt: string
+}
+
 export interface Stage {
   id: string
   gameId: string
@@ -1174,6 +1232,10 @@ export interface AssetPipelineProject {
   flags?: GameFlag[]
   /** Step 3: per-game triggers. Optional on disk; filled in memory when missing. */
   triggers?: Trigger[]
+  /** Step 4: per-game NPCs. Optional on disk; filled in memory when missing. */
+  npcs?: Npc[]
+  /** Step 4: per-game dialogue trees. Optional on disk; filled in memory when missing. */
+  dialogues?: Dialogue[]
   createdAt: string
   updatedAt: string
 }

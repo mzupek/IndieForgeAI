@@ -991,6 +991,11 @@ export function collectRegionUsers(pipeline: AssetPipelineProject, regionId: str
       }
     }
   }
+  for (const n of pipeline.npcs || []) {
+    if ((n.placements || []).some((p) => p.regionId === regionId)) {
+      users.push({ id: n.id, name: n.displayName, kind: 'npc' })
+    }
+  }
   const region = (pipeline.regions || []).find((r) => r.id === regionId)
   for (const hs of region?.hotspots || []) {
     if (!hs.triggerId) continue

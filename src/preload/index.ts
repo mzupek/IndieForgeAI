@@ -453,6 +453,22 @@ const api: IndieForgeAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.TRIGGER_UPDATE, projectId, gameId, id, patch),
     remove: (projectId, gameId, id) =>
       ipcRenderer.invoke(IPC_CHANNELS.TRIGGER_REMOVE, projectId, gameId, id)
+  },
+  npcs: {
+    create: (projectId, gameId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.NPC_CREATE, projectId, gameId, input),
+    update: (projectId, gameId, id, patch) =>
+      ipcRenderer.invoke(IPC_CHANNELS.NPC_UPDATE, projectId, gameId, id, patch),
+    remove: (projectId, gameId, id) =>
+      ipcRenderer.invoke(IPC_CHANNELS.NPC_REMOVE, projectId, gameId, id)
+  },
+  dialogues: {
+    create: (projectId, gameId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.DIALOGUE_CREATE, projectId, gameId, input),
+    update: (projectId, gameId, id, patch) =>
+      ipcRenderer.invoke(IPC_CHANNELS.DIALOGUE_UPDATE, projectId, gameId, id, patch),
+    remove: (projectId, gameId, id) =>
+      ipcRenderer.invoke(IPC_CHANNELS.DIALOGUE_REMOVE, projectId, gameId, id)
   }
 }
 
