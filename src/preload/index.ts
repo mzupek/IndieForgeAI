@@ -356,7 +356,11 @@ const api: IndieForgeAPI = {
     addCounterKind: (projectId, gameId, moduleId, input) =>
       ipcRenderer.invoke(IPC_CHANNELS.GAME_SETTINGS_ADD_COUNTER_KIND, projectId, gameId, moduleId, input),
     removeCounterKind: (projectId, gameId, moduleId, key) =>
-      ipcRenderer.invoke(IPC_CHANNELS.GAME_SETTINGS_REMOVE_COUNTER_KIND, projectId, gameId, moduleId, key)
+      ipcRenderer.invoke(IPC_CHANNELS.GAME_SETTINGS_REMOVE_COUNTER_KIND, projectId, gameId, moduleId, key),
+    addParamSpec: (projectId, gameId, moduleId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.GAME_SETTINGS_ADD_PARAM_SPEC, projectId, gameId, moduleId, input),
+    removeParamSpec: (projectId, gameId, moduleId, key) =>
+      ipcRenderer.invoke(IPC_CHANNELS.GAME_SETTINGS_REMOVE_PARAM_SPEC, projectId, gameId, moduleId, key)
   },
   worldContent: {
     createWorld: (projectId, gameId, input) =>

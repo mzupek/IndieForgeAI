@@ -26,6 +26,7 @@ import { WorldMapPanel } from './WorldMapPanel'
 import { WorldFlowPreview, type FlowOpenTarget } from './WorldFlowPreview'
 import { validateEncounter } from '@shared/worldContent/validate'
 import { encounterTuningConflict } from '@shared/worldContent/encounterLinks'
+import { formatParamSpec, validateParamsAgainstSpecs } from '@shared/gameSettings/paramSpecs'
 import { fieldErrorsFromIssues, formErrorFromIssues, plainErrorMessage } from '@shared/studio/formErrors'
 
 type TabId = 'structure' | 'encounters' | 'regions' | 'map' | 'flow'
@@ -996,6 +997,9 @@ function EncounterPanel({
   const tuningWarnings = encounterTuningConflict(pipeline, draftEncounter)
   const leadEnemy = matchingEnemies.find((e) => e.id === enemyLinks[0]?.enemyId)
   const tuningRow = tuning.find((t) => t.id === tuningId)
+  const selectedModule = modules.find((m) => m.id === moduleId)
+  const paramSpecs = selectedModule?.paramSpecs || []
+  const paramIssues = validateParamsAgainstSpecs(paramSpecs, tuningRow?.params, 'params')
 
   function moveLink(index: number, dir: -1 | 1) {
     setEnemyLinks((prev) => {
@@ -1140,6 +1144,39 @@ function EncounterPanel({
               ))}
             </select>
           </label>
+          {paramSpecs.length > 0 && (
+            <div>
+              <div style={{ fontSize: '0.85rem', color: 'var(--muted)', marginBottom: '0.35rem' }}>
+                Module params
+              </div>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
+                <thead>
+                  <tr style={{ textAlign: 'left', color: 'var(--muted)' }}>
+                    <th style={{ padding: '0.15rem 0.35rem 0.15rem 0' }}>Spec</th>
+                    <th>Value</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paramSpecs.map((spec) => {
+                    const hasValue = Boolean(tuningRow && Object.prototype.hasOwnProperty.call(tuningRow.params || {}, spec.key))
+                    const value = hasValue ? tuningRow?.params?.[spec.key] : undefined
+                    const issue = paramIssues.find((i) => i.path === `params.${spec.key}`)
+                    return (
+                      <tr key={spec.key}>
+                        <td style={{ padding: '0.15rem 0.35rem 0.15rem 0', verticalAlign: 'top' }}>
+                          {formatParamSpec(spec)}
+                        </td>
+                        <td style={{ verticalAlign: 'top', color: issue ? 'var(--forge-gold)' : undefined }}>
+                          {hasValue ? String(value) : spec.required ? 'missing' : '—'}
+                          {issue ? ` — ${issue.message}` : ''}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
           <label>
             Difficulty
             <select value={difficulty} onChange={(e) => setDifficulty(e.target.value)} disabled={busy}>

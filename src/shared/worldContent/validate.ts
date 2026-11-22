@@ -27,6 +27,7 @@ import {
 import { requireGame } from './scope'
 import { assertRecordKey, isAliasRef, isUuid, normalizeRecordKey } from './keys'
 import { errorIssue, type ContentIssue, type NamedUser, warningIssue } from './issues'
+import { validateEncounterParamSpecs } from '../gameSettings/paramSpecs'
 import { validateEncounterLinks } from './encounterLinks'
 
 export const RECORD_SCHEMA_VERSION = 2
@@ -650,6 +651,7 @@ export function validateEncounter(
     )
   }
   issues.push(...validateEncounterLinks(pipeline, encounter, path))
+  issues.push(...validateEncounterParamSpecs(pipeline, encounter, path))
   if (encounter.recommendedLevel !== undefined) {
     const n = assertFiniteNumber(encounter.recommendedLevel, `${path}.recommendedLevel`, issues)
     if (n !== undefined && n < 0) {

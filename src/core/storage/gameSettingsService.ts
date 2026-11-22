@@ -43,8 +43,14 @@ import {
   normalizeEncounterType,
   normalizeModule
 } from '@shared/gameSettings/encounterSettings'
+import { assertCanRemoveParamSpec, normalizeParamSpec } from '@shared/gameSettings/paramSpecs'
 import { formatInUseError } from '@shared/worldContent/issues'
-import type { GameEncounterModule, ModuleAttackKind, ModuleCounterKind } from '@shared/types/assetPipeline'
+import type {
+  GameEncounterModule,
+  ModuleAttackKind,
+  ModuleCounterKind,
+  ModuleParamSpec
+} from '@shared/types/assetPipeline'
 import { getAssetPipeline, updateAssetPipeline } from './studioStorage'
 
 export interface NamedUser {
@@ -448,7 +454,8 @@ export async function listEncounterModules(
     starKinds: m.starKinds ? [...m.starKinds] : undefined,
     winConditions: m.winConditions ? [...m.winConditions] : undefined,
     attackKinds: m.attackKinds ? m.attackKinds.map((k) => ({ ...k, params: k.params ? k.params.map((p) => ({ ...p })) : undefined })) : undefined,
-    counterKinds: m.counterKinds ? m.counterKinds.map((k) => ({ ...k })) : undefined
+    counterKinds: m.counterKinds ? m.counterKinds.map((k) => ({ ...k })) : undefined,
+    paramSpecs: m.paramSpecs ? m.paramSpecs.map((s) => ({ ...s, options: s.options ? [...s.options] : undefined })) : undefined
   }))
 }
 
@@ -462,6 +469,7 @@ export async function addEncounterModule(
     winConditions?: string[]
     attackKinds?: ModuleAttackKind[]
     counterKinds?: ModuleCounterKind[]
+    paramSpecs?: ModuleParamSpec[]
   },
   options?: SlotCategoryWriteOptions
 ): Promise<GameEncounterModule> {
@@ -494,6 +502,7 @@ export async function updateEncounterModule(
     winConditions?: string[]
     attackKinds?: ModuleAttackKind[]
     counterKinds?: ModuleCounterKind[]
+    paramSpecs?: ModuleParamSpec[]
   },
   options?: SlotCategoryWriteOptions
 ): Promise<GameEncounterModule> {
@@ -510,7 +519,8 @@ export async function updateEncounterModule(
     starKinds: input.starKinds !== undefined ? input.starKinds : previous.starKinds,
     winConditions: input.winConditions !== undefined ? input.winConditions : previous.winConditions,
     attackKinds: input.attackKinds !== undefined ? input.attackKinds : previous.attackKinds,
-    counterKinds: input.counterKinds !== undefined ? input.counterKinds : previous.counterKinds
+    counterKinds: input.counterKinds !== undefined ? input.counterKinds : previous.counterKinds,
+    paramSpecs: input.paramSpecs !== undefined ? input.paramSpecs : previous.paramSpecs
   })
   for (const t of next.typeIds) {
     if (!settings.encounterTypes.includes(t)) {
@@ -648,6 +658,68 @@ export async function removeModuleCounterKind(
   const next = normalizeModule({
     ...previous,
     counterKinds: (previous.counterKinds || []).filter((k) => k.key.toLowerCase() !== found.key.toLowerCase())
+  })
+  if (options?.dryRun) return next
+  settings.modules[index] = next
+  touch(game)
+  await updateAssetPipeline(pipeline, options?.dataDirOverride)
+  return next
+}
+
+export async function addModuleParamSpec(
+  gameId: string,
+  moduleId: string,
+  input: {
+    key: string
+    type: string
+    min?: number
+    max?: number
+    options?: string[]
+    default?: number | string | boolean
+    required?: boolean
+  },
+  options?: SlotCategoryWriteOptions
+): Promise<GameEncounterModule> {
+  const pipeline = await getAssetPipeline(options?.dataDirOverride)
+  const game = requireGame(pipeline, gameId)
+  const settings = ensureSettings(game)
+  const index = settings.modules.findIndex((m) => m.id === moduleId.trim().toLowerCase() || m.id === moduleId)
+  if (index < 0) throw new Error(`Module not found: ${moduleId}`)
+  const previous = settings.modules[index]
+  const def = normalizeParamSpec(input, previous.id)
+  const existing = previous.paramSpecs || []
+  if (existing.some((s) => s.key.toLowerCase() === def.key.toLowerCase())) {
+    throw new Error(`Param '${def.key}' already exists on module '${previous.id}'`)
+  }
+  const next = normalizeModule({
+    ...previous,
+    paramSpecs: [...existing, def]
+  })
+  if (options?.dryRun) return next
+  settings.modules[index] = next
+  touch(game)
+  await updateAssetPipeline(pipeline, options?.dataDirOverride)
+  return next
+}
+
+export async function removeModuleParamSpec(
+  gameId: string,
+  moduleId: string,
+  key: string,
+  options?: SlotCategoryWriteOptions
+): Promise<GameEncounterModule> {
+  const pipeline = await getAssetPipeline(options?.dataDirOverride)
+  const game = requireGame(pipeline, gameId)
+  const settings = ensureSettings(game)
+  const index = settings.modules.findIndex((m) => m.id === moduleId.trim().toLowerCase() || m.id === moduleId)
+  if (index < 0) throw new Error(`Module not found: ${moduleId}`)
+  const previous = settings.modules[index]
+  const found = (previous.paramSpecs || []).find((s) => s.key.toLowerCase() === key.trim().toLowerCase())
+  if (!found) throw new Error(`Param '${key}' was not found on module '${previous.id}'`)
+  assertCanRemoveParamSpec(pipeline, gameId, previous.id, found.key)
+  const next = normalizeModule({
+    ...previous,
+    paramSpecs: (previous.paramSpecs || []).filter((s) => s.key.toLowerCase() !== found.key.toLowerCase())
   })
   if (options?.dryRun) return next
   settings.modules[index] = next

@@ -9,8 +9,10 @@ import type {
   GameEncounterModule,
   ModuleAttackKind,
   ModuleCounterKind,
-  ModuleKindParamDef
+  ModuleKindParamDef,
+  ModuleParamSpec
 } from '../types/assetPipeline'
+import { assertCanRemoveParamSpec, normalizeParamSpecs } from './paramSpecs'
 import { emptyGameSettings, DEFAULT_ENCOUNTER_TYPES } from '../studio/schema'
 import { assertLabel, assertSettingsKey, normalizeSettingsKey } from './keys'
 import type { NamedUser } from '../worldContent/issues'
@@ -239,6 +241,7 @@ export function normalizeModule(input: {
   winConditions?: string[]
   attackKinds?: ModuleAttackKind[]
   counterKinds?: ModuleCounterKind[]
+  paramSpecs?: ModuleParamSpec[]
 }): GameEncounterModule {
   const id = assertSettingsKey(input.id, 'Module')
   const label = assertLabel(input.label, 'Module')
@@ -269,6 +272,8 @@ export function normalizeModule(input: {
   if (attacks) def.attackKinds = attacks
   const counters = normalizeCounterKinds(input.counterKinds, id)
   if (counters) def.counterKinds = counters
+  const specs = normalizeParamSpecs(input.paramSpecs, id)
+  if (specs) def.paramSpecs = specs
   return def
 }
 
@@ -415,5 +420,10 @@ export function assertModuleUpdateCompatible(
     if (nextCounters.has(kind.key.toLowerCase())) continue
     const users = collectCounterKindUsers(pipeline, gameId, previous.id, kind.key)
     if (users.length > 0) throw new Error(formatInUseError('counter kind', kind.key, users))
+  }
+  const nextSpecs = new Set((next.paramSpecs || []).map((s) => s.key.toLowerCase()))
+  for (const spec of previous.paramSpecs || []) {
+    if (nextSpecs.has(spec.key.toLowerCase())) continue
+    assertCanRemoveParamSpec(pipeline, gameId, previous.id, spec.key)
   }
 }

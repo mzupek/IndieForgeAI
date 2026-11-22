@@ -181,6 +181,7 @@ import {
   addGamePoseSlot,
   addModuleAttackKind,
   addModuleCounterKind,
+  addModuleParamSpec,
   removeCharacterPoseSlot,
   removeEncounterModule,
   removeEncounterType,
@@ -188,6 +189,7 @@ import {
   removeGamePoseSlot,
   removeModuleAttackKind,
   removeModuleCounterKind,
+  removeModuleParamSpec,
   setCharacterCorePosesRequired,
   updateEncounterModule
 } from '../../core/storage/gameSettingsService'
@@ -1646,6 +1648,34 @@ export function registerIpcHandlers(): void {
     IPC_CHANNELS.GAME_SETTINGS_REMOVE_COUNTER_KIND,
     async (_e, projectId: string, gameId: string, moduleId: string, key: string) => {
       await removeModuleCounterKind(gameId, moduleId, key)
+      return await loadProject(projectId)
+    }
+  )
+  ipcMain.handle(
+    IPC_CHANNELS.GAME_SETTINGS_ADD_PARAM_SPEC,
+    async (
+      _e,
+      projectId: string,
+      gameId: string,
+      moduleId: string,
+      input: {
+        key: string
+        type: string
+        min?: number
+        max?: number
+        options?: string[]
+        default?: number | string | boolean
+        required?: boolean
+      }
+    ) => {
+      await addModuleParamSpec(gameId, moduleId, input)
+      return await loadProject(projectId)
+    }
+  )
+  ipcMain.handle(
+    IPC_CHANNELS.GAME_SETTINGS_REMOVE_PARAM_SPEC,
+    async (_e, projectId: string, gameId: string, moduleId: string, key: string) => {
+      await removeModuleParamSpec(gameId, moduleId, key)
       return await loadProject(projectId)
     }
   )

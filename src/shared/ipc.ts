@@ -167,6 +167,8 @@ export const IPC_CHANNELS = {
   GAME_SETTINGS_REMOVE_ATTACK_KIND: 'gameSettings:removeAttackKind',
   GAME_SETTINGS_ADD_COUNTER_KIND: 'gameSettings:addCounterKind',
   GAME_SETTINGS_REMOVE_COUNTER_KIND: 'gameSettings:removeCounterKind',
+  GAME_SETTINGS_ADD_PARAM_SPEC: 'gameSettings:addParamSpec',
+  GAME_SETTINGS_REMOVE_PARAM_SPEC: 'gameSettings:removeParamSpec',
   CHARACTER_POSE_SLOT_ADD: 'characterPoseSlot:add',
   CHARACTER_POSE_SLOT_REMOVE: 'characterPoseSlot:remove',
   CHARACTER_CORE_POSES_REQUIRED: 'characterPoseSlot:coreRequired',

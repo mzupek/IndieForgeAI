@@ -116,7 +116,17 @@ Optional top-level `difficultyProfiles` array, filled in memory when missing. Op
 - Deleting an enemy, attack table, or difficulty profile that an encounter uses is refused (message names the encounter).
 - `content apply` / `content export` include `difficultyProfiles` and the encounter fields. `@key` aliases work for `enemyId`, `attackTableId`, and `difficultyProfileId`. **`contentSchemaVersion` stays 1**. Export **manifest v2 is unchanged**. Saves overlay unknown fields so extra keys survive an update.
 
-## Out of 1a / 1b / 1c / 1d / 2a / 2b / 2c
+## 2d (same schema v2 — no bump)
+
+Optional `Game.settings.modules[].paramSpecs`. No migrate. No freemium / currency / reward fields. Still poses only.
+
+- **ModuleParamSpec:** `key` (camelCase), `type` (`int` | `float` | `bool` | `enum` | `string`), optional `min` / `max` (int/float), optional `options` (enum, required when type is enum), optional `default` (must match type/range/options), optional `required`.
+- Unique keys per module (case-insensitive). Empty list is allowed (default).
+- Encounter validation: if the module lists param specs, the linked Game Definition **tuning profile** is checked. Missing required params, wrong types, out-of-range numbers, and enum values not in `options` are **warnings** (Flow + Encounter editor). They do not block save.
+- Removing a param spec is refused while an encounter of that module has a tuning row that still contains that key (message names the encounter).
+- `content export` includes `settings.modules` (and therefore `paramSpecs`). **`contentSchemaVersion` stays 1**. Export **manifest v2 is unchanged**.
+
+## Out of 1a / 1b / 1c / 1d / 2a / 2b / 2c / 2d
 
 - A4 portable export package
 - `seedDefaultGames` and the Neon Recall Game Definition markdown special case (flagged only)

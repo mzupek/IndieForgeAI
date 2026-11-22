@@ -154,6 +154,19 @@ export interface ModuleKindParamDef {
   max?: number
 }
 
+export type ModuleParamType = 'int' | 'float' | 'bool' | 'enum' | 'string'
+
+/** 2d: expected tuning params for an encounter module. Optional; default empty. */
+export interface ModuleParamSpec {
+  key: string
+  type: ModuleParamType
+  min?: number
+  max?: number
+  options?: string[]
+  default?: number | string | boolean
+  required?: boolean
+}
+
 export interface ModuleAttackKind {
   key: string
   label: string
@@ -176,6 +189,8 @@ export interface GameEncounterModule {
   attackKinds?: ModuleAttackKind[]
   /** 2b: allowed counter kinds for attack rows (data, not code). */
   counterKinds?: ModuleCounterKind[]
+  /** 2d: expected tuning params for this module. Optional; default empty. */
+  paramSpecs?: ModuleParamSpec[]
 }
 
 export interface GameSettings {

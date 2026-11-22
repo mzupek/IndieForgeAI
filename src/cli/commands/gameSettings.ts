@@ -11,6 +11,7 @@ import {
   addEncounterType,
   addModuleAttackKind,
   addModuleCounterKind,
+  addModuleParamSpec,
   addGameAssetCategory,
   addGamePoseSlot,
   listCharacterPoseSlots,
@@ -23,6 +24,7 @@ import {
   removeEncounterType,
   removeModuleAttackKind,
   removeModuleCounterKind,
+  removeModuleParamSpec,
   removeGameAssetCategory,
   removeGamePoseSlot,
   setCharacterCorePosesRequired,
@@ -474,8 +476,9 @@ export function registerGameSettingsCommands(gamesCmd: Command, characterCmd: Co
             const wins = (m.winConditions || []).join(',')
             const attacks = (m.attackKinds || []).map((k) => k.key).join(',')
             const counters = (m.counterKinds || []).map((k) => k.key).join(',')
+            const params = (m.paramSpecs || []).map((s) => s.key).join(',')
             console.log(
-              `  ${m.id}  ${m.label}  types=${m.typeIds.join(',')}${wins ? `  win=${wins}` : ''}${attacks ? `  attack=${attacks}` : ''}${counters ? `  counter=${counters}` : ''}`
+              `  ${m.id}  ${m.label}  types=${m.typeIds.join(',')}${wins ? `  win=${wins}` : ''}${attacks ? `  attack=${attacks}` : ''}${counters ? `  counter=${counters}` : ''}${params ? `  params=${params}` : ''}`
             )
           }
         })
@@ -689,6 +692,101 @@ export function registerGameSettingsCommands(gamesCmd: Command, characterCmd: Co
         })
         printOrJson({ module: def, dryRun: Boolean(opts.dryRun) }, opts, () => {
           console.log(`${opts.dryRun ? 'Would remove' : 'Removed'} counter kind '${options.key}' from ${def.id}`)
+        })
+      } catch (err) {
+        outputError(err, opts)
+        process.exit(1)
+      }
+    })
+
+  const paramCmd = moduleCmd.command('param').description('Manage module tuning param specs (2d)')
+  paramCmd
+    .command('list')
+    .description('List param specs on a module')
+    .argument('<moduleId>', 'Module slug')
+    .requiredOption('--game <id>', 'Game ID')
+    .action(async (moduleId, options, cmd) => {
+      const opts = { ...program.opts(), ...collectOpts(cmd, options) }
+      try {
+        const modules = await listEncounterModules(opts.game!, dir(opts))
+        const mod = modules.find((m) => m.id === String(moduleId).trim() || m.id === String(moduleId).trim().toLowerCase())
+        if (!mod) throw new Error(`Module not found: ${moduleId}`)
+        const paramSpecs = mod.paramSpecs || []
+        printOrJson({ paramSpecs }, opts, () => {
+          console.log(`\nParam specs (${mod.id}):`)
+          if (paramSpecs.length === 0) console.log('  (none)')
+          for (const s of paramSpecs) {
+            const range =
+              s.min !== undefined || s.max !== undefined ? ` ${s.min ?? ''}–${s.max ?? ''}` : ''
+            const optionsText = s.options?.length ? ` [${s.options.join(', ')}]` : ''
+            const req = s.required ? ' required' : ''
+            const def = s.default !== undefined ? ` default=${String(s.default)}` : ''
+            console.log(`  ${s.key}  ${s.type}${range}${optionsText}${req}${def}`)
+          }
+        })
+      } catch (err) {
+        outputError(err, opts)
+        process.exit(1)
+      }
+    })
+  paramCmd
+    .command('add')
+    .description('Add a tuning param spec to a module')
+    .argument('<moduleId>', 'Module slug')
+    .requiredOption('--game <id>', 'Game ID')
+    .requiredOption('--key <key>', 'Param key (camelCase)')
+    .requiredOption('--type <type>', 'int | float | bool | enum | string')
+    .option('--min <n>', 'Minimum (int/float)')
+    .option('--max <n>', 'Maximum (int/float)')
+    .option('--options <list>', 'Comma-separated enum options')
+    .option('--default <value>', 'Default value')
+    .option('--required', 'Required on the encounter tuning row')
+    .option('--dry-run', 'Validate without writing')
+    .action(async (moduleId, options, cmd) => {
+      const opts = { ...program.opts(), ...collectOpts(cmd, options) }
+      try {
+        const input = {
+          key: String(options.key),
+          type: String(options.type),
+          min: options.min !== undefined ? Number(options.min) : undefined,
+          max: options.max !== undefined ? Number(options.max) : undefined,
+          options: options.options
+            ? String(options.options)
+                .split(',')
+                .map((s: string) => s.trim())
+                .filter(Boolean)
+            : undefined,
+          default: options.default !== undefined ? String(options.default) : undefined,
+          required: Boolean(options.required)
+        }
+        const def = await addModuleParamSpec(opts.game!, String(moduleId), input, {
+          dataDirOverride: dir(opts),
+          dryRun: Boolean(opts.dryRun)
+        })
+        printOrJson({ module: def, dryRun: Boolean(opts.dryRun) }, opts, () => {
+          console.log(`${opts.dryRun ? 'Would add' : 'Added'} param '${options.key}' on ${def.id}`)
+        })
+      } catch (err) {
+        outputError(err, opts)
+        process.exit(1)
+      }
+    })
+  paramCmd
+    .command('remove')
+    .description('Remove a param spec (refused while an encounter tuning row uses it)')
+    .argument('<moduleId>', 'Module slug')
+    .requiredOption('--game <id>', 'Game ID')
+    .requiredOption('--key <key>', 'Param key')
+    .option('--dry-run', 'Validate without writing')
+    .action(async (moduleId, options, cmd) => {
+      const opts = { ...program.opts(), ...collectOpts(cmd, options) }
+      try {
+        const def = await removeModuleParamSpec(opts.game!, String(moduleId), String(options.key), {
+          dataDirOverride: dir(opts),
+          dryRun: Boolean(opts.dryRun)
+        })
+        printOrJson({ module: def, dryRun: Boolean(opts.dryRun) }, opts, () => {
+          console.log(`${opts.dryRun ? 'Would remove' : 'Removed'} param '${options.key}' from ${def.id}`)
         })
       } catch (err) {
         outputError(err, opts)

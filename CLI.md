@@ -148,6 +148,7 @@ forge content   export --game <id> --out <dir> [--dry-run] --json   # writes <di
 forge game type list|add|remove --game <id>
 forge game module list|add|update|remove --game <id>
 forge game module update --game <id> <moduleId> --win-conditions a,b,c [--dry-run]
+forge game module param list|add|remove --game <id> <moduleId>
 forge game settings update --game <id> --file settings.json [--dry-run] --json
 
 forge enemy list|show|create|update|remove --game <id> [--json] [--dry-run]
@@ -383,6 +384,24 @@ The enemy must exist in the same game, and `enemy.moduleId` must match the encou
 Flow preview labels the lead enemy (and extra count) and warns when that enemy's checklist is not ready. If encounter tuning (for example HP / rounds) disagrees with the lead enemy's `winCondition`, both are shown as a warning; nothing is auto-resolved.
 
 Create / update wrap `{ "record": { ...profile... }, "dryRun": false }`. List wraps `{ "difficultyProfiles": [ ... ] }`.
+
+---
+
+### Mini-game param specs (2d)
+
+Each encounter module can list expected tuning params. Types are `int`, `float`, `bool`, `enum`, and `string`. Range (`--min` / `--max`) applies to int/float; `--options` is required for enum. Optional `default` and `--required`. No game names are hardcoded. **`contentSchemaVersion` stays 1**. No migrate.
+
+```bash
+forge game module param list --game <id> <moduleId> [--json]
+forge game module param add --game <id> <moduleId> --key rounds --type int --min 1 --max 20 --default 10 --required
+forge game module param add --game <id> <moduleId> --key mode --type enum --options easy,hard --default easy
+forge game module param add --game <id> <moduleId> --key turbo --type bool --default false
+forge game module param remove --game <id> <moduleId> --key rounds [--dry-run] [--json]
+```
+
+Flow preview warns when an encounter's Game Definition tuning row is missing a required param or has one out of range (or wrong type / not in the enum). The Encounter editor lists the module's specs beside the current tuning values. Removing a param spec that an encounter's tuning row still uses is refused and names the encounter(s). `content export` includes `settings.modules[].paramSpecs`. Re-apply of unchanged encounter records reports 0 changes.
+
+List wraps `{ "paramSpecs": [ ... ] }`. Add / remove wrap `{ "module": { ... }, "dryRun": false }`.
 
 ---
 

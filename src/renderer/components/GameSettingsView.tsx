@@ -13,6 +13,7 @@ import {
   normalizeAttackKind,
   normalizeCounterKind
 } from '@shared/gameSettings/encounterSettings'
+import { formatParamSpec, MODULE_PARAM_TYPES, normalizeParamSpec } from '@shared/gameSettings/paramSpecs'
 import { attemptSync, plainErrorMessage } from '@shared/studio/formErrors'
 import type { GameAssetCategoryDef, GameEncounterModule, GamePoseSlotDef } from '@shared/types/assetPipeline'
 
@@ -326,8 +327,9 @@ export function GameSettingsView() {
       <div className="panel-section" style={{ marginTop: '2rem' }}>
         <h3>Encounter modules</h3>
         <p style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>
-          Each module lists the types it supports, optional star kinds, win conditions, attack kinds, and counter kinds.
-          Removal of a module, win condition, or kind is refused while an encounter, enemy, or attack row uses it.
+          Each module lists the types it supports, optional star kinds, win conditions, attack kinds, counter kinds,
+          and tuning param specs. Removal of a module, win condition, kind, or in-use param spec is refused while an
+          encounter, enemy, or attack row uses it.
         </p>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
           <thead>
@@ -339,6 +341,7 @@ export function GameSettingsView() {
               <th>Win conditions</th>
               <th>Attack kinds</th>
               <th>Counter kinds</th>
+              <th>Tuning params</th>
               <th></th>
             </tr>
           </thead>
@@ -369,6 +372,9 @@ export function GameSettingsView() {
                 </td>
                 <td style={{ minWidth: '12rem' }}>
                   <ModuleCounterKinds module={m} busy={busy} projectId={projectId} gameId={gameId} onChange={refreshAfter} />
+                </td>
+                <td style={{ minWidth: '18rem' }}>
+                  <ModuleParamSpecs module={m} busy={busy} projectId={projectId} gameId={gameId} onChange={refreshAfter} />
                 </td>
                 <td>
                   <button
@@ -772,6 +778,171 @@ function ModuleCounterKinds({
           disabled={busy}
         />
         <input placeholder="label" value={label} onChange={(e) => setLabel(e.target.value)} disabled={busy} />
+        <button type="submit" className="ghost" disabled={busy || !key.trim()}>
+          Add
+        </button>
+      </form>
+      {error && (
+        <p style={{ color: 'var(--error)', fontSize: '0.8rem', margin: 0, whiteSpace: 'pre-wrap' }}>{error}</p>
+      )}
+    </div>
+  )
+}
+
+function ModuleParamSpecs({
+  module,
+  busy,
+  projectId,
+  gameId,
+  onChange
+}: {
+  module: GameEncounterModule
+  busy: boolean
+  projectId: string
+  gameId: string
+  onChange: (mutator: () => Promise<unknown>) => Promise<unknown>
+}) {
+  const [key, setKey] = useState('')
+  const [type, setType] = useState<(typeof MODULE_PARAM_TYPES)[number]>('int')
+  const [min, setMin] = useState('')
+  const [max, setMax] = useState('')
+  const [enumOptions, setEnumOptions] = useState('')
+  const [defaultValue, setDefaultValue] = useState('')
+  const [required, setRequired] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const specs = module.paramSpecs || []
+
+  function reset() {
+    setKey('')
+    setType('int')
+    setMin('')
+    setMax('')
+    setEnumOptions('')
+    setDefaultValue('')
+    setRequired(false)
+  }
+
+  return (
+    <div style={{ display: 'grid', gap: '0.35rem' }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
+        {specs.length === 0 && <span style={{ color: 'var(--muted)' }}>(none)</span>}
+        {specs.map((spec) => (
+          <span
+            key={spec.key}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.25rem',
+              padding: '0.1rem 0.4rem',
+              border: '1px solid var(--border)',
+              borderRadius: 4,
+              fontSize: '0.8rem'
+            }}
+          >
+            {formatParamSpec(spec)}
+            <button
+              type="button"
+              className="ghost"
+              disabled={busy}
+              style={{ color: 'var(--error)', padding: 0 }}
+              onClick={() => {
+                setError(null)
+                void onChange(() =>
+                  window.indieForge.gameSettings.removeParamSpec(projectId, gameId, module.id, spec.key)
+                )
+              }}
+              aria-label={`Remove ${spec.key}`}
+            >
+              ×
+            </button>
+          </span>
+        ))}
+      </div>
+      <form
+        style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', alignItems: 'center' }}
+        onSubmit={(e) => {
+          e.preventDefault()
+          if (!key.trim()) return
+          const input = {
+            key: key.trim(),
+            type,
+            min: min.trim() ? Number(min) : undefined,
+            max: max.trim() ? Number(max) : undefined,
+            options: type === 'enum' ? enumOptions.split(',').map((s) => s.trim()).filter(Boolean) : undefined,
+            default: defaultValue === '' ? undefined : defaultValue,
+            required: required || undefined
+          }
+          const preview = attemptSync(() => normalizeParamSpec(input, module.id))
+          if (!preview.ok) {
+            setError(preview.message)
+            return
+          }
+          setError(null)
+          void Promise.resolve(
+            onChange(() => window.indieForge.gameSettings.addParamSpec(projectId, gameId, module.id, input))
+          ).then((updated) => {
+            if (!updated) return
+            reset()
+          })
+        }}
+      >
+        <input
+          placeholder="key"
+          value={key}
+          onChange={(e) => {
+            setKey(e.target.value)
+            if (error) setError(null)
+          }}
+          disabled={busy}
+        />
+        <select
+          value={type}
+          onChange={(e) => setType(e.target.value as (typeof MODULE_PARAM_TYPES)[number])}
+          disabled={busy}
+        >
+          {MODULE_PARAM_TYPES.map((t) => (
+            <option key={t} value={t}>
+              {t}
+            </option>
+          ))}
+        </select>
+        {(type === 'int' || type === 'float') && (
+          <>
+            <input
+              placeholder="min"
+              value={min}
+              onChange={(e) => setMin(e.target.value)}
+              disabled={busy}
+              style={{ width: '3.5rem' }}
+            />
+            <input
+              placeholder="max"
+              value={max}
+              onChange={(e) => setMax(e.target.value)}
+              disabled={busy}
+              style={{ width: '3.5rem' }}
+            />
+          </>
+        )}
+        {type === 'enum' && (
+          <input
+            placeholder="options (comma)"
+            value={enumOptions}
+            onChange={(e) => setEnumOptions(e.target.value)}
+            disabled={busy}
+          />
+        )}
+        <input
+          placeholder="default"
+          value={defaultValue}
+          onChange={(e) => setDefaultValue(e.target.value)}
+          disabled={busy}
+          style={{ width: '5rem' }}
+        />
+        <label style={{ display: 'inline-flex', gap: '0.25rem', fontSize: '0.8rem', alignItems: 'center' }}>
+          <input type="checkbox" checked={required} onChange={(e) => setRequired(e.target.checked)} disabled={busy} />
+          required
+        </label>
         <button type="submit" className="ghost" disabled={busy || !key.trim()}>
           Add
         </button>

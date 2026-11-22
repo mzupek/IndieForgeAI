@@ -15,6 +15,7 @@ import {
   addEncounterModule,
   addGameAssetCategory,
   addGamePoseSlot,
+  addModuleParamSpec,
   listCharacterPoseSlots,
   listEncounterModules,
   listGameAssetCategories,
@@ -22,6 +23,7 @@ import {
   removeCharacterPoseSlot,
   removeGameAssetCategory,
   removeGamePoseSlot,
+  removeModuleParamSpec,
   updateEncounterModule
 } from './gameSettingsService'
 
@@ -390,6 +392,61 @@ async function testWinConditions() {
   console.log('✓ module winConditions unique + isolated')
 }
 
+async function testParamSpecs() {
+  await withDir(async (dir) => {
+    await addEncounterModule(
+      'game-a',
+      { id: 'mini', label: 'Mini', typeIds: ['minigame'] },
+      { dataDirOverride: dir }
+    )
+    const added = await addModuleParamSpec(
+      'game-a',
+      'mini',
+      { key: 'lanes', type: 'int', min: 1, max: 4, default: 2, required: true },
+      { dataDirOverride: dir }
+    )
+    assert.equal(added.paramSpecs?.[0]?.key, 'lanes')
+    assert.equal(added.paramSpecs?.[0]?.type, 'int')
+    assert.equal(added.paramSpecs?.[0]?.required, true)
+
+    const kept = await updateEncounterModule('game-a', 'mini', { label: 'Mini game' }, { dataDirOverride: dir })
+    assert.equal(kept.paramSpecs?.[0]?.key, 'lanes')
+
+    await assert.rejects(
+      () => addModuleParamSpec('game-a', 'mini', { key: 'lanes', type: 'float' }, { dataDirOverride: dir }),
+      /already exists/
+    )
+    await assert.rejects(
+      () => addModuleParamSpec('game-a', 'mini', { key: 'mode', type: 'bytes' }, { dataDirOverride: dir }),
+      /int, float, bool, enum, string/
+    )
+
+    const dry = await addModuleParamSpec(
+      'game-a',
+      'mini',
+      { key: 'mode', type: 'enum', options: ['a', 'b'], default: 'a' },
+      { dataDirOverride: dir, dryRun: true }
+    )
+    assert.equal(dry.paramSpecs?.some((s) => s.key === 'mode'), true)
+    const listed = await listEncounterModules('game-a', dir)
+    assert.equal(listed.find((m) => m.id === 'mini')?.paramSpecs?.some((s) => s.key === 'mode'), false)
+
+    const withMode = await addModuleParamSpec(
+      'game-a',
+      'mini',
+      { key: 'mode', type: 'enum', options: ['a', 'b'], default: 'a' },
+      { dataDirOverride: dir }
+    )
+    const removed = await removeModuleParamSpec('game-a', 'mini', 'mode', { dataDirOverride: dir })
+    assert.equal(removed.paramSpecs?.some((s) => s.key === 'mode'), false)
+    assert.equal(withMode.paramSpecs?.some((s) => s.key === 'lanes'), true)
+
+    const b = await listEncounterModules('game-b', dir)
+    assert.equal(b.length, 0)
+  })
+  console.log('✓ module paramSpecs CRUD + isolation + label update keeps specs')
+}
+
 async function main() {
   await testLayeredSlotsAndIsolation()
   await testInUseRefuse()
@@ -397,6 +454,7 @@ async function main() {
   await testReadPathNoWriteAndDryRun()
   await testExportCompatibility()
   await testWinConditions()
+  await testParamSpecs()
   console.log('\n✓ gameSettingsService tests passed')
 }
 

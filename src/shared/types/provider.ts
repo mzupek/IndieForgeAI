@@ -794,6 +794,21 @@ export interface IndieForgeAPI {
       input: { key: string; label?: string }
     ) => Promise<IndieForgeProject>
     removeCounterKind: (projectId: string, gameId: string, moduleId: string, key: string) => Promise<IndieForgeProject>
+    addParamSpec: (
+      projectId: string,
+      gameId: string,
+      moduleId: string,
+      input: {
+        key: string
+        type: string
+        min?: number
+        max?: number
+        options?: string[]
+        default?: number | string | boolean
+        required?: boolean
+      }
+    ) => Promise<IndieForgeProject>
+    removeParamSpec: (projectId: string, gameId: string, moduleId: string, key: string) => Promise<IndieForgeProject>
   }
   worldContent: {
     createWorld: (projectId: string, gameId: string, input: any) => Promise<IndieForgeProject>
