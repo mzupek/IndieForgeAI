@@ -30,6 +30,16 @@ export function formErrorFromIssues(issues: ContentIssue[]): string | null {
   return text || null
 }
 
+export function fieldErrorsFromIssues(issues: ContentIssue[]): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const issue of issues.filter((i) => i.level === 'error')) {
+    const m = issue.path.match(/\.([^.]+)$/)
+    const key = m ? m[1]!.replace(/\[\d+\]$/, '') : issue.path
+    if (!out[key]) out[key] = issue.message
+  }
+  return out
+}
+
 export function attemptSync<T>(fn: () => T): { ok: true; value: T } | { ok: false; message: string } {
   try {
     return { ok: true, value: fn() }

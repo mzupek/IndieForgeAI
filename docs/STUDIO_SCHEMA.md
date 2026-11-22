@@ -63,7 +63,7 @@ The empty `worlds` / `stages` / `encounters` / `regions` arrays from 1a now hold
 
 - **World:** name, description?, order. No refs.
 - **Stage:** worldId in the same game.
-- **Encounter:** typeId in `settings.encounterTypes`; moduleId in `settings.modules` and supports that type; sceneId in the same game (uuid, `@key`, or exact name); tuningProfileId is a Game Definition tuning row (uuid or name); difficultyProfileId stored, not checked; at most 3 stars; star kind must be in the module's `starKinds` when that list is present.
+- **Encounter:** typeId in `settings.encounterTypes`; moduleId in `settings.modules` and supports that type; sceneId in the same game (uuid, `@key`, or exact name); tuningProfileId is a Game Definition tuning row (uuid or name); optional `difficultyProfileId` (empty = player's choice; must exist in this game when set); optional `enemies[]` `{ enemyId, attackTableId? }` (first is lead; enemy and optional table must exist in this game and match the encounter module); at most 3 stars; star kind must be in the module's `starKinds` when that list is present.
 - **Region:** background asset must be a background-based category; unique anchor ids; pos in 0..1; edges/spawn/hotspots/exits reference real anchors; exits target a region in the same game. Edges are `[a,b]` or `{from,to,requires?,hint?}`. `requires` is stored with a warning and ignored until vehicles.
 - Removing a record is refused while other records reference it. Removing an encounter type or module is refused while encounters use it.
 
@@ -106,9 +106,18 @@ Optional top-level `attackTables` array, filled in memory when missing. No migra
 - **Enemy.attackTableId:** table must exist in the same game and module. Table removal refused while an enemy uses it. Event/audio removal refused while a row uses it.
 - `content apply` / `content export` include `attackTables`. **`contentSchemaVersion` stays 1**. Export **manifest v2 is unchanged**. Saves overlay unknown fields so extra keys survive an update.
 
-## Out of 1a / 1b / 1c / 1d / 2a / 2b
+## 2c (same schema v2 — no bump)
 
-- Difficulty (2c)
+Optional top-level `difficultyProfiles` array, filled in memory when missing. Optional `Encounter.enemies` and `Encounter.difficultyProfileId`. No migrate. No freemium / currency / reward fields. Still poses only.
+
+- **DifficultyProfile:** `id`, optional `key`, `gameId`, `name`, `heroHpMultiplier` (`> 0`), `playbackSpeed` (`> 0`), `attackWeightScale` (`> 0`), `hintCharges` (integer `>= 0`), optional `notes`.
+- **Encounter.enemies[]:** `{ enemyId, attackTableId? }`. First entry is the lead. Enemy must exist in the same game; `enemy.moduleId` must match the encounter module. Optional `attackTableId` override must exist on that same module.
+- **Encounter.difficultyProfileId:** optional; empty means the player's choice. When set, the profile must exist in this game.
+- Deleting an enemy, attack table, or difficulty profile that an encounter uses is refused (message names the encounter).
+- `content apply` / `content export` include `difficultyProfiles` and the encounter fields. `@key` aliases work for `enemyId`, `attackTableId`, and `difficultyProfileId`. **`contentSchemaVersion` stays 1**. Export **manifest v2 is unchanged**. Saves overlay unknown fields so extra keys survive an update.
+
+## Out of 1a / 1b / 1c / 1d / 2a / 2b / 2c
+
 - A4 portable export package
 - `seedDefaultGames` and the Neon Recall Game Definition markdown special case (flagged only)
 - ScenesView / StoryboardEditor store-refresh bug (deferred)

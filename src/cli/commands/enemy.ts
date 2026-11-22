@@ -266,7 +266,9 @@ export function registerEnemyCommands(program: Command): void {
           for (const s of checklist.sfx) {
             console.log(`  sfx ${s.name}  ${s.have ? 'have' : 'missing'}  (${s.usedBy})`)
           }
-          if (!checklist.usedBy.length) console.log('  usedBy: (none until 2c)')
+          console.log(
+            `  usedBy: ${checklist.usedBy.length ? checklist.usedBy.join(', ') : '(none)'}`
+          )
         })
       } catch (err) {
         outputError(err, opts)

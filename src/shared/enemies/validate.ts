@@ -39,6 +39,38 @@ export function moduleWinKinds(mod: GameEncounterModule | undefined | null): str
   return Array.isArray(mod?.winConditions) ? mod!.winConditions! : []
 }
 
+export function resolveEnemyRef(
+  pipeline: AssetPipelineProject,
+  gameId: string,
+  raw: string | undefined | null
+): { id?: string; enemy?: Enemy; error?: string } {
+  const value = String(raw ?? '').trim()
+  if (!value) return { error: 'enemyId is required' }
+  const inGame = enemiesOf(pipeline, gameId)
+  if (isAliasRef(value) || value.startsWith('@')) {
+    const key = normalizeRecordKey(value.replace(/^@/, ''))
+    const found = inGame.find((e) => e.key === key)
+    if (!found) return { error: `Enemy alias '@${key}' was not found in this game` }
+    return { id: found.id, enemy: found }
+  }
+  const byId = inGame.find((e) => e.id === value)
+  if (byId) return { id: byId.id, enemy: byId }
+  const byKey = inGame.find((e) => e.key === value || e.key === normalizeRecordKey(value))
+  if (byKey) return { id: byKey.id, enemy: byKey }
+  const byName = inGame.filter((e) => e.name === value)
+  if (byName.length === 1) return { id: byName[0]!.id, enemy: byName[0] }
+  if (byName.length > 1) {
+    return { error: `Enemy name '${value}' is not unique in this game` }
+  }
+  const other = (pipeline.enemies || []).find((e) => e.id === value)
+  if (other && other.gameId !== gameId) {
+    return {
+      error: `Enemy '${other.name}' belongs to game '${other.gameId}', not '${gameId}'`
+    }
+  }
+  return { error: `Enemy '${value}' was not found in this game` }
+}
+
 export function resolveCharacterRef(
   pipeline: AssetPipelineProject,
   gameId: string,
@@ -506,7 +538,9 @@ export function buildEnemyChecklist(pipeline: AssetPipelineProject, enemy: Enemy
     assets,
     cueEvents,
     sfx,
-    usedBy: []
+    usedBy: (pipeline.encounters || [])
+      .filter((enc) => (enc.enemies || []).some((link) => link.enemyId === enemy.id))
+      .map((enc) => enc.name)
   }
 }
 

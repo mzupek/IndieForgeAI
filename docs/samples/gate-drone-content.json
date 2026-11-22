@@ -59,11 +59,38 @@
       "moduleId": "memory_pad",
       "sceneId": "Gate Drone Encounter",
       "tuningProfileId": "Gate Drone Encounter",
+      "enemies": [{ "enemyId": "Gate Drone" }],
       "stars": [
         { "id": "s1", "label": "Win", "kind": "win" },
         { "id": "s2", "label": "No misses", "kind": "noMisses" },
         { "id": "s3", "label": "Under 60s", "kind": "timeUnder", "params": { "sec": 60 } }
       ]
+    }
+  ],
+  "difficultyProfiles": [
+    {
+      "key": "story",
+      "name": "Story",
+      "heroHpMultiplier": 1.5,
+      "playbackSpeed": 0.85,
+      "attackWeightScale": 0.75,
+      "hintCharges": 3
+    },
+    {
+      "key": "normal",
+      "name": "Normal",
+      "heroHpMultiplier": 1,
+      "playbackSpeed": 1,
+      "attackWeightScale": 1,
+      "hintCharges": 1
+    },
+    {
+      "key": "hard",
+      "name": "Hard",
+      "heroHpMultiplier": 0.7,
+      "playbackSpeed": 1.15,
+      "attackWeightScale": 1.25,
+      "hintCharges": 0
     }
   ]
 }

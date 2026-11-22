@@ -11,8 +11,12 @@ import { isBackgroundCategoryKey } from '@shared/gameSettings/assetCategories'
 import { resolveLibraryPreviewPath } from '@shared/storyboard/layerValidation'
 import type {
   AssetPipelineProject,
+  AttackTable,
+  DifficultyProfile,
   Encounter,
+  EncounterEnemyLink,
   EncounterStar,
+  Enemy,
   GameEncounterModule,
   Region,
   Stage,
@@ -20,6 +24,9 @@ import type {
 } from '@shared/types/assetPipeline'
 import { WorldMapPanel } from './WorldMapPanel'
 import { WorldFlowPreview, type FlowOpenTarget } from './WorldFlowPreview'
+import { validateEncounter } from '@shared/worldContent/validate'
+import { encounterTuningConflict } from '@shared/worldContent/encounterLinks'
+import { fieldErrorsFromIssues, formErrorFromIssues, plainErrorMessage } from '@shared/studio/formErrors'
 
 type TabId = 'structure' | 'encounters' | 'regions' | 'map' | 'flow'
 type FormMode = 'idle' | 'new' | 'edit'
@@ -68,8 +75,10 @@ export function WorldsView() {
     try {
       const updated = await mutator()
       if (updated) setActiveProject(updated)
+      return updated
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(plainErrorMessage(err))
+      return null
     } finally {
       setBusy(false)
     }
@@ -189,12 +198,13 @@ export function WorldsView() {
         <EncounterPanel
           projectId={projectId}
           gameId={gameId}
+          pipeline={pipeline}
           stages={stages}
           encounters={encounters}
           types={types}
           modules={modules}
           scenes={scenes.map((s) => ({ id: s.id, name: s.name }))}
-          tuning={tuning.map((t) => ({ id: t.id, name: t.name }))}
+          tuning={tuning.map((t) => ({ id: t.id, name: t.name, params: t.params }))}
           busy={busy}
           focusId={focusEncounterId}
           refreshAfter={refreshAfter}
@@ -877,6 +887,7 @@ function WorldStagePanel({
 function EncounterPanel({
   projectId,
   gameId,
+  pipeline,
   stages,
   encounters,
   types,
@@ -889,15 +900,16 @@ function EncounterPanel({
 }: {
   projectId: string
   gameId: string
+  pipeline: AssetPipelineProject
   stages: Stage[]
   encounters: Encounter[]
   types: string[]
   modules: GameEncounterModule[]
   scenes: { id: string; name: string }[]
-  tuning: { id: string; name: string }[]
+  tuning: { id: string; name: string; params?: Record<string, number | string | boolean> }[]
   busy: boolean
   focusId: string | null
-  refreshAfter: (m: () => Promise<any>) => Promise<void>
+  refreshAfter: (m: () => Promise<any>) => Promise<any>
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const selected = encounters.find((e) => e.id === selectedId) || null
@@ -909,6 +921,10 @@ function EncounterPanel({
   const [sceneId, setSceneId] = useState('')
   const [tuningId, setTuningId] = useState('')
   const [difficulty, setDifficulty] = useState('')
+  const [enemyLinks, setEnemyLinks] = useState<EncounterEnemyLink[]>([])
+  const [addEnemyId, setAddEnemyId] = useState('')
+  const [formError, setFormError] = useState<string | null>(null)
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [stars, setStars] = useState<[EncounterStar | null, EncounterStar | null, EncounterStar | null]>([
     null,
     null,
@@ -916,6 +932,16 @@ function EncounterPanel({
   ])
 
   const availableModules = modules.filter((m) => !typeId || m.typeIds.includes(typeId))
+  const matchingEnemies = ((pipeline.enemies || []) as Enemy[]).filter(
+    (e) => e.gameId === gameId && e.moduleId === moduleId
+  )
+  const matchingTables = ((pipeline.attackTables || []) as AttackTable[]).filter(
+    (t) => t.gameId === gameId && t.moduleId === moduleId
+  )
+  const difficultyProfiles = ((pipeline.difficultyProfiles || []) as DifficultyProfile[])
+    .filter((p) => p.gameId === gameId)
+    .slice()
+    .sort((a, b) => a.name.localeCompare(b.name))
 
   function load(enc: Encounter) {
     setSelectedId(enc.id)
@@ -927,6 +953,10 @@ function EncounterPanel({
     setSceneId(enc.sceneId || '')
     setTuningId(enc.tuningProfileId || '')
     setDifficulty(enc.difficultyProfileId || '')
+    setEnemyLinks((enc.enemies || []).map((l) => ({ ...l })))
+    setAddEnemyId('')
+    setFormError(null)
+    setFieldErrors({})
     setStars([enc.stars[0] || null, enc.stars[1] || null, enc.stars[2] || null])
   }
 
@@ -946,6 +976,39 @@ function EncounterPanel({
       .filter((s): s is EncounterStar => Boolean(s))
   }
 
+  const draftEncounter: Encounter = {
+    id: selected?.id || 'draft',
+    gameId,
+    stageId,
+    name: name.trim() || 'Untitled',
+    typeId,
+    moduleId,
+    sceneId: sceneId || undefined,
+    tuningProfileId: tuningId || undefined,
+    difficultyProfileId: difficulty || undefined,
+    enemies: enemyLinks.length ? enemyLinks : undefined,
+    stars: starPayload(),
+    order: selected?.order ?? 1,
+    schemaVersion: selected?.schemaVersion || 2,
+    createdAt: selected?.createdAt || '',
+    updatedAt: selected?.updatedAt || ''
+  }
+  const tuningWarnings = encounterTuningConflict(pipeline, draftEncounter)
+  const leadEnemy = matchingEnemies.find((e) => e.id === enemyLinks[0]?.enemyId)
+  const tuningRow = tuning.find((t) => t.id === tuningId)
+
+  function moveLink(index: number, dir: -1 | 1) {
+    setEnemyLinks((prev) => {
+      const next = [...prev]
+      const j = index + dir
+      if (j < 0 || j >= next.length) return prev
+      const tmp = next[index]!
+      next[index] = next[j]!
+      next[j] = tmp
+      return next
+    })
+  }
+
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: '1.5rem' }}>
       <div className="panel-section">
@@ -959,7 +1022,10 @@ function EncounterPanel({
                 cursor: 'pointer',
                 background: e.id === selectedId ? 'var(--bg-secondary)' : 'transparent'
               }}
-              onClick={() => load(e)}
+              onClick={() => {
+                if (e.id === selectedId) return
+                load(e)
+              }}
             >
               {e.name} <span style={{ color: 'var(--muted)' }}>{e.typeId}/{e.moduleId}</span>
             </li>
@@ -974,6 +1040,10 @@ function EncounterPanel({
             setName('')
             setKey('')
             setDifficulty('')
+            setEnemyLinks([])
+            setAddEnemyId('')
+            setFormError(null)
+            setFieldErrors({})
             setStars([null, null, null])
           }}
         >
@@ -986,6 +1056,13 @@ function EncounterPanel({
           style={{ display: 'grid', gap: '0.5rem', maxWidth: '40rem' }}
           onSubmit={(e) => {
             e.preventDefault()
+            const issues = validateEncounter(pipeline, draftEncounter)
+            const message = formErrorFromIssues(issues)
+            if (message) {
+              setFormError(message)
+              setFieldErrors(fieldErrorsFromIssues(issues))
+              return
+            }
             const input = {
               stageId,
               name: name.trim(),
@@ -994,7 +1071,8 @@ function EncounterPanel({
               key: key.trim() || undefined,
               sceneId: sceneId || undefined,
               tuningProfileId: tuningId || undefined,
-              difficultyProfileId: difficulty.trim() || undefined,
+              difficultyProfileId: difficulty || '',
+              enemies: enemyLinks,
               stars: starPayload()
             }
             void refreshAfter(() =>
@@ -1048,6 +1126,9 @@ function EncounterPanel({
               ))}
             </select>
           </label>
+          {formError && (
+            <div style={{ color: 'var(--error)', whiteSpace: 'pre-wrap' }}>{formError}</div>
+          )}
           <label>
             Tuning profile
             <select value={tuningId} onChange={(e) => setTuningId(e.target.value)} disabled={busy}>
@@ -1059,12 +1140,148 @@ function EncounterPanel({
               ))}
             </select>
           </label>
-          <input
-            placeholder="difficultyProfileId (stored, not checked)"
-            value={difficulty}
-            onChange={(e) => setDifficulty(e.target.value)}
-            disabled={busy}
-          />
+          <label>
+            Difficulty
+            <select value={difficulty} onChange={(e) => setDifficulty(e.target.value)} disabled={busy}>
+              <option value="">Player's choice</option>
+              {difficultyProfiles.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          {fieldErrors.difficultyProfileId && (
+            <div style={{ color: 'var(--error)', fontSize: '0.75rem' }}>{fieldErrors.difficultyProfileId}</div>
+          )}
+          <div>
+            <div style={{ fontSize: '0.85rem', color: 'var(--muted)', marginBottom: '0.35rem' }}>
+              Enemies (first is lead). Only enemies on this module are listed.
+            </div>
+            {enemyLinks.map((link, index) => {
+              const enemy = matchingEnemies.find((e) => e.id === link.enemyId)
+              return (
+                <div
+                  key={`${link.enemyId}-${index}`}
+                  style={{ display: 'flex', gap: '0.35rem', marginBottom: '0.35rem', alignItems: 'center' }}
+                >
+                  <span style={{ minWidth: '3.5rem', fontSize: '0.75rem', color: 'var(--muted)' }}>
+                    {index === 0 ? 'Lead' : `#${index + 1}`}
+                  </span>
+                  <span style={{ flex: 1 }}>{enemy?.name || link.enemyId}</span>
+                  <select
+                    value={link.attackTableId || ''}
+                    disabled={busy}
+                    onChange={(e) => {
+                      const next = [...enemyLinks]
+                      const row = { ...link }
+                      if (e.target.value) row.attackTableId = e.target.value
+                      else delete row.attackTableId
+                      next[index] = row
+                      setEnemyLinks(next)
+                    }}
+                  >
+                    <option value="">Enemy default table</option>
+                    {matchingTables.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button type="button" className="ghost" disabled={busy || index === 0} onClick={() => moveLink(index, -1)}>
+                    Up
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost"
+                    disabled={busy || index === enemyLinks.length - 1}
+                    onClick={() => moveLink(index, 1)}
+                  >
+                    Down
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost"
+                    style={{ color: 'var(--error)' }}
+                    disabled={busy}
+                    onClick={() => setEnemyLinks(enemyLinks.filter((_, i) => i !== index))}
+                  >
+                    Remove
+                  </button>
+                </div>
+              )
+            })}
+            <div style={{ display: 'flex', gap: '0.35rem' }}>
+              <select
+                value={addEnemyId}
+                onChange={(e) => setAddEnemyId(e.target.value)}
+                disabled={busy || !moduleId}
+              >
+                <option value="">{moduleId ? 'Add enemy…' : 'Pick a module first'}</option>
+                {matchingEnemies.map((e) => (
+                  <option key={e.id} value={e.id}>
+                    {e.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="ghost"
+                disabled={busy || !addEnemyId}
+                onClick={() => {
+                  setEnemyLinks([...enemyLinks, { enemyId: addEnemyId }])
+                  setAddEnemyId('')
+                }}
+              >
+                Add
+              </button>
+            </div>
+            {matchingEnemies.length === 0 && moduleId && (
+              <div style={{ color: 'var(--muted)', fontSize: '0.8rem' }}>No enemies on this module.</div>
+            )}
+            {fieldErrors.enemyId && (
+              <div style={{ color: 'var(--error)', fontSize: '0.75rem' }}>{fieldErrors.enemyId}</div>
+            )}
+          </div>
+          {tuningWarnings.length > 0 && (
+            <div
+              style={{
+                padding: '0.75rem',
+                border: '1px solid var(--forge-gold)',
+                borderRadius: 4,
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr',
+                gap: '0.75rem',
+                fontSize: '0.85rem'
+              }}
+            >
+              <div>
+                <div style={{ color: 'var(--muted)', marginBottom: '0.25rem' }}>Encounter tuning</div>
+                <div>{tuningRow?.name || tuningId}</div>
+                {tuningRow?.params &&
+                  Object.entries(tuningRow.params).map(([k, v]) => (
+                    <div key={k}>
+                      {k}: {String(v)}
+                    </div>
+                  ))}
+              </div>
+              <div>
+                <div style={{ color: 'var(--muted)', marginBottom: '0.25rem' }}>Lead enemy win condition</div>
+                <div>{leadEnemy?.name || enemyLinks[0]?.enemyId}</div>
+                {leadEnemy?.winCondition && (
+                  <div>
+                    {leadEnemy.winCondition.kind}{' '}
+                    {Object.entries(leadEnemy.winCondition.params || {})
+                      .map(([k, v]) => `${k}=${v}`)
+                      .join(', ')}
+                  </div>
+                )}
+              </div>
+              <div style={{ gridColumn: '1 / -1', color: 'var(--forge-gold)' }}>
+                {tuningWarnings[0]?.message}
+              </div>
+            </div>
+          )}
           <div>
             <div style={{ fontSize: '0.85rem', color: 'var(--muted)', marginBottom: '0.35rem' }}>Stars (up to 3)</div>
             {[0, 1, 2].map((i) => {

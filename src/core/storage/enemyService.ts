@@ -31,6 +31,7 @@ import {
 } from '@shared/enemies/validate'
 import { findModule } from '@shared/gameSettings/encounterSettings'
 import { resolveAttackTableRef } from '@shared/attackTables/validate'
+import { assertCanRemoveEnemy } from '@shared/worldContent/encounterLinks'
 
 export interface WriteOptions {
   dataDirOverride?: string
@@ -269,7 +270,7 @@ export async function removeEnemy(
   return mutatePipeline(options, (pipeline) => {
     requireGame(pipeline, gameId)
     const enemy = requireIdOrKey(pipeline.enemies || [], idOrKey, gameId, 'Enemy')
-    // 2c will refuse while an encounter uses the enemy. Nothing links yet in 2a.
+    assertCanRemoveEnemy(pipeline, enemy.id, enemy.key || enemy.name)
     if (options?.dryRun) return { removed: enemy.id }
     pipeline.enemies = (pipeline.enemies || []).filter((e) => e.id !== enemy.id)
     return { removed: enemy.id }

@@ -79,6 +79,7 @@ function createEmptyStudioData(): StudioData {
       regions: [],
       enemies: [],
       attackTables: [],
+      difficultyProfiles: [],
       createdAt: now,
       updatedAt: now
     },

@@ -22,6 +22,7 @@ import { registerGameSettingsCommands } from './commands/gameSettings'
 import { registerWorldContentCommands } from './commands/worldContent'
 import { registerEnemyCommands } from './commands/enemy'
 import { registerAttackTableCommands } from './commands/attackTable'
+import { registerDifficultyCommands } from './commands/difficulty'
 import * as asset from './commands/asset'
 import * as assetState from './commands/asset-state'
 
@@ -412,5 +413,8 @@ registerEnemyCommands(program)
 
 // 2b attack tables
 registerAttackTableCommands(program)
+
+// 2c difficulty profiles
+registerDifficultyCommands(program)
 
 program.parse()

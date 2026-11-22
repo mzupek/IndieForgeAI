@@ -277,6 +277,9 @@ path = os.environ["FORGE_DATA_DIR"] + "/bundle.json"
 data = json.load(open(path))
 # Fixture module id is pad, not memory_pad
 data["encounters"][0]["moduleId"] = "pad"
+# 1d fixture has no enemy records; 2c fields are covered by test-encounter-difficulty-mac.sh
+data["encounters"][0].pop("enemies", None)
+data.pop("difficultyProfiles", None)
 json.dump(data, open(path, "w"), indent=2)
 PY
 

@@ -200,5 +200,8 @@ export const IPC_CHANNELS = {
   ATTACK_TABLE_REMOVE: 'attackTable:remove',
   ATTACK_TABLE_ROW_ADD: 'attackTable:rowAdd',
   ATTACK_TABLE_ROW_UPDATE: 'attackTable:rowUpdate',
-  ATTACK_TABLE_ROW_REMOVE: 'attackTable:rowRemove'
+  ATTACK_TABLE_ROW_REMOVE: 'attackTable:rowRemove',
+  DIFFICULTY_CREATE: 'difficulty:create',
+  DIFFICULTY_UPDATE: 'difficulty:update',
+  DIFFICULTY_REMOVE: 'difficulty:remove'
 } as const

@@ -17,6 +17,9 @@ forge game module add --game game-neon-recall --id memory_pad --label "Memory pa
 # Scene + tuning row: the sample looks them up by **name**
 #   sceneId: "Gate Drone Encounter"
 #   tuningProfileId: "Gate Drone Encounter"
+#
+# Enemy link: encounter.enemies[0].enemyId is the existing "Gate Drone" enemy (by name).
+# Difficulty is omitted (player's choice). Story / Normal / Hard profiles are in the bundle.
 ```
 
 ## Apply

@@ -15,6 +15,7 @@ import {
   validateStage,
   validateWorld
 } from './validate'
+import { encounterFlowExtras } from './encounterLinks'
 
 export type FlowKind = 'world' | 'node' | 'stage' | 'region' | 'hotspot' | 'encounter' | 'exit'
 
@@ -258,13 +259,16 @@ export function buildWorldFlow(pipeline: AssetPipelineProject, world: World): Wo
       if (hs.encounterId) {
         const enc = (pipeline.encounters || []).find((e) => e.id === hs.encounterId)
         if (enc) {
-          const encIssues = validateEncounter(pipeline, enc, `encounters.${enc.key || enc.id}`)
+          const encPath = `encounters.${enc.key || enc.id}`
+          const encIssues = validateEncounter(pipeline, enc, encPath)
+          const extras = encounterFlowExtras(pipeline, enc, encPath)
+          const allIssues = [...encIssues, ...extras.issues]
           hsLine.children.push({
             id: `encounter:${enc.id}`,
             kind: 'encounter',
-            label: enc.name,
-            status: worst(encIssues),
-            issues: [...encIssues],
+            label: extras.label,
+            status: worst(allIssues),
+            issues: allIssues,
             recordKind: 'encounter',
             recordId: enc.id,
             children: []

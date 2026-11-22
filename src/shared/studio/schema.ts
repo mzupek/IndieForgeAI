@@ -102,6 +102,7 @@ export function normalizeStudioInMemory(studio: StudioFile): StudioFile {
   p.regions = ensureArray(p.regions)
   p.enemies = ensureArray(p.enemies)
   p.attackTables = ensureArray(p.attackTables)
+  p.difficultyProfiles = ensureArray(p.difficultyProfiles)
 
   for (const shot of p.storyboardShots) {
     if (shot.layers) {

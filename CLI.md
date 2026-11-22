@@ -152,9 +152,10 @@ forge game settings update --game <id> --file settings.json [--dry-run] --json
 
 forge enemy list|show|create|update|remove --game <id> [--json] [--dry-run]
 forge enemy checklist <id|@key> --game <id> --json
+forge difficulty list|show|create|update|remove --game <id> [--json] [--dry-run]
 ```
 
-`content apply` is all-or-nothing and matches by key (create if new, update if found). Dry-run writes nothing. Re-apply reports 0 changes. Any validation failure writes nothing. JSON includes `aliasMap`, `creates`, `updates`, `unchanged`, `issues`. `content apply` / `content export` include the optional `enemies` array (additive; `contentSchemaVersion` stays 1).
+`content apply` is all-or-nothing and matches by key (create if new, update if found). Dry-run writes nothing. Re-apply reports 0 changes. Any validation failure writes nothing. JSON includes `aliasMap`, `creates`, `updates`, `unchanged`, `issues`. `content apply` / `content export` include the optional `enemies`, `attackTables`, and `difficultyProfiles` arrays (additive; `contentSchemaVersion` stays 1).
 
 Removal is refused while other records reference the target. Removing an encounter type or module is refused while an encounter uses it.
 
@@ -170,7 +171,7 @@ Example bundle: `docs/samples/gate-drone-content.json`.
 
 ### Enemies (2a)
 
-Game-level enemy records wrap a **character** (still poses only) plus a **module win condition**. No game names are hardcoded: character, module, win kinds, and pose slots come from that game's data. `attackTableId` is validated in 2b (same game and module). Encounter links land in 2c.
+Game-level enemy records wrap a **character** (still poses only) plus a **module win condition**. No game names are hardcoded: character, module, win kinds, and pose slots come from that game's data. `attackTableId` is validated in 2b (same game and module). Encounter `enemies[]` links are validated in 2c.
 
 ```bash
 forge enemy list --game <id> [--json]
@@ -235,7 +236,7 @@ Create / update wrap `{ "record": { ...same enemy... }, "dryRun": false }`. Show
 }
 ```
 
-`usedBy` encounters stay empty until 2c. Pose `have` is true when that character has a pose file for the slot. Unmapped battle moments (`idle`, `telegraph`, `attack`, `hit`, `defeat`, `win`) fall back to `ready`.
+`usedBy` lists encounter names that link this enemy (empty if none). Pose `have` is true when that character has a pose file for the slot. Unmapped battle moments (`idle`, `telegraph`, `attack`, `hit`, `defeat`, `win`) fall back to `ready`.
 
 #### JSON: `forge game module update --win-conditions --json`
 
@@ -350,6 +351,38 @@ Rerun with the same seed matches. Raising `alarm_pulse` weight (for example to 8
 ```
 
 Create / update wrap `{ "record": { ...table... }, "dryRun": false }`. List wraps `{ "attackTables": [ ... ] }`.
+
+---
+
+### Encounter links + difficulty (2c)
+
+Per-game difficulty profiles and optional encounter enemy lists. No game names are hardcoded. First `enemies[]` entry is the lead. Empty `difficultyProfileId` means the player's choice at runtime. **`contentSchemaVersion` stays 1**. No migrate.
+
+```bash
+forge difficulty list --game <id> [--json]
+forge difficulty show <id|@key> --game <id> [--json]
+forge difficulty create --game <id> --name Story --key story \
+  --hero-hp-multiplier 1.5 --playback-speed 0.85 --attack-weight-scale 0.75 --hint-charges 3 \
+  [--notes "easier"] [--dry-run] [--json]
+forge difficulty update <id|@key> --game <id> --hint-charges 2 [--dry-run] [--json]
+forge difficulty remove <id|@key> --game <id> [--dry-run] [--json]
+
+forge encounter update <id|@key> --game <id> --enemy @scout --enemy @drone=@gate-table
+forge encounter update <id|@key> --game <id> --difficulty @story
+forge encounter update <id|@key> --game <id> --difficulty ""
+forge encounter update <id|@key> --game <id> --clear-enemies
+forge encounter update <id|@key> --game <id> --enemies '[{"enemyId":"@scout","attackTableId":"@gate"}]'
+```
+
+`--enemy` is repeatable (`id|@key|exact name`, optional `=table` override). First `--enemy` is the lead. `--difficulty` accepts uuid, `@key`, or exact name; empty string is player's choice. Multipliers must be `> 0`. `hintCharges` is an integer `>= 0`.
+
+The enemy must exist in the same game, and `enemy.moduleId` must match the encounter's module. `attackTableId` on a link is an optional override and must exist on that same module. Deleting an enemy, attack table, or difficulty profile that an encounter uses is refused and names the encounter(s).
+
+`content apply` / `content export` include `difficultyProfiles` plus encounter `enemies` and `difficultyProfileId`. `@key` aliases work for `enemyId`, `attackTableId`, and `difficultyProfileId`. Re-apply reports 0 changes.
+
+Flow preview labels the lead enemy (and extra count) and warns when that enemy's checklist is not ready. If encounter tuning (for example HP / rounds) disagrees with the lead enemy's `winCondition`, both are shown as a warning; nothing is auto-resolved.
+
+Create / update wrap `{ "record": { ...profile... }, "dryRun": false }`. List wraps `{ "difficultyProfiles": [ ... ] }`.
 
 ---
 

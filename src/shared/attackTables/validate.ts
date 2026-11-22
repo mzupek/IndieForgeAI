@@ -528,9 +528,13 @@ export function collectAttackTableUsers(
   pipeline: AssetPipelineProject,
   tableId: string
 ): NamedUser[] {
-  return (pipeline.enemies || [])
+  const enemyUsers = (pipeline.enemies || [])
     .filter((e) => e.attackTableId === tableId)
     .map((e) => ({ id: e.id, name: e.name, kind: 'enemy' }))
+  const encounterUsers = (pipeline.encounters || [])
+    .filter((enc) => (enc.enemies || []).some((link) => link.attackTableId === tableId))
+    .map((enc) => ({ id: enc.id, name: enc.name, kind: 'encounter' }))
+  return [...enemyUsers, ...encounterUsers]
 }
 
 export function assertCanRemoveAttackTable(pipeline: AssetPipelineProject, tableId: string): void {

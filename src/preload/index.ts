@@ -425,6 +425,14 @@ const api: IndieForgeAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.ATTACK_TABLE_ROW_UPDATE, projectId, gameId, tableId, rowId, input),
     removeRow: (projectId, gameId, tableId, rowId) =>
       ipcRenderer.invoke(IPC_CHANNELS.ATTACK_TABLE_ROW_REMOVE, projectId, gameId, tableId, rowId)
+  },
+  difficulty: {
+    create: (projectId, gameId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.DIFFICULTY_CREATE, projectId, gameId, input),
+    update: (projectId, gameId, id, patch) =>
+      ipcRenderer.invoke(IPC_CHANNELS.DIFFICULTY_UPDATE, projectId, gameId, id, patch),
+    remove: (projectId, gameId, id) =>
+      ipcRenderer.invoke(IPC_CHANNELS.DIFFICULTY_REMOVE, projectId, gameId, id)
   }
 }
 

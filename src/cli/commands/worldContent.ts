@@ -86,6 +86,40 @@ function parseJsonArg(raw: string | undefined, label: string): unknown {
   }
 }
 
+function collect(value: string, previous: string[] | undefined): string[] {
+  return [...(previous || []), value]
+}
+
+function parseEnemySpec(raw: string): { enemyId: string; attackTableId?: string } {
+  const s = String(raw || '').trim()
+  const eq = s.lastIndexOf('=')
+  if (eq > 0) {
+    const enemyId = s.slice(0, eq).trim()
+    const attackTableId = s.slice(eq + 1).trim()
+    if (!enemyId) throw new Error(`--enemy needs an enemy id, got '${raw}'`)
+    return attackTableId ? { enemyId, attackTableId } : { enemyId }
+  }
+  if (!s) throw new Error('--enemy needs an enemy id')
+  return { enemyId: s }
+}
+
+function enemiesFromOptions(options: Record<string, unknown>): EncounterInput['enemies'] | undefined {
+  if (options.clearEnemies) {
+    if ((options.enemy as string[] | undefined)?.length || options.enemies !== undefined) {
+      throw new Error('Use either --clear-enemies or --enemy/--enemies, not both')
+    }
+    return []
+  }
+  if (options.enemies !== undefined) {
+    const parsed = parseJsonArg(String(options.enemies), '--enemies')
+    if (!Array.isArray(parsed)) throw new Error('--enemies must be a JSON array')
+    return parsed as EncounterInput['enemies']
+  }
+  const specs = options.enemy as string[] | undefined
+  if (!specs?.length) return undefined
+  return specs.map(parseEnemySpec)
+}
+
 function readJsonFile(path: string): unknown {
   try {
     return JSON.parse(readFileSync(path, 'utf-8'))
@@ -265,7 +299,8 @@ export function registerWorldContentCommands(program: Command): void {
         difficultyProfileId: options.difficulty,
         recommendedLevel: options.recommendedLevel !== undefined ? Number(options.recommendedLevel) : undefined,
         stars: parseJsonArg(options.stars, '--stars') as EncounterInput['stars'],
-        order: options.order !== undefined ? Number(options.order) : undefined
+        order: options.order !== undefined ? Number(options.order) : undefined,
+        enemies: enemiesFromOptions(options)
       }
       return createEncounter(opts.game!, input, { dataDirOverride: dir(opts), dryRun: Boolean(opts.dryRun) })
     },
@@ -288,6 +323,8 @@ export function registerWorldContentCommands(program: Command): void {
       if (options.recommendedLevel !== undefined) patch.recommendedLevel = Number(options.recommendedLevel)
       if (options.stars !== undefined) patch.stars = parseJsonArg(options.stars, '--stars') as EncounterInput['stars']
       if (options.order !== undefined) patch.order = Number(options.order)
+      const enemies = enemiesFromOptions(options)
+      if (enemies !== undefined) patch.enemies = enemies
       return updateEncounter(opts.game!, id, patch, { dataDirOverride: dir(opts), dryRun: Boolean(opts.dryRun) })
     },
     remove: (id, opts) =>
@@ -303,7 +340,10 @@ export function registerWorldContentCommands(program: Command): void {
         .option('--key <key>', 'Optional slug')
         .option('--scene <id>', 'Scene uuid, @key, or name')
         .option('--tuning <id>', 'Tuning profile uuid or name')
-        .option('--difficulty <id>', 'Difficulty profile id (stored, not checked)')
+        .option('--difficulty <id>', 'Difficulty profile uuid, @key, or name (empty = player\'s choice)')
+        .option('--enemy <spec>', 'Enemy id/@key/name, optional =table override (repeatable; first is lead)', collect)
+        .option('--enemies <json>', 'JSON array of { enemyId, attackTableId? }')
+        .option('--clear-enemies', 'Clear the encounter enemy list')
         .option('--recommended-level <n>', 'Recommended level')
         .option('--stars <json>', 'JSON array of 0-3 stars')
         .option('--order <n>', 'Sort order'),
@@ -316,7 +356,10 @@ export function registerWorldContentCommands(program: Command): void {
         .option('--key <key>', 'Slug')
         .option('--scene <id>', 'Scene uuid, @key, or name (empty to clear)')
         .option('--tuning <id>', 'Tuning profile uuid or name (empty to clear)')
-        .option('--difficulty <id>', 'Difficulty profile id')
+        .option('--difficulty <id>', 'Difficulty profile uuid, @key, or name (empty = player\'s choice)')
+        .option('--enemy <spec>', 'Enemy id/@key/name, optional =table override (repeatable; first is lead)', collect)
+        .option('--enemies <json>', 'JSON array of { enemyId, attackTableId? }')
+        .option('--clear-enemies', 'Clear the encounter enemy list')
         .option('--recommended-level <n>', 'Recommended level')
         .option('--stars <json>', 'JSON array of 0-3 stars')
         .option('--order <n>', 'Sort order')

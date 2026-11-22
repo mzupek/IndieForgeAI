@@ -1,6 +1,5 @@
 /**
- * /studio/enemies/:gameId — enemy records (2a) and attack tables (2b).
- * Difficulty lands in 2c.
+ * /studio/enemies/:gameId — enemy records (2a), attack tables (2b), difficulty (2c).
  */
 
 import { useMemo, useState } from 'react'
@@ -11,6 +10,7 @@ import { effectivePoseSlots } from '@shared/gameSettings/poseSlots'
 import { BATTLE_TYPE_ID, buildEnemyChecklist, FALLBACK_BATTLE_POSE_SLOT, validateEnemy } from '@shared/enemies/validate'
 import { formErrorFromIssues, plainErrorMessage } from '@shared/studio/formErrors'
 import { AttackTablesPanel } from './AttackTablesPanel'
+import { DifficultyPanel } from './DifficultyPanel'
 import type {
   AssetPipelineProject,
   BattleMoment,
@@ -285,7 +285,15 @@ export function EnemiesView() {
         />
       )}
       {tab === 'difficulty' && (
-        <p style={{ color: 'var(--muted)' }}>Difficulty profiles come in step 2c.</p>
+        <DifficultyPanel
+          projectId={projectId}
+          gameId={gameId}
+          pipeline={pipeline}
+          busy={busy}
+          error={error}
+          onError={setError}
+          refreshAfter={refreshAfter}
+        />
       )}
 
       {tab === 'enemies' && (
@@ -835,7 +843,10 @@ function ChecklistPanel({
           <span style={{ color: 'var(--muted)' }}>({s.usedBy})</span>
         </div>
       ))}
-      <p style={{ color: 'var(--muted)', fontSize: '0.8rem' }}>usedBy encounters: none until 2c</p>
+      <p style={{ color: 'var(--muted)', fontSize: '0.8rem' }}>
+        usedBy encounters:{' '}
+        {checklist.usedBy.length ? checklist.usedBy.join(', ') : 'none'}
+      </p>
     </div>
   )
 }

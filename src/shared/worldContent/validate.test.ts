@@ -379,7 +379,6 @@ function region(over: Partial<Region> = {}): Region {
         moduleId: 'pad',
         sceneId: 'Boss Fight',
         tuningProfileId: 'Boss Tune',
-        difficultyProfileId: 'stored-not-checked',
         stars: [
           { id: 's1', label: 'Win', kind: 'win' },
           { id: 's2', label: 'No misses', kind: 'noMisses' }
@@ -392,7 +391,7 @@ function region(over: Partial<Region> = {}): Region {
   const enc = next.encounters!.find((e) => e.key === 'enc-boss')!
   assert.equal(enc.sceneId, 'scene-a')
   assert.equal(enc.tuningProfileId, 'tune-a')
-  assert.equal(enc.difficultyProfileId, 'stored-not-checked')
+  assert.equal(enc.difficultyProfileId, undefined)
 }
 
 {

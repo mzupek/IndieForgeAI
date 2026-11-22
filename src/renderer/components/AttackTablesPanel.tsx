@@ -187,6 +187,9 @@ export function AttackTablesPanel({
   const selected = formMode === 'edit' ? tables.find((t) => t.id === selectedId) || null : null
   const selectedModule = battleModules.find((m) => m.id === moduleId)
   const linkedEnemies = (pipeline.enemies || []).filter((e) => e.attackTableId === selected?.id)
+  const linkedEncounters = (pipeline.encounters || []).filter((enc) =>
+    (enc.enemies || []).some((link) => link.attackTableId === selected?.id)
+  )
   const linkedCharacters: Character[] = []
   for (const enemy of linkedEnemies) {
     const ch = (pipeline.characters || []).find((c) => c.id === enemy.characterId)
@@ -620,6 +623,11 @@ export function AttackTablesPanel({
           {linkedEnemies.length > 0 && (
             <p style={{ color: 'var(--muted)', fontSize: '0.8rem' }}>
               Linked enemies: {linkedEnemies.map((e) => e.name).join(', ')}
+            </p>
+          )}
+          {linkedEncounters.length > 0 && (
+            <p style={{ color: 'var(--muted)', fontSize: '0.8rem' }}>
+              Linked encounters: {linkedEncounters.map((e) => e.name).join(', ')}
             </p>
           )}
         </div>

@@ -866,6 +866,12 @@ export interface EncounterStar {
   params?: Record<string, string | number | boolean>
 }
 
+/** First entry is the lead enemy. attackTableId is an optional per-link override. */
+export interface EncounterEnemyLink {
+  enemyId: string
+  attackTableId?: string
+}
+
 export interface Encounter {
   id: string
   gameId: string
@@ -876,10 +882,32 @@ export interface Encounter {
   moduleId: string
   sceneId?: string
   tuningProfileId?: string
+  /** Empty / omitted = player's choice at runtime. */
   difficultyProfileId?: string
+  /** Optional. Default empty. First entry is the lead. */
+  enemies?: EncounterEnemyLink[]
   recommendedLevel?: number
   stars: EncounterStar[]
   order: number
+  schemaVersion: number
+  createdAt: string
+  updatedAt: string
+}
+
+/**
+ * Per-game difficulty profile. Optional; empty Encounter.difficultyProfileId
+ * means the player picks at runtime.
+ */
+export interface DifficultyProfile {
+  id: string
+  gameId: string
+  key?: string
+  name: string
+  heroHpMultiplier: number
+  playbackSpeed: number
+  attackWeightScale: number
+  hintCharges: number
+  notes?: string
   schemaVersion: number
   createdAt: string
   updatedAt: string
@@ -1058,6 +1086,8 @@ export interface AssetPipelineProject {
   enemies?: Enemy[]
   /** 2b: game-level attack tables. Optional on disk; filled in memory when missing. */
   attackTables?: AttackTable[]
+  /** 2c: per-game difficulty profiles. Optional on disk; filled in memory when missing. */
+  difficultyProfiles?: DifficultyProfile[]
   createdAt: string
   updatedAt: string
 }

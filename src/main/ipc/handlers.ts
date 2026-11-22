@@ -225,6 +225,11 @@ import {
   updateAttackTableRow
 } from '../../core/storage/attackTableService'
 import {
+  createDifficultyProfile,
+  removeDifficultyProfile,
+  updateDifficultyProfile
+} from '../../core/storage/difficultyService'
+import {
   applyDesignerAssetPrompt,
   applyDesignerStyleGuide,
   clearDesignerChat,
@@ -1813,6 +1818,21 @@ export function registerIpcHandlers(): void {
       return await loadProject(projectId)
     }
   )
+  ipcMain.handle(IPC_CHANNELS.DIFFICULTY_CREATE, async (_e, projectId: string, gameId: string, input: any) => {
+    await createDifficultyProfile(gameId, input)
+    return await loadProject(projectId)
+  })
+  ipcMain.handle(
+    IPC_CHANNELS.DIFFICULTY_UPDATE,
+    async (_e, projectId: string, gameId: string, id: string, patch: any) => {
+      await updateDifficultyProfile(gameId, id, patch)
+      return await loadProject(projectId)
+    }
+  )
+  ipcMain.handle(IPC_CHANNELS.DIFFICULTY_REMOVE, async (_e, projectId: string, gameId: string, id: string) => {
+    await removeDifficultyProfile(gameId, id)
+    return await loadProject(projectId)
+  })
 }
 
 export async function ensureAppDataDirs(): Promise<void> {

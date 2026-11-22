@@ -8,8 +8,10 @@ import { join } from 'path'
 import type {
   AssetPipelineProject,
   Encounter,
+  EncounterEnemyLink,
   EncounterStar,
   AttackTable,
+  DifficultyProfile,
   Enemy,
   Region,
   RegionEdge,
@@ -48,6 +50,8 @@ import {
   type ContentBundle
 } from '@shared/worldContent/apply'
 import { resolveSceneId, resolveTuningProfileId } from '@shared/worldContent/validate'
+import { resolveEncounterEnemyLinks } from '@shared/worldContent/encounterLinks'
+import { resolveDifficultyRef } from '@shared/difficulty/validate'
 
 export const CONTENT_SCHEMA_VERSION = 1
 
@@ -208,7 +212,8 @@ export interface EncounterInput {
   key?: string
   sceneId?: string
   tuningProfileId?: string
-  difficultyProfileId?: string
+  difficultyProfileId?: string | null
+  enemies?: EncounterEnemyLink[] | null
   recommendedLevel?: number
   stars?: EncounterStar[]
   order?: number
@@ -543,6 +548,28 @@ function resolveEncounterRefs(
     const id = resolveTuningProfileId(pipeline, gameId, encounter.tuningProfileId, 'tuningProfileId', issues)
     if (id) encounter.tuningProfileId = id
   }
+  if (encounter.enemies) {
+    encounter.enemies = resolveEncounterEnemyLinks(
+      pipeline,
+      gameId,
+      encounter.enemies,
+      'enemies',
+      issues
+    )
+    if (encounter.enemies.length === 0) delete encounter.enemies
+  }
+  if (encounter.difficultyProfileId) {
+    const resolved = resolveDifficultyRef(pipeline, gameId, encounter.difficultyProfileId)
+    if (resolved.error || !resolved.id) {
+      issues.push({
+        level: 'error',
+        path: 'difficultyProfileId',
+        message: resolved.error || 'difficultyProfileId was not found'
+      })
+    } else {
+      encounter.difficultyProfileId = resolved.id
+    }
+  }
   return issues
 }
 
@@ -575,6 +602,7 @@ export async function createEncounter(
     if (input.sceneId) encounter.sceneId = input.sceneId
     if (input.tuningProfileId) encounter.tuningProfileId = input.tuningProfileId
     if (input.difficultyProfileId) encounter.difficultyProfileId = input.difficultyProfileId
+    if (input.enemies && input.enemies.length) encounter.enemies = input.enemies
     if (input.recommendedLevel !== undefined) encounter.recommendedLevel = input.recommendedLevel
     const refIssues = resolveEncounterRefs(pipeline, gameId, encounter)
     const issues = [...refIssues, ...validateEncounter(pipeline, encounter)]
@@ -610,6 +638,10 @@ export async function updateEncounter(
     if (patch.difficultyProfileId !== undefined) {
       if (patch.difficultyProfileId) encounter.difficultyProfileId = patch.difficultyProfileId
       else delete encounter.difficultyProfileId
+    }
+    if (patch.enemies !== undefined) {
+      if (patch.enemies && patch.enemies.length) encounter.enemies = patch.enemies
+      else delete encounter.enemies
     }
     if (patch.sceneId !== undefined) {
       if (patch.sceneId) encounter.sceneId = patch.sceneId
@@ -1020,7 +1052,15 @@ function parseBundle(raw: unknown): ContentBundle {
   }
   const obj = raw as Record<string, unknown>
   const bundle: ContentBundle = {}
-  for (const name of ['worlds', 'stages', 'encounters', 'regions', 'enemies', 'attackTables'] as const) {
+  for (const name of [
+    'worlds',
+    'stages',
+    'encounters',
+    'regions',
+    'enemies',
+    'attackTables',
+    'difficultyProfiles'
+  ] as const) {
     if (obj[name] === undefined) continue
     if (!Array.isArray(obj[name])) {
       throw new Error(`bundle.${name} must be an array`)
@@ -1079,6 +1119,7 @@ export interface ContentExportFile {
   regions: Region[]
   enemies: Enemy[]
   attackTables: AttackTable[]
+  difficultyProfiles: DifficultyProfile[]
 }
 
 export async function exportContent(
@@ -1102,7 +1143,8 @@ export async function exportContent(
     encounters: encountersOf(pipeline, gameId),
     regions: regionsOf(pipeline, gameId),
     enemies: (pipeline.enemies || []).filter((e) => e.gameId === gameId),
-    attackTables: (pipeline.attackTables || []).filter((t) => t.gameId === gameId)
+    attackTables: (pipeline.attackTables || []).filter((t) => t.gameId === gameId),
+    difficultyProfiles: (pipeline.difficultyProfiles || []).filter((p) => p.gameId === gameId)
   }
   const target = join(outDir, 'content.json')
   if (options?.dryRun) {

@@ -27,6 +27,7 @@ import {
 import { requireGame } from './scope'
 import { assertRecordKey, isAliasRef, isUuid, normalizeRecordKey } from './keys'
 import { errorIssue, type ContentIssue, type NamedUser, warningIssue } from './issues'
+import { validateEncounterLinks } from './encounterLinks'
 
 export const RECORD_SCHEMA_VERSION = 2
 export const MAX_ENCOUNTER_STARS = 3
@@ -648,7 +649,7 @@ export function validateEncounter(
       issues
     )
   }
-  // difficultyProfileId is stored and not checked until step 2.
+  issues.push(...validateEncounterLinks(pipeline, encounter, path))
   if (encounter.recommendedLevel !== undefined) {
     const n = assertFiniteNumber(encounter.recommendedLevel, `${path}.recommendedLevel`, issues)
     if (n !== undefined && n < 0) {
