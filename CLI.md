@@ -405,6 +405,46 @@ List wraps `{ "paramSpecs": [ ... ] }`. Add / remove wrap `{ "module": { ... }, 
 
 ---
 
+### Story flags, conditions, and triggers (Step 3)
+
+Per-game story flags and reusable condition / effect objects. Old `unlockAfter`, `clearedBy`, and `hotspot.encounterId` keep working as shorthand. When both `unlockAfter` and `unlockCondition` are set, both must pass. `hotspot.encounterId` still behaves like a `startEncounter` trigger. Progress is flags earned through play — no currency, prices, energy, XP, or reward fields. No game names are hardcoded. **`contentSchemaVersion` stays 1**. No migrate.
+
+```bash
+forge flag list --game <id> [--json]
+forge flag show <id|@key> --game <id> [--json]
+forge flag create --game <id> --name "Has board" --key has_board --type bool --default false --scope game [--description "..."] [--dry-run] [--json]
+forge flag update <id|@key> --game <id> --name "Has hoverboard" [--dry-run] [--json]
+forge flag remove <id|@key> --game <id> [--dry-run] [--json]
+
+forge trigger list --game <id> [--json]
+forge trigger show <id|@key> --game <id> [--json]
+forge trigger create --game <id> --name Talk --kind onHotspot --source region-intro:hs-mentor \
+  --condition '{"flag":{"flagId":"@has_board","op":"eq","value":true}}' \
+  --effects '[{"setFlag":{"flagId":"@has_board","value":true}}]' [--once] [--key talk] [--notes "..."] [--dry-run] [--json]
+forge trigger update <id|@key> --game <id> --effects '[{"returnToWorldMap":true}]' [--dry-run] [--json]
+forge trigger remove <id|@key> --game <id> [--dry-run] [--json]
+
+forge stage update <id|@key> --game <id> --unlock-condition '{"flag":{"flagId":"@has_board","op":"eq","value":true}}'
+forge stage update <id|@key> --game <id> --unlock-condition ""
+forge encounter update <id|@key> --game <id> --on-win '[{"setFlag":{"flagId":"@passed","value":true}}]' --on-lose '[]'
+
+forge flow simulate --game <id> --world <id|@key> --flags has_board=true [--json]
+```
+
+Flag `--type` is `bool` or `int`. `--scope` is `game` or `world`. Trigger kinds: `onHotspot`, `onEnterRegion`, `onStageEnter`, `onEncounterWin`, `onEncounterLose`, `onDialogueEnd`. `--source` is an id, `@key`, or `region:hotspot` (unique hotspot id also works). Missing trigger sources are warnings. `startDialogue` / `onDialogueEnd` are accepted; a missing dialogue is a warning until Step 4.
+
+Condition object: `all` / `any` / `not` groups, plus `flag` (`eq` `ne` `gte` `lte`), `stageCleared`, and `encounterWon`. Effect list: `setFlag`, `incFlag`, `clearFlag`, `unlockStage`, `startEncounter`, `startDialogue`, `playScene`, `moveToRegion` (`regionId` + optional `anchorId`), `returnToWorldMap`.
+
+Deleting a flag or trigger that is in use is refused and names the users (`hotspot.triggerId` for triggers; conditions/effects for flags). Flow preview shows each stage's unlock condition and the trigger on each hotspot. Warnings: flag read but never set, flag set but never read, a stage whose condition can never pass, a trigger whose source is missing.
+
+`forge flow simulate` prints which stages are unlocked and which triggers would fire for the given `--flags k=v,...` (key, name, or id). `hotspot.encounterId` without `triggerId` is listed as a virtual `onHotspot` startEncounter trigger.
+
+`content apply` / `content export` include `flags` and `triggers` plus `Stage.unlockCondition` and `Encounter.onWin` / `onLose`. `@key` aliases work. Re-apply of unchanged records reports 0 changes.
+
+Create / update wrap `{ "record": { ... }, "dryRun": false }`. List wraps `{ "flags": [ ... ] }` or `{ "triggers": [ ... ] }`. Simulate wraps `{ "result": { ... } }`.
+
+---
+
 ### `forge character list --game <id>`
 
 List all characters in a game.

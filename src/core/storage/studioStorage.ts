@@ -80,6 +80,8 @@ function createEmptyStudioData(): StudioData {
       enemies: [],
       attackTables: [],
       difficultyProfiles: [],
+      flags: [],
+      triggers: [],
       createdAt: now,
       updatedAt: now
     },

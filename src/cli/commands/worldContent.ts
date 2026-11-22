@@ -227,6 +227,10 @@ export function registerWorldContentCommands(program: Command): void {
       if (options.entryRegion !== undefined) patch.entryRegionId = String(options.entryRegion)
       if (options.entryAnchor !== undefined) patch.entryAnchor = String(options.entryAnchor)
       if (options.unlockAfter !== undefined) patch.unlockAfter = csvIds(options.unlockAfter)
+      if (options.unlockCondition !== undefined) {
+        const raw = String(options.unlockCondition)
+        patch.unlockCondition = raw.trim() === '' ? null : (parseJsonArg(options.unlockCondition, '--unlock-condition') as StageInput['unlockCondition'])
+      }
       if (options.clearedBy !== undefined) patch.clearedBy = csvIds(options.clearedBy)
       if (options.returnToNode !== undefined) patch.returnToNode = String(options.returnToNode)
       return updateStage(opts.game!, id, patch, { dataDirOverride: dir(opts), dryRun: Boolean(opts.dryRun) })
@@ -253,6 +257,7 @@ export function registerWorldContentCommands(program: Command): void {
         .option('--entry-region <id>', 'Entry region id or @key (empty to clear)')
         .option('--entry-anchor <id>', 'Entry anchor id (defaults to spawn)')
         .option('--unlock-after <ids>', 'Comma-separated stage ids or @keys')
+        .option('--unlock-condition <json>', 'Condition object JSON (empty string clears)')
         .option('--cleared-by <ids>', 'Comma-separated encounter ids or @keys')
         .option('--return-to-node <id>', 'Map node id to return to')
   })
@@ -300,7 +305,9 @@ export function registerWorldContentCommands(program: Command): void {
         recommendedLevel: options.recommendedLevel !== undefined ? Number(options.recommendedLevel) : undefined,
         stars: parseJsonArg(options.stars, '--stars') as EncounterInput['stars'],
         order: options.order !== undefined ? Number(options.order) : undefined,
-        enemies: enemiesFromOptions(options)
+        enemies: enemiesFromOptions(options),
+        onWin: parseJsonArg(options.onWin, '--on-win') as EncounterInput['onWin'],
+        onLose: parseJsonArg(options.onLose, '--on-lose') as EncounterInput['onLose']
       }
       return createEncounter(opts.game!, input, { dataDirOverride: dir(opts), dryRun: Boolean(opts.dryRun) })
     },
@@ -325,6 +332,14 @@ export function registerWorldContentCommands(program: Command): void {
       if (options.order !== undefined) patch.order = Number(options.order)
       const enemies = enemiesFromOptions(options)
       if (enemies !== undefined) patch.enemies = enemies
+      if (options.onWin !== undefined) {
+        const raw = String(options.onWin)
+        patch.onWin = raw.trim() === '' ? null : (parseJsonArg(options.onWin, '--on-win') as EncounterInput['onWin'])
+      }
+      if (options.onLose !== undefined) {
+        const raw = String(options.onLose)
+        patch.onLose = raw.trim() === '' ? null : (parseJsonArg(options.onLose, '--on-lose') as EncounterInput['onLose'])
+      }
       return updateEncounter(opts.game!, id, patch, { dataDirOverride: dir(opts), dryRun: Boolean(opts.dryRun) })
     },
     remove: (id, opts) =>
@@ -344,6 +359,8 @@ export function registerWorldContentCommands(program: Command): void {
         .option('--enemy <spec>', 'Enemy id/@key/name, optional =table override (repeatable; first is lead)', collect)
         .option('--enemies <json>', 'JSON array of { enemyId, attackTableId? }')
         .option('--clear-enemies', 'Clear the encounter enemy list')
+        .option('--on-win <json>', 'onWin effects JSON array')
+        .option('--on-lose <json>', 'onLose effects JSON array')
         .option('--recommended-level <n>', 'Recommended level')
         .option('--stars <json>', 'JSON array of 0-3 stars')
         .option('--order <n>', 'Sort order'),
@@ -360,6 +377,8 @@ export function registerWorldContentCommands(program: Command): void {
         .option('--enemy <spec>', 'Enemy id/@key/name, optional =table override (repeatable; first is lead)', collect)
         .option('--enemies <json>', 'JSON array of { enemyId, attackTableId? }')
         .option('--clear-enemies', 'Clear the encounter enemy list')
+        .option('--on-win <json>', 'onWin effects JSON array (empty string clears)')
+        .option('--on-lose <json>', 'onLose effects JSON array (empty string clears)')
         .option('--recommended-level <n>', 'Recommended level')
         .option('--stars <json>', 'JSON array of 0-3 stars')
         .option('--order <n>', 'Sort order')

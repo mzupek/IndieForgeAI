@@ -14,6 +14,7 @@ import { LibraryView } from './components/LibraryView'
 import { GameSettingsView } from './components/GameSettingsView'
 import { WorldsView } from './components/WorldsView'
 import { EnemiesView } from './components/EnemiesView'
+import { StoryView } from './components/StoryView'
 import { useProjectStore, useUIStore } from './state/indieForgeStore'
 import {
   STUDIO_SCHEMA_VERSION,
@@ -51,6 +52,7 @@ function StudioLayout({ children }: { children: React.ReactNode }) {
     { path: '/studio/library', label: 'Library' },
     { path: '/studio/world', label: 'Worlds' },
     { path: '/studio/enemies', label: 'Enemies' },
+    { path: '/studio/story', label: 'Flags' },
     { path: '/studio/scenes', label: 'Scenes' },
     { path: '/studio/storyboards', label: 'Storyboards' },
     { path: '/studio/definitions', label: 'Game Definitions' },
@@ -126,6 +128,8 @@ function AppRoutes() {
           <Route path="world/:gameId" element={<WorldsView />} />
           <Route path="enemies" element={<GameDefaultRedirect section="enemies" />} />
           <Route path="enemies/:gameId" element={<EnemiesView />} />
+          <Route path="story" element={<GameDefaultRedirect section="story" />} />
+          <Route path="story/:gameId" element={<StoryView />} />
           <Route path="assets" element={<GameDefaultRedirect section="library" />} />
           <Route path="assets/:gameId" element={<AssetsRedirect />} />
           <Route path="scenes" element={<GameDefaultRedirect section="scenes" />} />

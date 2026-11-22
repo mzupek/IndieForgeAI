@@ -88,6 +88,8 @@ export function StudioHome() {
       navigate(`/studio/world/${gameId}`)
     } else if (path.startsWith('/studio/enemies/')) {
       navigate(`/studio/enemies/${gameId}`)
+    } else if (path.startsWith('/studio/story/')) {
+      navigate(`/studio/story/${gameId}`)
     } else if (path.startsWith('/studio/scenes/')) {
       navigate(`/studio/scenes/${gameId}`)
     } else if (path.startsWith('/studio/storyboards/')) {

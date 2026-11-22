@@ -6,16 +6,20 @@
 import type {
   AssetPipelineProject,
   AttackTable,
+  Condition,
   DifficultyProfile,
+  Effect,
   Encounter,
   EncounterEnemyLink,
   EncounterStar,
   Enemy,
+  GameFlag,
   Region,
   RegionEdge,
   RegionExit,
   RegionHotspot,
   Stage,
+  Trigger,
   World,
   WorldMap,
   WorldMapNode,
@@ -63,6 +67,15 @@ import {
 import { parseEncounterEnemies } from './encounterLinks'
 import { resolveEnemyRef } from '../enemies/validate'
 import { resolveSceneId, resolveTuningProfileId } from './validate'
+import {
+  mapCondition,
+  mapEffects,
+  parseCondition,
+  parseEffects,
+  resolveFlagRef
+} from '../story/conditions'
+import { flagsOf, validateGameFlag } from '../story/flags'
+import { parseTriggerKind, triggersOf, validateTrigger } from '../story/triggers'
 
 export interface ContentBundle {
   worlds?: Record<string, unknown>[]
@@ -72,12 +85,14 @@ export interface ContentBundle {
   enemies?: Record<string, unknown>[]
   attackTables?: Record<string, unknown>[]
   difficultyProfiles?: Record<string, unknown>[]
+  flags?: Record<string, unknown>[]
+  triggers?: Record<string, unknown>[]
 }
 
 export type ApplyAction = 'create' | 'update' | 'unchanged'
 
 export interface ApplyRecordResult {
-  type: 'world' | 'stage' | 'encounter' | 'region' | 'enemy' | 'attackTable' | 'difficultyProfile'
+  type: 'world' | 'stage' | 'encounter' | 'region' | 'enemy' | 'attackTable' | 'difficultyProfile' | 'flag' | 'trigger'
   action: ApplyAction
   id: string
   key?: string
@@ -117,6 +132,8 @@ function seedAliasMap(pipeline: AssetPipelineProject, gameId: string): Record<st
   for (const e of enemiesOf(pipeline, gameId)) add('enemy', e.key, e.id)
   for (const t of attackTablesOf(pipeline, gameId)) add('attackTable', t.key, t.id)
   for (const d of difficultyProfilesOf(pipeline, gameId)) add('difficultyProfile', d.key, d.id)
+  for (const f of flagsOf(pipeline, gameId)) add('flag', f.key, f.id)
+  for (const t of triggersOf(pipeline, gameId)) add('trigger', t.key, t.id)
   for (const c of (pipeline.characters || []).filter((x) => x.gameId === gameId)) {
     add('character', c.key, c.id)
   }
@@ -145,7 +162,7 @@ function lookupAlias(
 
 function resolveIncomingNamed(
   raw: unknown,
-  kind: 'enemy' | 'attackTable' | 'difficultyProfile',
+  kind: 'enemy' | 'attackTable' | 'difficultyProfile' | 'flag' | 'trigger',
   aliasMap: Record<string, string>,
   path: string,
   issues: ContentIssue[],
@@ -211,7 +228,7 @@ interface Planned {
 }
 
 function planIncoming(
-  kind: 'world' | 'stage' | 'encounter' | 'region' | 'enemy' | 'attackTable' | 'difficultyProfile',
+  kind: 'world' | 'stage' | 'encounter' | 'region' | 'enemy' | 'attackTable' | 'difficultyProfile' | 'flag' | 'trigger',
   inputs: Record<string, unknown>[],
   existing: { id: string; key?: string; gameId: string }[],
   gameId: string,
@@ -281,7 +298,7 @@ function resolveBackgroundAsset(
 
 function resolveTypedRef(
   raw: unknown,
-  kind: 'world' | 'stage' | 'encounter' | 'region' | 'asset' | 'scene',
+  kind: 'world' | 'stage' | 'encounter' | 'region' | 'asset' | 'scene' | 'flag' | 'trigger',
   aliasMap: Record<string, string>,
   path: string,
   issues: ContentIssue[],
@@ -411,6 +428,30 @@ function resolveIdList(
   return out
 }
 
+function resolveStoryId(
+  kind: 'flag' | 'stage' | 'encounter' | 'region' | 'scene' | 'dialogue',
+  raw: string,
+  pipeline: AssetPipelineProject,
+  gameId: string,
+  aliasMap: Record<string, string>,
+  path: string,
+  issues: ContentIssue[]
+): string | undefined {
+  if (kind === 'flag') {
+    return resolveIncomingNamed(raw, 'flag', aliasMap, path, issues, (value) =>
+      resolveFlagRef(pipeline, gameId, value)
+    )
+  }
+  if (kind === 'dialogue') {
+    const aliased = lookupAlias(aliasMap, raw, 'dialogue')
+    if (aliased) return aliased
+    return raw
+  }
+  const mapped =
+    kind === 'scene' ? 'scene' : kind === 'region' ? 'region' : kind === 'stage' ? 'stage' : 'encounter'
+  return resolveTypedRef(raw, mapped, aliasMap, path, issues, false)
+}
+
 /**
  * Mutates `pipeline`. Throws ContentApplyError if any error-level issues.
  */
@@ -431,8 +472,11 @@ export function applyContentBundle(
   if (!pipeline.enemies) pipeline.enemies = []
   if (!pipeline.attackTables) pipeline.attackTables = []
   if (!pipeline.difficultyProfiles) pipeline.difficultyProfiles = []
+  if (!pipeline.flags) pipeline.flags = []
+  if (!pipeline.triggers) pipeline.triggers = []
 
   const worldPlan = planIncoming('world', bundle.worlds || [], pipeline.worlds, gameId, aliasMap, issues)
+  const flagPlan = planIncoming('flag', bundle.flags || [], pipeline.flags, gameId, aliasMap, issues)
   const stagePlan = planIncoming('stage', bundle.stages || [], pipeline.stages, gameId, aliasMap, issues)
   const regionPlan = planIncoming('region', bundle.regions || [], pipeline.regions, gameId, aliasMap, issues)
   const attackTablePlan = planIncoming(
@@ -460,6 +504,7 @@ export function applyContentBundle(
     aliasMap,
     issues
   )
+  const triggerPlan = planIncoming('trigger', bundle.triggers || [], pipeline.triggers, gameId, aliasMap, issues)
 
   // Assign region ids into the alias map before validating exits.
   for (const p of regionPlan) {
@@ -519,6 +564,43 @@ export function applyContentBundle(
     else pipeline.worlds.push(w)
   }
 
+  const nextFlags: GameFlag[] = []
+  for (const p of flagPlan) {
+    const path = `flags[${p.index}]`
+    const existing = pipeline.flags.find((f) => f.id === p.id)
+    const typeRaw = optionalStr(p.input.type) || existing?.type || 'bool'
+    const type = typeRaw === 'int' ? 'int' : 'bool'
+    let defaultValue: boolean | number = existing?.default ?? (type === 'int' ? 0 : false)
+    if (p.input.default !== undefined) {
+      if (type === 'bool') defaultValue = p.input.default === true || p.input.default === 'true' || p.input.default === 1
+      else {
+        const n = Number(p.input.default)
+        defaultValue = Number.isInteger(n) ? n : 0
+      }
+    }
+    const known: GameFlag = {
+      id: p.id,
+      gameId,
+      name: str(p.input.name) || existing?.name || '',
+      type,
+      default: defaultValue,
+      scope: optionalStr(p.input.scope) === 'world' ? 'world' : existing?.scope || 'game',
+      schemaVersion: RECORD_SCHEMA_VERSION,
+      createdAt: existing?.createdAt || now,
+      updatedAt: now
+    }
+    const key = p.key ?? existing?.key
+    if (key) known.key = key
+    const description = optionalStr(p.input.description) ?? existing?.description
+    if (description) known.description = description
+    nextFlags.push(overlayRecord(existing, known))
+  }
+  for (const f of nextFlags) {
+    const idx = pipeline.flags.findIndex((x) => x.id === f.id)
+    if (idx >= 0) pipeline.flags[idx] = f
+    else pipeline.flags.push(f)
+  }
+
   const nextStages: Stage[] = []
   for (const p of stagePlan) {
     const path = `stages[${p.index}]`
@@ -571,12 +653,25 @@ export function applyContentBundle(
         ? resolveIdList(p.input.clearedBy, 'encounter', aliasMap, `${path}.clearedBy`, issues)
         : existing?.clearedBy
     if (clearedBy) known.clearedBy = clearedBy
+    if (p.input.unlockCondition !== undefined) {
+      const condIssues: ContentIssue[] = []
+      const parsed = parseCondition(p.input.unlockCondition, `${path}.unlockCondition`, condIssues)
+      issues.push(...condIssues)
+      if (parsed) {
+        known.unlockCondition = mapCondition(parsed, (kind, id) =>
+          resolveStoryId(kind, id, pipeline, gameId, aliasMap, `${path}.unlockCondition`, issues)
+        )
+      }
+    } else if (existing?.unlockCondition) {
+      known.unlockCondition = existing.unlockCondition
+    }
     const stage = overlayRecord(existing, known)
     if (p.input.entryRegionId === null) delete stage.entryRegionId
     if (p.input.entryAnchor === null) delete stage.entryAnchor
     if (p.input.returnToNode === null) delete stage.returnToNode
     if (p.input.unlockAfter === null) delete stage.unlockAfter
     if (p.input.clearedBy === null) delete stage.clearedBy
+    if (p.input.unlockCondition === null) delete stage.unlockCondition
     nextStages.push(stage)
   }
   for (const s of nextStages) {
@@ -626,16 +721,30 @@ export function applyContentBundle(
     else if (existing?.stageId) known.stageId = existing.stageId
 
     known.hotspots = (known.hotspots || []).map((hs: RegionHotspot, hi) => {
-      if (!hs?.encounterId) return hs
-      const encId = resolveTypedRef(
-        hs.encounterId,
-        'encounter',
-        aliasMap,
-        `${path}.hotspots[${hi}].encounterId`,
-        issues,
-        false
-      )
-      return encId ? { ...hs, encounterId: encId } : hs
+      let next = hs
+      if (hs?.encounterId) {
+        const encId = resolveTypedRef(
+          hs.encounterId,
+          'encounter',
+          aliasMap,
+          `${path}.hotspots[${hi}].encounterId`,
+          issues,
+          false
+        )
+        if (encId) next = { ...next, encounterId: encId }
+      }
+      if (hs?.triggerId) {
+        const triggerId = resolveTypedRef(
+          hs.triggerId,
+          'trigger',
+          aliasMap,
+          `${path}.hotspots[${hi}].triggerId`,
+          issues,
+          false
+        )
+        if (triggerId) next = { ...next, triggerId }
+      }
+      return next
     })
     known.exits = (known.exits || []).map((ex: RegionExit, ei) => {
       if (ex.toWorldMap) return { ...ex }
@@ -904,15 +1013,118 @@ export function applyContentBundle(
       known.enemies = existing.enemies
     }
 
+    if (p.input.onWin !== undefined) {
+      const winIssues: ContentIssue[] = []
+      const parsed = parseEffects(p.input.onWin, `${path}.onWin`, winIssues)
+      issues.push(...winIssues)
+      known.onWin = mapEffects(parsed, (kind, id) =>
+        resolveStoryId(kind, id, pipeline, gameId, aliasMap, `${path}.onWin`, issues)
+      )
+    } else if (existing?.onWin) {
+      known.onWin = existing.onWin
+    }
+    if (p.input.onLose !== undefined) {
+      const loseIssues: ContentIssue[] = []
+      const parsed = parseEffects(p.input.onLose, `${path}.onLose`, loseIssues)
+      issues.push(...loseIssues)
+      known.onLose = mapEffects(parsed, (kind, id) =>
+        resolveStoryId(kind, id, pipeline, gameId, aliasMap, `${path}.onLose`, issues)
+      )
+    } else if (existing?.onLose) {
+      known.onLose = existing.onLose
+    }
+
     const rec = overlayRecord(existing, known)
     if (p.input.enemies !== undefined && !known.enemies?.length) delete rec.enemies
     if (clearDifficulty) delete rec.difficultyProfileId
+    if (p.input.onWin !== undefined && !known.onWin?.length) delete rec.onWin
+    if (p.input.onLose !== undefined && !known.onLose?.length) delete rec.onLose
     nextEncounters.push(rec)
   }
   for (const e of nextEncounters) {
     const idx = pipeline.encounters.findIndex((x) => x.id === e.id)
     if (idx >= 0) pipeline.encounters[idx] = e
     else pipeline.encounters.push(e)
+  }
+
+  const nextTriggers: Trigger[] = []
+  for (const p of triggerPlan) {
+    const path = `triggers[${p.index}]`
+    const existing = pipeline.triggers.find((t) => t.id === p.id)
+    let kind: Trigger['kind'] = existing?.kind || 'onHotspot'
+    try {
+      if (p.input.kind !== undefined) kind = parseTriggerKind(p.input.kind)
+    } catch (err) {
+      issues.push(errorIssue(`${path}.kind`, err instanceof Error ? err.message : String(err)))
+    }
+    const condIssues: ContentIssue[] = []
+    const parsedCondition =
+      p.input.condition !== undefined
+        ? parseCondition(p.input.condition, `${path}.condition`, condIssues)
+        : existing?.condition
+    issues.push(...condIssues)
+    const effectIssues: ContentIssue[] = []
+    const parsedEffects =
+      p.input.effects !== undefined
+        ? parseEffects(p.input.effects, `${path}.effects`, effectIssues)
+        : existing?.effects || []
+    issues.push(...effectIssues)
+    const known: Trigger = {
+      id: p.id,
+      gameId,
+      name: str(p.input.name) || existing?.name || '',
+      kind,
+      sourceRef: str(p.input.sourceRef) || existing?.sourceRef || '',
+      once: p.input.once !== undefined ? Boolean(p.input.once) : existing?.once ?? false,
+      effects: mapEffects(parsedEffects, (k, id) =>
+        resolveStoryId(k, id, pipeline, gameId, aliasMap, `${path}.effects`, issues)
+      ),
+      schemaVersion: RECORD_SCHEMA_VERSION,
+      createdAt: existing?.createdAt || now,
+      updatedAt: now
+    }
+    const key = p.key ?? existing?.key
+    if (key) known.key = key
+    const notes = optionalStr(p.input.notes) ?? existing?.notes
+    if (notes) known.notes = notes
+    if (parsedCondition) {
+      known.condition = mapCondition(parsedCondition, (k, id) =>
+        resolveStoryId(k, id, pipeline, gameId, aliasMap, `${path}.condition`, issues)
+      )
+    }
+    const sourceKind =
+      kind === 'onEnterRegion'
+        ? 'region'
+        : kind === 'onStageEnter'
+          ? 'stage'
+          : kind === 'onEncounterWin' || kind === 'onEncounterLose'
+            ? 'encounter'
+            : kind === 'onDialogueEnd'
+              ? 'dialogue'
+              : undefined
+    if (sourceKind && known.sourceRef) {
+      const resolved = resolveStoryId(
+        sourceKind,
+        known.sourceRef,
+        pipeline,
+        gameId,
+        aliasMap,
+        `${path}.sourceRef`,
+        issues
+      )
+      if (resolved) known.sourceRef = resolved
+    } else if (kind === 'onHotspot' && known.sourceRef) {
+      const aliased = lookupAlias(aliasMap, known.sourceRef, 'region')
+      if (aliased && !known.sourceRef.includes(':') && !known.sourceRef.includes('/')) {
+        // keep hotspot-local id; aliases for region:hotspot stay as authored
+      }
+    }
+    nextTriggers.push(overlayRecord(existing, known))
+  }
+  for (const t of nextTriggers) {
+    const idx = pipeline.triggers.findIndex((x) => x.id === t.id)
+    if (idx >= 0) pipeline.triggers[idx] = t
+    else pipeline.triggers.push(t)
   }
 
   for (const p of worldPlan) {
@@ -942,6 +1154,14 @@ export function applyContentBundle(
   for (const p of difficultyPlan) {
     const rec = pipeline.difficultyProfiles.find((d) => d.id === p.id)!
     issues.push(...validateDifficultyProfile(pipeline, rec, `difficultyProfiles[${p.index}]`))
+  }
+  for (const p of flagPlan) {
+    const rec = pipeline.flags.find((f) => f.id === p.id)!
+    issues.push(...validateGameFlag(pipeline, rec, `flags[${p.index}]`))
+  }
+  for (const p of triggerPlan) {
+    const rec = pipeline.triggers.find((t) => t.id === p.id)!
+    issues.push(...validateTrigger(pipeline, rec, `triggers[${p.index}]`))
   }
 
   result.issues = issues
@@ -1000,6 +1220,8 @@ export function applyContentBundle(
   pack('attackTable', attackTablePlan, pipeline.attackTables)
   pack('enemy', enemyPlan, pipeline.enemies)
   pack('encounter', encounterPlan, pipeline.encounters)
+  pack('flag', flagPlan, pipeline.flags)
+  pack('trigger', triggerPlan, pipeline.triggers)
 
   return result
 }
@@ -1019,7 +1241,9 @@ export function classifyApplyActions(
     region: before.regions || [],
     enemy: before.enemies || [],
     attackTable: before.attackTables || [],
-    difficultyProfile: before.difficultyProfiles || []
+    difficultyProfile: before.difficultyProfiles || [],
+    flag: before.flags || [],
+    trigger: before.triggers || []
   }
   const afterLookup = {
     world: after.worlds || [],
@@ -1028,7 +1252,9 @@ export function classifyApplyActions(
     region: after.regions || [],
     enemy: after.enemies || [],
     attackTable: after.attackTables || [],
-    difficultyProfile: after.difficultyProfiles || []
+    difficultyProfile: after.difficultyProfiles || [],
+    flag: after.flags || [],
+    trigger: after.triggers || []
   }
   const all = [...result.creates, ...result.updates, ...result.unchanged]
   result.creates = []

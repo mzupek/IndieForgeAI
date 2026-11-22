@@ -23,6 +23,8 @@ import { registerWorldContentCommands } from './commands/worldContent'
 import { registerEnemyCommands } from './commands/enemy'
 import { registerAttackTableCommands } from './commands/attackTable'
 import { registerDifficultyCommands } from './commands/difficulty'
+import { registerFlagCommands } from './commands/flag'
+import { registerFlowSimulateCommand, registerTriggerCommands } from './commands/trigger'
 import * as asset from './commands/asset'
 import * as assetState from './commands/asset-state'
 
@@ -416,5 +418,10 @@ registerAttackTableCommands(program)
 
 // 2c difficulty profiles
 registerDifficultyCommands(program)
+
+// Step 3 flags, triggers, flow simulate
+registerFlagCommands(program)
+registerTriggerCommands(program)
+registerFlowSimulateCommand(program)
 
 program.parse()

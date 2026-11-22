@@ -126,7 +126,22 @@ Optional `Game.settings.modules[].paramSpecs`. No migrate. No freemium / currenc
 - Removing a param spec is refused while an encounter of that module has a tuning row that still contains that key (message names the encounter).
 - `content export` includes `settings.modules` (and therefore `paramSpecs`). **`contentSchemaVersion` stays 1**. Export **manifest v2 is unchanged**.
 
-## Out of 1a / 1b / 1c / 1d / 2a / 2b / 2c / 2d
+## Step 3 (same schema v2 — no bump)
+
+Optional top-level `flags` and `triggers` arrays, filled in memory when missing. Optional `Stage.unlockCondition`, `Encounter.onWin` / `onLose`, `RegionHotspot.triggerId`. No migrate. No freemium / currency / reward / XP / energy / price fields. Progress is flags earned through play. Still poses only.
+
+- **GameFlag:** `id`, optional `key`, `gameId`, `name`, `type` (`bool` | `int`), `default` (bool or integer matching type), `scope` (`game` | `world`), optional `description`.
+- **Condition:** `{ all: Condition[] }` | `{ any: Condition[] }` | `{ not: Condition }` | `{ flag: { flagId, op: eq|ne|gte|lte, value } }` | `{ stageCleared: { stageId } }` | `{ encounterWon: { encounterId } }`. Validated against real ids. `gte`/`lte` only on int flags.
+- **Effect:** `setFlag` | `incFlag` | `clearFlag` | `unlockStage` | `startEncounter` | `startDialogue` | `playScene` | `moveToRegion` `{ regionId, anchorId? }` | `returnToWorldMap: true`.
+- **Trigger:** `id`, optional `key`, `gameId`, `name`, `kind` (`onHotspot` | `onEnterRegion` | `onStageEnter` | `onEncounterWin` | `onEncounterLose` | `onDialogueEnd`), `sourceRef`, optional `condition`, `once` (bool, default false), `effects[]`, optional `notes`. Missing source is a **warning**.
+- **Stage.unlockCondition:** optional, lives beside `unlockAfter`. When both are set, both must pass. Never-pass conditions are warnings.
+- **Encounter.onWin[] / onLose[]:** optional effect lists.
+- **RegionHotspot.triggerId:** must exist and kind must be `onHotspot`. `hotspot.encounterId` remains shorthand startEncounter.
+- Deleting a flag or trigger that is in use is refused (message names the users).
+- Flow warnings: flag read but never set, flag set but never read, unlock condition that can never pass, missing trigger source.
+- `content apply` / `content export` include `flags`, `triggers`, and the new stage/encounter fields. `@key` aliases work. **`contentSchemaVersion` stays 1**. Export **manifest v2 is unchanged**. Saves overlay unknown fields so extra keys survive an update.
+
+## Out of 1a / 1b / 1c / 1d / 2a / 2b / 2c / 2d / Step 3
 
 - A4 portable export package
 - `seedDefaultGames` and the Neon Recall Game Definition markdown special case (flagged only)

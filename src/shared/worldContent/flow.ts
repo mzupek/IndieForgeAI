@@ -16,6 +16,9 @@ import {
   validateWorld
 } from './validate'
 import { encounterFlowExtras } from './encounterLinks'
+import { summarizeCondition } from '../story/conditions'
+import { collectFlagUsageWarnings } from '../story/flags'
+import { triggersOf, validateTrigger } from '../story/triggers'
 
 export type FlowKind = 'world' | 'node' | 'stage' | 'region' | 'hotspot' | 'encounter' | 'exit'
 
@@ -152,15 +155,23 @@ export function buildWorldFlow(pipeline: AssetPipelineProject, world: World): Wo
   })
 
   const stagesWithNodes = new Set(orderedNodes.map((n) => n.stageId))
+  attach(tree, collectFlagUsageWarnings(pipeline, world.gameId))
+  for (const trigger of triggersOf(pipeline, world.gameId)) {
+    attach(tree, validateTrigger(pipeline, trigger, `triggers.${trigger.key || trigger.id}`))
+  }
 
   function stageLine(stage: Stage, nodeId?: string): FlowLine {
     const path = `stages.${stage.key || stage.id}`
     const issues = validateStage(pipeline, stage, path)
-    const locked = Array.isArray(stage.unlockAfter) && stage.unlockAfter.length > 0
+    const locked =
+      (Array.isArray(stage.unlockAfter) && stage.unlockAfter.length > 0) || Boolean(stage.unlockCondition)
+    const unlockSummary = stage.unlockCondition
+      ? summarizeCondition(pipeline, world.gameId, stage.unlockCondition)
+      : ''
     const line: FlowLine = {
       id: `stage:${stage.id}`,
       kind: 'stage',
-      label: stage.name,
+      label: unlockSummary ? `${stage.name} — unlock: ${unlockSummary}` : stage.name,
       status: worst(issues),
       issues: [...issues],
       recordKind: 'stage',
@@ -246,10 +257,19 @@ export function buildWorldFlow(pipeline: AssetPipelineProject, world: World): Wo
           hsIssues.push(warningIssue(`${path}.hotspots.${hs.id}`, `Hotspot '${hs.id}' encounter is missing`))
         }
       }
+      let triggerLabel = ''
+      if (hs.triggerId) {
+        const trigger = triggersOf(pipeline, world.gameId).find((t) => t.id === hs.triggerId)
+        if (trigger) triggerLabel = ` [${trigger.name}]`
+        else {
+          hsIssues.push(warningIssue(`${path}.hotspots.${hs.id}`, `Hotspot '${hs.id}' trigger is missing`))
+          triggerLabel = ' [missing trigger]'
+        }
+      }
       const hsLine: FlowLine = {
         id: `hotspot:${region.id}:${hs.id}`,
         kind: 'hotspot',
-        label: hs.prompt || hs.id,
+        label: (hs.prompt || hs.id) + triggerLabel,
         status: worst(hsIssues),
         issues: hsIssues,
         recordKind: 'region',

@@ -231,6 +231,8 @@ import {
   removeDifficultyProfile,
   updateDifficultyProfile
 } from '../../core/storage/difficultyService'
+import { createFlag, removeFlag, updateFlag } from '../../core/storage/flagService'
+import { createTrigger, removeTrigger, updateTrigger } from '../../core/storage/triggerService'
 import {
   applyDesignerAssetPrompt,
   applyDesignerStyleGuide,
@@ -1861,6 +1863,33 @@ export function registerIpcHandlers(): void {
   )
   ipcMain.handle(IPC_CHANNELS.DIFFICULTY_REMOVE, async (_e, projectId: string, gameId: string, id: string) => {
     await removeDifficultyProfile(gameId, id)
+    return await loadProject(projectId)
+  })
+  ipcMain.handle(IPC_CHANNELS.FLAG_CREATE, async (_e, projectId: string, gameId: string, input: any) => {
+    await createFlag(gameId, input)
+    return await loadProject(projectId)
+  })
+  ipcMain.handle(IPC_CHANNELS.FLAG_UPDATE, async (_e, projectId: string, gameId: string, id: string, patch: any) => {
+    await updateFlag(gameId, id, patch)
+    return await loadProject(projectId)
+  })
+  ipcMain.handle(IPC_CHANNELS.FLAG_REMOVE, async (_e, projectId: string, gameId: string, id: string) => {
+    await removeFlag(gameId, id)
+    return await loadProject(projectId)
+  })
+  ipcMain.handle(IPC_CHANNELS.TRIGGER_CREATE, async (_e, projectId: string, gameId: string, input: any) => {
+    await createTrigger(gameId, input)
+    return await loadProject(projectId)
+  })
+  ipcMain.handle(
+    IPC_CHANNELS.TRIGGER_UPDATE,
+    async (_e, projectId: string, gameId: string, id: string, patch: any) => {
+      await updateTrigger(gameId, id, patch)
+      return await loadProject(projectId)
+    }
+  )
+  ipcMain.handle(IPC_CHANNELS.TRIGGER_REMOVE, async (_e, projectId: string, gameId: string, id: string) => {
+    await removeTrigger(gameId, id)
     return await loadProject(projectId)
   })
 }

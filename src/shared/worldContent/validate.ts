@@ -29,6 +29,12 @@ import { assertRecordKey, isAliasRef, isUuid, normalizeRecordKey } from './keys'
 import { errorIssue, type ContentIssue, type NamedUser, warningIssue } from './issues'
 import { validateEncounterParamSpecs } from '../gameSettings/paramSpecs'
 import { validateEncounterLinks } from './encounterLinks'
+import {
+  conditionNeverPasses,
+  summarizeCondition,
+  validateCondition,
+  validateEffects
+} from '../story/conditions'
 
 export const RECORD_SCHEMA_VERSION = 2
 export const MAX_ENCOUNTER_STARS = 3
@@ -466,6 +472,20 @@ export function validateStage(
     }
   }
 
+  if (stage.unlockCondition) {
+    issues.push(
+      ...validateCondition(pipeline, stage.gameId, stage.unlockCondition, `${path}.unlockCondition`)
+    )
+    if (conditionNeverPasses(stage.unlockCondition)) {
+      issues.push(
+        warningIssue(
+          `${path}.unlockCondition`,
+          `Unlock condition can never pass (${summarizeCondition(pipeline, stage.gameId, stage.unlockCondition)})`
+        )
+      )
+    }
+  }
+
   if (stage.entryRegionId) {
     const region = (pipeline.regions || []).find((r) => r.id === stage.entryRegionId)
     if (!region) {
@@ -652,6 +672,12 @@ export function validateEncounter(
   }
   issues.push(...validateEncounterLinks(pipeline, encounter, path))
   issues.push(...validateEncounterParamSpecs(pipeline, encounter, path))
+  if (encounter.onWin?.length) {
+    issues.push(...validateEffects(pipeline, encounter.gameId, encounter.onWin, `${path}.onWin`))
+  }
+  if (encounter.onLose?.length) {
+    issues.push(...validateEffects(pipeline, encounter.gameId, encounter.onLose, `${path}.onLose`))
+  }
   if (encounter.recommendedLevel !== undefined) {
     const n = assertFiniteNumber(encounter.recommendedLevel, `${path}.recommendedLevel`, issues)
     if (n !== undefined && n < 0) {
@@ -794,7 +820,16 @@ export function validateRegion(
     else hotspotIds.add(id)
     if (!String(hs?.prompt || '').trim()) issues.push(errorIssue(`${p}.prompt`, 'Hotspot prompt is required'))
     hasAnchor(String(hs?.anchor || ''), `${p}.anchor`)
-    // triggerId stored, not checked until step 3
+    if (hs?.triggerId) {
+      const trigger = findByIdOrKey(pipeline.triggers || [], hs.triggerId, region.gameId)
+      if (!trigger) {
+        issues.push(errorIssue(`${p}.triggerId`, `Trigger '${hs.triggerId}' was not found`))
+      } else if (trigger.kind !== 'onHotspot') {
+        issues.push(
+          errorIssue(`${p}.triggerId`, `Trigger '${trigger.name}' kind must be onHotspot`)
+        )
+      }
+    }
     if (hs?.encounterId) {
       if (!region.stageId) {
         issues.push(
@@ -888,6 +923,16 @@ export function collectStageUsers(pipeline: AssetPipelineProject, stageId: strin
       users.push({ id: s.id, name: `${s.name} unlockAfter`, kind: 'stage' })
     }
   }
+  for (const t of pipeline.triggers || []) {
+    if (t.kind === 'onStageEnter' && (t.sourceRef === stageId || t.sourceRef === `@${(pipeline.stages || []).find((s) => s.id === stageId)?.key || ''}`)) {
+      users.push({ id: t.id, name: t.name, kind: 'trigger' })
+    }
+    for (const effect of t.effects || []) {
+      if ('unlockStage' in effect && effect.unlockStage.stageId === stageId) {
+        users.push({ id: t.id, name: t.name, kind: 'trigger' })
+      }
+    }
+  }
   return users
 }
 
@@ -903,6 +948,19 @@ export function collectEncounterUsers(pipeline: AssetPipelineProject, encounterI
   for (const s of pipeline.stages || []) {
     if ((s.clearedBy || []).includes(encounterId)) {
       users.push({ id: s.id, name: `${s.name} clearedBy`, kind: 'stage' })
+    }
+  }
+  for (const t of pipeline.triggers || []) {
+    if (
+      (t.kind === 'onEncounterWin' || t.kind === 'onEncounterLose') &&
+      (t.sourceRef === encounterId || t.sourceRef.replace(/^@/, '') === (pipeline.encounters || []).find((e) => e.id === encounterId)?.key)
+    ) {
+      users.push({ id: t.id, name: t.name, kind: 'trigger' })
+    }
+    for (const effect of t.effects || []) {
+      if ('startEncounter' in effect && effect.startEncounter.encounterId === encounterId) {
+        users.push({ id: t.id, name: t.name, kind: 'trigger' })
+      }
     }
   }
   return users
@@ -922,6 +980,22 @@ export function collectRegionUsers(pipeline: AssetPipelineProject, regionId: str
     if (s.entryRegionId === regionId) {
       users.push({ id: s.id, name: `${s.name} entry region`, kind: 'stage' })
     }
+  }
+  for (const t of pipeline.triggers || []) {
+    if (t.kind === 'onEnterRegion' && (t.sourceRef === regionId || t.sourceRef.replace(/^@/, '') === (pipeline.regions || []).find((r) => r.id === regionId)?.key)) {
+      users.push({ id: t.id, name: t.name, kind: 'trigger' })
+    }
+    for (const effect of t.effects || []) {
+      if ('moveToRegion' in effect && effect.moveToRegion.regionId === regionId) {
+        users.push({ id: t.id, name: t.name, kind: 'trigger' })
+      }
+    }
+  }
+  const region = (pipeline.regions || []).find((r) => r.id === regionId)
+  for (const hs of region?.hotspots || []) {
+    if (!hs.triggerId) continue
+    const trigger = (pipeline.triggers || []).find((t) => t.id === hs.triggerId)
+    if (trigger) users.push({ id: trigger.id, name: trigger.name, kind: 'trigger' })
   }
   return users
 }

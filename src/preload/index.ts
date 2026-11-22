@@ -437,6 +437,22 @@ const api: IndieForgeAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.DIFFICULTY_UPDATE, projectId, gameId, id, patch),
     remove: (projectId, gameId, id) =>
       ipcRenderer.invoke(IPC_CHANNELS.DIFFICULTY_REMOVE, projectId, gameId, id)
+  },
+  flags: {
+    create: (projectId, gameId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.FLAG_CREATE, projectId, gameId, input),
+    update: (projectId, gameId, id, patch) =>
+      ipcRenderer.invoke(IPC_CHANNELS.FLAG_UPDATE, projectId, gameId, id, patch),
+    remove: (projectId, gameId, id) =>
+      ipcRenderer.invoke(IPC_CHANNELS.FLAG_REMOVE, projectId, gameId, id)
+  },
+  triggers: {
+    create: (projectId, gameId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.TRIGGER_CREATE, projectId, gameId, input),
+    update: (projectId, gameId, id, patch) =>
+      ipcRenderer.invoke(IPC_CHANNELS.TRIGGER_UPDATE, projectId, gameId, id, patch),
+    remove: (projectId, gameId, id) =>
+      ipcRenderer.invoke(IPC_CHANNELS.TRIGGER_REMOVE, projectId, gameId, id)
   }
 }
 

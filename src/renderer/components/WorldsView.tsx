@@ -12,7 +12,9 @@ import { resolveLibraryPreviewPath } from '@shared/storyboard/layerValidation'
 import type {
   AssetPipelineProject,
   AttackTable,
+  Condition,
   DifficultyProfile,
+  Effect,
   Encounter,
   EncounterEnemyLink,
   EncounterStar,
@@ -20,8 +22,10 @@ import type {
   GameEncounterModule,
   Region,
   Stage,
+  Trigger,
   World
 } from '@shared/types/assetPipeline'
+import { ConditionBuilder, EffectList } from './ConditionBuilder'
 import { WorldMapPanel } from './WorldMapPanel'
 import { WorldFlowPreview, type FlowOpenTarget } from './WorldFlowPreview'
 import { validateEncounter } from '@shared/worldContent/validate'
@@ -169,6 +173,7 @@ export function WorldsView() {
         <WorldStagePanel
           projectId={projectId}
           gameId={gameId}
+          pipeline={pipeline}
           worlds={worlds}
           stages={stages}
           regions={regions}
@@ -295,6 +300,7 @@ function OrderControls({
 function WorldStagePanel({
   projectId,
   gameId,
+  pipeline,
   worlds,
   stages,
   regions,
@@ -307,6 +313,7 @@ function WorldStagePanel({
 }: {
   projectId: string
   gameId: string
+  pipeline: AssetPipelineProject
   worlds: World[]
   stages: Stage[]
   regions: Region[]
@@ -339,6 +346,7 @@ function WorldStagePanel({
   const [entryAnchor, setEntryAnchor] = useState(initialStage?.entryAnchor || '')
   const [returnToNode, setReturnToNode] = useState(initialStage?.returnToNode || '')
   const [clearedBy, setClearedBy] = useState<string[]>(initialStage?.clearedBy || [])
+  const [unlockCondition, setUnlockCondition] = useState<Condition | undefined>(initialStage?.unlockCondition)
   const [worldDragOverId, setWorldDragOverId] = useState<string | null>(null)
   const [stageDragOverId, setStageDragOverId] = useState<string | null>(null)
 
@@ -416,6 +424,7 @@ function WorldStagePanel({
     setEntryAnchor(s.entryAnchor || '')
     setReturnToNode(s.returnToNode || '')
     setClearedBy(s.clearedBy || [])
+    setUnlockCondition(s.unlockCondition)
   }
 
   function hideStageForm(list = worldStages) {
@@ -430,6 +439,7 @@ function WorldStagePanel({
     setEntryAnchor('')
     setReturnToNode('')
     setClearedBy([])
+    setUnlockCondition(undefined)
   }
 
   function beginNewStage(list = worldStages) {
@@ -758,7 +768,8 @@ function WorldStagePanel({
                       entryRegionId: entryRegionId || null,
                       entryAnchor: entryAnchor || null,
                       returnToNode: returnToNode || null,
-                      clearedBy
+                      clearedBy,
+                      unlockCondition: unlockCondition || null
                     })
                   }
                   const knownIds = new Set(worldStages.map((s) => s.id))
@@ -844,6 +855,19 @@ function WorldStagePanel({
                       ))}
                     </select>
                   </label>
+                  <div>
+                    <div style={{ fontSize: '0.85rem', marginBottom: '0.25rem' }}>Unlock condition</div>
+                    <ConditionBuilder
+                      pipeline={pipeline}
+                      gameId={gameId}
+                      value={unlockCondition}
+                      onChange={setUnlockCondition}
+                      disabled={busy}
+                    />
+                    <p style={{ color: 'var(--muted)', fontSize: '0.75rem', margin: '0.25rem 0 0' }}>
+                      Lives beside unlockAfter. When both are set, both must pass.
+                    </p>
+                  </div>
                   <fieldset style={{ border: '1px solid var(--border)', padding: '0.5rem' }}>
                     <legend>Cleared by</legend>
                     {stageEncounters.length === 0 && (
@@ -931,6 +955,8 @@ function EncounterPanel({
     null,
     null
   ])
+  const [onWin, setOnWin] = useState<Effect[]>([])
+  const [onLose, setOnLose] = useState<Effect[]>([])
 
   const availableModules = modules.filter((m) => !typeId || m.typeIds.includes(typeId))
   const matchingEnemies = ((pipeline.enemies || []) as Enemy[]).filter(
@@ -959,6 +985,8 @@ function EncounterPanel({
     setFormError(null)
     setFieldErrors({})
     setStars([enc.stars[0] || null, enc.stars[1] || null, enc.stars[2] || null])
+    setOnWin(enc.onWin || [])
+    setOnLose(enc.onLose || [])
   }
 
   useEffect(() => {
@@ -988,6 +1016,8 @@ function EncounterPanel({
     tuningProfileId: tuningId || undefined,
     difficultyProfileId: difficulty || undefined,
     enemies: enemyLinks.length ? enemyLinks : undefined,
+    onWin: onWin.length ? onWin : undefined,
+    onLose: onLose.length ? onLose : undefined,
     stars: starPayload(),
     order: selected?.order ?? 1,
     schemaVersion: selected?.schemaVersion || 2,
@@ -1049,6 +1079,8 @@ function EncounterPanel({
             setFormError(null)
             setFieldErrors({})
             setStars([null, null, null])
+            setOnWin([])
+            setOnLose([])
           }}
         >
           New encounter
@@ -1077,6 +1109,8 @@ function EncounterPanel({
               tuningProfileId: tuningId || undefined,
               difficultyProfileId: difficulty || '',
               enemies: enemyLinks,
+              onWin,
+              onLose,
               stars: starPayload()
             }
             void refreshAfter(() =>
@@ -1320,6 +1354,14 @@ function EncounterPanel({
             </div>
           )}
           <div>
+            <div style={{ fontSize: '0.85rem', marginBottom: '0.25rem' }}>On win</div>
+            <EffectList pipeline={pipeline} gameId={gameId} value={onWin} onChange={setOnWin} disabled={busy} />
+          </div>
+          <div>
+            <div style={{ fontSize: '0.85rem', marginBottom: '0.25rem' }}>On lose</div>
+            <EffectList pipeline={pipeline} gameId={gameId} value={onLose} onChange={setOnLose} disabled={busy} />
+          </div>
+          <div>
             <div style={{ fontSize: '0.85rem', color: 'var(--muted)', marginBottom: '0.35rem' }}>Stars (up to 3)</div>
             {[0, 1, 2].map((i) => {
               const star = stars[i] || { id: `s${i + 1}`, label: '', kind: '' }
@@ -1562,6 +1604,9 @@ function RegionPanel({
             hotspotsJson={hotspotsJson}
             setHotspotsJson={setHotspotsJson}
             encounters={encounters.filter((e) => !stageId || e.stageId === stageId)}
+            triggers={((pipeline.triggers || []) as Trigger[]).filter(
+              (t) => t.gameId === gameId && t.kind === 'onHotspot'
+            )}
             busy={busy}
           />
           <label>
@@ -1640,14 +1685,16 @@ function HotspotEncounterPickers({
   hotspotsJson,
   setHotspotsJson,
   encounters,
+  triggers,
   busy
 }: {
   hotspotsJson: string
   setHotspotsJson: (v: string) => void
   encounters: Encounter[]
+  triggers: Trigger[]
   busy: boolean
 }) {
-  let hotspots: Array<{ id?: string; encounterId?: string }> = []
+  let hotspots: Array<{ id?: string; encounterId?: string; triggerId?: string }> = []
   try {
     const parsed = JSON.parse(hotspotsJson || '[]')
     if (Array.isArray(parsed)) hotspots = parsed
@@ -1657,9 +1704,9 @@ function HotspotEncounterPickers({
   if (hotspots.length === 0) return null
   return (
     <div>
-      <div style={{ fontSize: '0.85rem', color: 'var(--muted)' }}>Hotspot encounters (this stage)</div>
+      <div style={{ fontSize: '0.85rem', color: 'var(--muted)' }}>Hotspot encounter / trigger</div>
       {hotspots.map((hs, i) => (
-        <label key={hs.id || i} style={{ display: 'grid', gap: '0.2rem', fontSize: '0.85rem' }}>
+        <div key={hs.id || i} style={{ display: 'grid', gap: '0.2rem', fontSize: '0.85rem', marginBottom: '0.5rem' }}>
           {hs.id || `hotspot ${i + 1}`}
           <select
             value={hs.encounterId || ''}
@@ -1671,14 +1718,31 @@ function HotspotEncounterPickers({
               setHotspotsJson(JSON.stringify(next, null, 2))
             }}
           >
-            <option value="">(none)</option>
+            <option value="">(no encounter)</option>
             {encounters.map((enc) => (
               <option key={enc.id} value={enc.id}>
                 {enc.name}
               </option>
             ))}
           </select>
-        </label>
+          <select
+            value={hs.triggerId || ''}
+            disabled={busy}
+            onChange={(e) => {
+              const next = hotspots.map((h, idx) =>
+                idx === i ? { ...h, triggerId: e.target.value || undefined } : h
+              )
+              setHotspotsJson(JSON.stringify(next, null, 2))
+            }}
+          >
+            <option value="">(no trigger)</option>
+            {triggers.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </select>
+        </div>
       ))}
     </div>
   )

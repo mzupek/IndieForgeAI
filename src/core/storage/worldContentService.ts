@@ -44,6 +44,7 @@ import {
 } from '@shared/worldContent/validate'
 import { buildWorldFlow, type WorldFlow } from '@shared/worldContent/flow'
 import { errorMessages, type ContentIssue } from '@shared/worldContent/issues'
+import { bindCondition, bindEffects } from '@shared/story/conditions'
 import {
   applyContentBundleIsolated,
   type ApplyResult,
@@ -198,6 +199,7 @@ export interface StageInput {
   recommendedLevel?: number
   optional?: boolean
   unlockAfter?: string[] | null
+  unlockCondition?: import('@shared/types/assetPipeline').Condition | null
   clearedBy?: string[] | null
   entryRegionId?: string | null
   entryAnchor?: string | null
@@ -214,6 +216,8 @@ export interface EncounterInput {
   tuningProfileId?: string
   difficultyProfileId?: string | null
   enemies?: EncounterEnemyLink[] | null
+  onWin?: import('@shared/types/assetPipeline').Effect[] | null
+  onLose?: import('@shared/types/assetPipeline').Effect[] | null
   recommendedLevel?: number
   stars?: EncounterStar[]
   order?: number
@@ -237,9 +241,16 @@ function newId(): string {
 
 function resolveRegionLinkRefs(pipeline: AssetPipelineProject, gameId: string, region: Region): void {
   region.hotspots = (region.hotspots || []).map((hs) => {
-    if (!hs.encounterId) return hs
-    const enc = requireIdOrKey(pipeline.encounters || [], hs.encounterId, gameId, 'Encounter')
-    return { ...hs, encounterId: enc.id }
+    let next = hs
+    if (hs.encounterId) {
+      const enc = requireIdOrKey(pipeline.encounters || [], hs.encounterId, gameId, 'Encounter')
+      next = { ...next, encounterId: enc.id }
+    }
+    if (hs.triggerId) {
+      const trigger = requireIdOrKey(pipeline.triggers || [], hs.triggerId, gameId, 'Trigger')
+      next = { ...next, triggerId: trigger.id }
+    }
+    return next
   })
   region.exits = (region.exits || []).map((ex) => {
     if (ex.toWorldMap || !ex.toRegionId) return ex
@@ -500,6 +511,10 @@ function applyStageLinkPatch(
     if (ids === null || (Array.isArray(ids) && ids.length === 0)) delete stage.clearedBy
     else if (ids) stage.clearedBy = ids
   }
+  if (patch.unlockCondition !== undefined) {
+    if (!patch.unlockCondition) delete stage.unlockCondition
+    else stage.unlockCondition = bindCondition(pipeline, gameId, patch.unlockCondition)
+  }
   if (patch.entryRegionId !== undefined) {
     if (!patch.entryRegionId) delete stage.entryRegionId
     else {
@@ -603,6 +618,8 @@ export async function createEncounter(
     if (input.tuningProfileId) encounter.tuningProfileId = input.tuningProfileId
     if (input.difficultyProfileId) encounter.difficultyProfileId = input.difficultyProfileId
     if (input.enemies && input.enemies.length) encounter.enemies = input.enemies
+    if (input.onWin && input.onWin.length) encounter.onWin = bindEffects(pipeline, gameId, input.onWin)
+    if (input.onLose && input.onLose.length) encounter.onLose = bindEffects(pipeline, gameId, input.onLose)
     if (input.recommendedLevel !== undefined) encounter.recommendedLevel = input.recommendedLevel
     const refIssues = resolveEncounterRefs(pipeline, gameId, encounter)
     const issues = [...refIssues, ...validateEncounter(pipeline, encounter)]
@@ -642,6 +659,14 @@ export async function updateEncounter(
     if (patch.enemies !== undefined) {
       if (patch.enemies && patch.enemies.length) encounter.enemies = patch.enemies
       else delete encounter.enemies
+    }
+    if (patch.onWin !== undefined) {
+      if (patch.onWin && patch.onWin.length) encounter.onWin = bindEffects(pipeline, gameId, patch.onWin)
+      else delete encounter.onWin
+    }
+    if (patch.onLose !== undefined) {
+      if (patch.onLose && patch.onLose.length) encounter.onLose = bindEffects(pipeline, gameId, patch.onLose)
+      else delete encounter.onLose
     }
     if (patch.sceneId !== undefined) {
       if (patch.sceneId) encounter.sceneId = patch.sceneId
@@ -1059,7 +1084,9 @@ function parseBundle(raw: unknown): ContentBundle {
     'regions',
     'enemies',
     'attackTables',
-    'difficultyProfiles'
+    'difficultyProfiles',
+    'flags',
+    'triggers'
   ] as const) {
     if (obj[name] === undefined) continue
     if (!Array.isArray(obj[name])) {
@@ -1120,6 +1147,8 @@ export interface ContentExportFile {
   enemies: Enemy[]
   attackTables: AttackTable[]
   difficultyProfiles: DifficultyProfile[]
+  flags: import('@shared/types/assetPipeline').GameFlag[]
+  triggers: import('@shared/types/assetPipeline').Trigger[]
 }
 
 export async function exportContent(
@@ -1144,7 +1173,9 @@ export async function exportContent(
     regions: regionsOf(pipeline, gameId),
     enemies: (pipeline.enemies || []).filter((e) => e.gameId === gameId),
     attackTables: (pipeline.attackTables || []).filter((t) => t.gameId === gameId),
-    difficultyProfiles: (pipeline.difficultyProfiles || []).filter((p) => p.gameId === gameId)
+    difficultyProfiles: (pipeline.difficultyProfiles || []).filter((p) => p.gameId === gameId),
+    flags: (pipeline.flags || []).filter((f) => f.gameId === gameId),
+    triggers: (pipeline.triggers || []).filter((t) => t.gameId === gameId)
   }
   const target = join(outDir, 'content.json')
   if (options?.dryRun) {

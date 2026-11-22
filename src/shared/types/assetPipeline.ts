@@ -851,6 +851,68 @@ export interface World {
   updatedAt: string
 }
 
+export type FlagType = 'bool' | 'int'
+export type FlagScope = 'game' | 'world'
+export type FlagOp = 'eq' | 'ne' | 'gte' | 'lte'
+
+/** Per-game story flag. Optional array; default empty. Progress is flags earned through play. */
+export interface GameFlag {
+  id: string
+  gameId: string
+  key?: string
+  name: string
+  type: FlagType
+  default: boolean | number
+  scope: FlagScope
+  description?: string
+  schemaVersion: number
+  createdAt: string
+  updatedAt: string
+}
+
+export type Condition =
+  | { all: Condition[] }
+  | { any: Condition[] }
+  | { not: Condition }
+  | { flag: { flagId: string; op: FlagOp; value: boolean | number } }
+  | { stageCleared: { stageId: string } }
+  | { encounterWon: { encounterId: string } }
+
+export type Effect =
+  | { setFlag: { flagId: string; value: boolean | number } }
+  | { incFlag: { flagId: string; by: number } }
+  | { clearFlag: { flagId: string } }
+  | { unlockStage: { stageId: string } }
+  | { startEncounter: { encounterId: string } }
+  | { startDialogue: { dialogueId: string } }
+  | { playScene: { sceneId: string } }
+  | { moveToRegion: { regionId: string; anchorId?: string } }
+  | { returnToWorldMap: true }
+
+export type TriggerKind =
+  | 'onHotspot'
+  | 'onEnterRegion'
+  | 'onStageEnter'
+  | 'onEncounterWin'
+  | 'onEncounterLose'
+  | 'onDialogueEnd'
+
+export interface Trigger {
+  id: string
+  gameId: string
+  key?: string
+  name: string
+  kind: TriggerKind
+  sourceRef: string
+  condition?: Condition
+  once: boolean
+  effects: Effect[]
+  notes?: string
+  schemaVersion: number
+  createdAt: string
+  updatedAt: string
+}
+
 export interface Stage {
   id: string
   gameId: string
@@ -862,6 +924,8 @@ export interface Stage {
   optional?: boolean
   /** Stages in this world that must be cleared first. No cycles. */
   unlockAfter?: string[]
+  /** Optional condition living beside unlockAfter. When both are set, both must pass. */
+  unlockCondition?: Condition
   /** Encounters in this stage. Default: every hotspot-linked encounter. */
   clearedBy?: string[]
   entryRegionId?: string
@@ -901,6 +965,9 @@ export interface Encounter {
   difficultyProfileId?: string
   /** Optional. Default empty. First entry is the lead. */
   enemies?: EncounterEnemyLink[]
+  /** Optional effect lists. Default empty. */
+  onWin?: Effect[]
+  onLose?: Effect[]
   recommendedLevel?: number
   stars: EncounterStar[]
   order: number
@@ -1103,6 +1170,10 @@ export interface AssetPipelineProject {
   attackTables?: AttackTable[]
   /** 2c: per-game difficulty profiles. Optional on disk; filled in memory when missing. */
   difficultyProfiles?: DifficultyProfile[]
+  /** Step 3: per-game story flags. Optional on disk; filled in memory when missing. */
+  flags?: GameFlag[]
+  /** Step 3: per-game triggers. Optional on disk; filled in memory when missing. */
+  triggers?: Trigger[]
   createdAt: string
   updatedAt: string
 }
