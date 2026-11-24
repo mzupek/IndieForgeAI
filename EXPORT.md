@@ -121,8 +121,8 @@ Each character includes:
 **Only APPROVED poses** (status = "approved") are exported.
 
 Each pose includes:
-- `slot`: Pose slot (ready, success, hurt, win, defeat)
-- `file`: Relative path to pose image (e.g., `poses/char-uuid_ready.png`)
+- `slot`: Pose slot key. Built-in values remain `ready`, `success`, `hurt`, `win`, `defeat`. Custom game/character slots (for example `ride`) appear as **additional** pose entries with the same fields — no rename or removal of existing keys. Manifest schema stays **v2**.
+- `file`: Relative path to pose image (e.g., `poses/char-uuid_ready.png`; a custom slot exports as `poses/char-uuid_<slot>.png`)
 - `width`: Image width (always 1024 for approved poses)
 - `height`: Image height (always 1024 for approved poses)
 - `status`: Always "approved" in exports
@@ -159,6 +159,7 @@ Each preset includes:
 │   ├── char1_hurt.png
 │   ├── char1_win.png
 │   ├── char1_defeat.png
+│   ├── char1_ride.png    # optional: custom slot, additive only
 │   └── char2_ready.png
 └── clips/
     ├── clip1_clip.mp4    # Video files
@@ -303,6 +304,8 @@ The `schemaVersion` field enables backward compatibility:
 
 #### Storyboards Array
 
+Shot backgrounds export `backgroundVisualAssetId` / `backgroundAssetStateId` when the still comes from the Library, plus resolved `backgroundFile` (studio-relative full-resolution image, not a thumbnail and not an orphan external path). Legacy `backgroundImage` remains for direct-imported copies under `backgrounds/`.
+
 The manifest now includes an optional `storyboards` array containing complete shot sequences with:
 
 - **Shot metadata**: Name, duration, aspect ratio, engineer notes
@@ -311,6 +314,7 @@ The manifest now includes an optional `storyboards` array containing complete sh
   - Resolved asset paths (pose files, clip files)
 - **Camera track**: Keyframes with target (layer ID or point), zoom, framing rect
 - **Effects track**: Effect markers with timing, preset references or inline definitions, optional clip moment bindings
+- **Clip track** (optional): timed clip blocks with start, duration, source in/out, role, and resolved `clipFile`. This is authoring/export **data** in IndieForge. Engine importers are not updated here; do not assume Unity/Godot playback parity.
 
 **Example storyboard entry:**
 
@@ -371,6 +375,19 @@ The manifest now includes an optional `storyboards` array containing complete sh
               "t": 2.8,
               "presetId": "preset-shake-01",
               "moment": "hit"
+            }
+          ],
+          "clipTrack": [
+            {
+              "id": "cblock-1",
+              "clipId": "clip-drone-intro",
+              "clipFile": "clips/drone_intro.mp4",
+              "role": "layer",
+              "layerId": "layer-drone",
+              "t": 0.5,
+              "durationSec": 1.2,
+              "sourceInSec": 0.0,
+              "sourceOutSec": 1.2
             }
           ],
           "notes": "Drone enters from top right, camera follows and zooms. Shake effect on impact."

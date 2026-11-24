@@ -6,7 +6,7 @@
 export const EXPORT_MANIFEST_SCHEMA_VERSION = 2
 
 export interface ExportManifestPose {
-  /** Pose slot (ready, success, hurt, win, defeat) */
+  /** Pose slot key: built-in ready/success/hurt/win/defeat, plus any game/character custom slots. */
   slot: string
   /** Relative path to pose image file in export directory */
   file: string
@@ -70,6 +70,18 @@ export interface ExportManifestLayer {
   rotation: number
   flipX: boolean
   opacity: number
+  visible?: boolean
+  visibleFromSec?: number
+  visibleToSec?: number
+}
+
+export interface ExportManifestBackgroundKey {
+  id: string
+  t: number
+  backgroundVisualAssetId?: string
+  backgroundAssetStateId?: string | null
+  backgroundImage?: string
+  backgroundFile?: string
 }
 
 export interface ExportManifestCameraKeyframe {
@@ -87,6 +99,18 @@ export interface ExportManifestEffectMarker {
   inlineParams?: Record<string, unknown>
 }
 
+export interface ExportManifestClipBlock {
+  id: string
+  clipId: string
+  clipFile?: string
+  role: 'layer' | 'background'
+  layerId?: string | null
+  t: number
+  durationSec: number
+  sourceInSec: number
+  sourceOutSec: number
+}
+
 export interface ExportManifestShot {
   id: string
   name: string
@@ -94,9 +118,15 @@ export interface ExportManifestShot {
   aspectRatio: { width: number; height: number }
   backgroundImage?: string
   backgroundClipId?: string
+  backgroundVisualAssetId?: string
+  backgroundAssetStateId?: string | null
+  /** Resolved studio-relative full-resolution image (not thumbnail, not an external source path). */
+  backgroundFile?: string
+  backgroundKeys?: ExportManifestBackgroundKey[]
   layers: ExportManifestLayer[]
   cameraTrack: ExportManifestCameraKeyframe[]
   effectsTrack: ExportManifestEffectMarker[]
+  clipTrack?: ExportManifestClipBlock[]
   notes?: string
   thumbnail?: string
 }

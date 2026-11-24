@@ -1,0 +1,168 @@
+{
+  "flags": [
+    {
+      "key": "has_hoverboard",
+      "name": "Has hoverboard",
+      "type": "bool",
+      "default": false,
+      "scope": "game",
+      "description": "Set when the mentor hands over the board. Item records arrive in Step 5."
+    },
+    {
+      "key": "hoverboard_test_passed",
+      "name": "Hoverboard test passed",
+      "type": "bool",
+      "default": false,
+      "scope": "game"
+    }
+  ],
+  "worlds": [
+    {
+      "key": "world-1",
+      "name": "World 1",
+      "order": 1,
+      "map": {
+        "backgroundAssetId": "World 1 map",
+        "nodes": [
+          { "id": "n-intro", "stageId": "@stage-intro", "pos": [0.12, 0.78] },
+          { "id": "n-gate", "stageId": "@stage-gate", "pos": [0.18, 0.72] }
+        ],
+        "paths": [{ "id": "p-intro-gate", "from": "n-intro", "to": "n-gate" }],
+        "startNodeId": "n-intro"
+      }
+    }
+  ],
+  "stages": [
+    {
+      "key": "stage-intro",
+      "worldId": "@world-1",
+      "name": "Intro",
+      "order": 1,
+      "entryRegionId": "@region-intro-yard",
+      "entryAnchor": "a-start",
+      "clearedBy": ["@enc-hover-test"]
+    },
+    {
+      "key": "stage-gate",
+      "worldId": "@world-1",
+      "name": "The Gate",
+      "order": 2,
+      "unlockAfter": ["@stage-intro"],
+      "unlockCondition": { "flag": { "flagId": "@hoverboard_test_passed", "op": "eq", "value": true } },
+      "entryRegionId": "@region-gate-approach",
+      "entryAnchor": "a-start",
+      "clearedBy": ["@enc-gate-drone"]
+    }
+  ],
+  "regions": [
+    {
+      "key": "region-intro-yard",
+      "stageId": "@stage-intro",
+      "name": "Yard",
+      "backgroundAssetId": "Gate approach",
+      "anchors": [
+        { "id": "a-start", "pos": [0.12, 0.78] },
+        { "id": "a-mentor", "pos": [0.40, 0.70] },
+        { "id": "a-test", "pos": [0.70, 0.68] }
+      ],
+      "edges": [["a-start", "a-mentor"], ["a-mentor", "a-test"]],
+      "spawn": "a-start",
+      "hotspots": [
+        {
+          "id": "hs-mentor",
+          "anchor": "a-mentor",
+          "prompt": "Talk",
+          "triggerId": "@tr-mentor-talk"
+        },
+        {
+          "id": "hs-hover-test",
+          "anchor": "a-test",
+          "prompt": "Test the board",
+          "encounterId": "@enc-hover-test",
+          "triggerId": "@tr-hover-test"
+        }
+      ],
+      "exits": [{ "id": "x-map", "anchor": "a-start", "toWorldMap": true }]
+    }
+  ],
+  "encounters": [
+    {
+      "key": "enc-hover-test",
+      "stageId": "@stage-intro",
+      "name": "Hoverboard test",
+      "typeId": "minigame",
+      "moduleId": "hover_test",
+      "stars": [{ "id": "s1", "label": "Finish", "kind": "win" }],
+      "onWin": [{ "setFlag": { "flagId": "@hoverboard_test_passed", "value": true } }]
+    }
+  ],
+  "npcs": [
+    {
+      "key": "mentor",
+      "displayName": "Mentor",
+      "role": "mentor",
+      "characterId": "Mentor",
+      "defaultDialogueId": "@dlg-mentor-board",
+      "placements": [
+        {
+          "regionId": "@region-intro-yard",
+          "anchorId": "a-mentor",
+          "interactTriggerId": "@tr-mentor-talk"
+        }
+      ]
+    }
+  ],
+  "dialogues": [
+    {
+      "key": "dlg-mentor-board",
+      "name": "Mentor hands over the board",
+      "startNodeId": "offer",
+      "entryVariants": [
+        {
+          "condition": { "flag": { "flagId": "@has_hoverboard", "op": "eq", "value": true } },
+          "startNodeId": "already"
+        }
+      ],
+      "nodes": [
+        {
+          "id": "offer",
+          "speaker": "@mentor",
+          "text": "Take this hoverboard. Flag only — the item record comes later.",
+          "choices": [
+            {
+              "text": "Thanks",
+              "next": "give",
+              "effects": [{ "setFlag": { "flagId": "@has_hoverboard", "value": true } }]
+            },
+            { "text": "Not yet", "next": "later" }
+          ]
+        },
+        {
+          "id": "give",
+          "speaker": "@mentor",
+          "text": "Try it on the lane.",
+          "effects": [{ "returnToWorldMap": true }]
+        },
+        { "id": "later", "speaker": "narrator", "text": "The mentor waits." },
+        { "id": "already", "speaker": "@mentor", "text": "You already have the board. Hit the test lane." }
+      ]
+    }
+  ],
+  "triggers": [
+    {
+      "key": "tr-mentor-talk",
+      "name": "Talk to mentor",
+      "kind": "onHotspot",
+      "sourceRef": "hs-mentor",
+      "effects": [{ "startDialogue": { "dialogueId": "@dlg-mentor-board" } }]
+    },
+    {
+      "key": "tr-hover-test",
+      "name": "Start hover test",
+      "kind": "onHotspot",
+      "sourceRef": "hs-hover-test",
+      "condition": { "flag": { "flagId": "@has_hoverboard", "op": "eq", "value": true } },
+      "effects": [{ "startEncounter": { "encounterId": "@enc-hover-test" } }]
+    }
+  ]
+}

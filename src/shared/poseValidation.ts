@@ -3,12 +3,19 @@
  * Reusable by UI (Phase 2) and CLI (Phase 2.5)
  */
 
-import type { Character, Pose, PoseSlot } from './types/assetPipeline'
+import type { Character, Game, Pose } from './types/assetPipeline'
+import {
+  CORE_POSE_SLOT_KEYS,
+  effectivePoseSlotKeys,
+  mapFilenameToSlotKey,
+  requiredPoseSlots
+} from './gameSettings/poseSlots'
 
-export const POSE_SLOTS: PoseSlot[] = ['ready', 'success', 'hurt', 'win', 'defeat']
+/** Built-in five. Custom slots live on game.settings / character.poseSlots. */
+export const POSE_SLOTS: string[] = [...CORE_POSE_SLOT_KEYS]
 
 export interface PoseValidationIssue {
-  slot: PoseSlot
+  slot: string
   type: 'missing' | 'size' | 'transparency' | 'facing' | 'status'
   message: string
 }
@@ -26,21 +33,29 @@ export interface PoseMetadata {
   facing?: 'left' | 'right' | 'front' | 'back'
 }
 
+export interface PoseCompletenessOptions {
+  game?: Game | null
+}
+
 /**
- * Check if all five pose slots are filled with approved poses
+ * Check required pose slots (core five by default; custom only if required: true).
+ * Pass game so game-level slots participate. Missing game = core five only
+ * (unless character.corePosesRequired === false).
  */
 export function checkPoseCompleteness(
   character: Character,
   poses: Pose[],
-  poseMetadataMap?: Map<string, PoseMetadata>
+  poseMetadataMap?: Map<string, PoseMetadata>,
+  options?: PoseCompletenessOptions
 ): CompletenessResult {
   const issues: PoseValidationIssue[] = []
   const characterPoses = poses.filter((p) => p.characterId === character.id)
+  const required = requiredPoseSlots(options?.game, character)
 
-  for (const slot of POSE_SLOTS) {
+  for (const slotDef of required) {
+    const slot = slotDef.key
     const pose = characterPoses.find((p) => p.slot === slot)
 
-    // Check if slot is filled
     if (!pose) {
       issues.push({
         slot,
@@ -50,7 +65,6 @@ export function checkPoseCompleteness(
       continue
     }
 
-    // Check if pose is approved
     if (pose.status !== 'approved') {
       issues.push({
         slot,
@@ -60,11 +74,9 @@ export function checkPoseCompleteness(
       continue
     }
 
-    // Check metadata if available
     if (poseMetadataMap) {
       const metadata = poseMetadataMap.get(pose.id)
       if (metadata) {
-        // Check size
         if (metadata.width !== 1024 || metadata.height !== 1024) {
           issues.push({
             slot,
@@ -73,7 +85,6 @@ export function checkPoseCompleteness(
           })
         }
 
-        // Check transparency
         if (!metadata.hasAlpha || !metadata.cornersTransparent) {
           issues.push({
             slot,
@@ -82,7 +93,6 @@ export function checkPoseCompleteness(
           })
         }
 
-        // Check facing consistency
         if (character.referenceSheet?.facing && metadata.facing) {
           if (character.referenceSheet.facing !== metadata.facing) {
             issues.push({
@@ -103,40 +113,25 @@ export function checkPoseCompleteness(
 }
 
 /**
- * Auto-map pose filename to slot
- * Examples:
- *   gate_drone_hurt.png → hurt
- *   hero_success_v2.png → success
- *   character-ready.png → ready
+ * Auto-map pose filename to slot. Longest key first.
+ * Without slotKeys, uses the built-in five.
  */
-export function mapFilenameToSlot(filename: string): PoseSlot | null {
-  const lower = filename.toLowerCase()
-  
-  for (const slot of POSE_SLOTS) {
-    // Match slot name as whole word or with separators
-    const patterns = [
-      new RegExp(`[_-]${slot}[_.-]`, 'i'),  // _hurt_, -hurt-, _hurt.
-      new RegExp(`[_-]${slot}$`, 'i'),      // _hurt, -hurt at end
-      new RegExp(`^${slot}[_.-]`, 'i'),     // hurt_, hurt- at start
-      new RegExp(`\\b${slot}\\b`, 'i')      // hurt as whole word
-    ]
-    
-    if (patterns.some((pattern) => pattern.test(lower))) {
-      return slot
-    }
-  }
-  
-  return null
+export function mapFilenameToSlot(filename: string, slotKeys?: string[]): string | null {
+  return mapFilenameToSlotKey(filename, slotKeys && slotKeys.length > 0 ? slotKeys : CORE_POSE_SLOT_KEYS)
 }
 
 /**
  * Group pose imports by slot for batch import
  */
-export function groupPosesBySlot(files: Array<{ name: string; path: string }>): Map<PoseSlot, string[]> {
-  const groups = new Map<PoseSlot, string[]>()
-  
+export function groupPosesBySlot(
+  files: Array<{ name: string; path: string }>,
+  slotKeys?: string[]
+): Map<string, string[]> {
+  const groups = new Map<string, string[]>()
+  const keys = slotKeys && slotKeys.length > 0 ? slotKeys : CORE_POSE_SLOT_KEYS
+
   for (const file of files) {
-    const slot = mapFilenameToSlot(file.name)
+    const slot = mapFilenameToSlot(file.name, keys)
     if (slot) {
       if (!groups.has(slot)) {
         groups.set(slot, [])
@@ -144,8 +139,12 @@ export function groupPosesBySlot(files: Array<{ name: string; path: string }>): 
       groups.get(slot)!.push(file.path)
     }
   }
-  
+
   return groups
+}
+
+export function availableSlotKeysForCharacter(game?: Game | null, character?: Character | null): string[] {
+  return effectivePoseSlotKeys(game, character)
 }
 
 /**
@@ -153,7 +152,7 @@ export function groupPosesBySlot(files: Array<{ name: string; path: string }>): 
  */
 export function formatValidationIssues(issues: PoseValidationIssue[]): string {
   if (issues.length === 0) return 'All checks passed'
-  
+
   const byType = new Map<string, string[]>()
   for (const issue of issues) {
     const type = issue.type
@@ -162,7 +161,7 @@ export function formatValidationIssues(issues: PoseValidationIssue[]): string {
     }
     byType.get(type)!.push(issue.message)
   }
-  
+
   const lines: string[] = []
   if (byType.has('missing')) {
     lines.push(`Missing: ${byType.get('missing')!.length} pose(s)`)
@@ -179,6 +178,6 @@ export function formatValidationIssues(issues: PoseValidationIssue[]): string {
   if (byType.has('facing')) {
     lines.push(`Facing mismatch: ${byType.get('facing')!.length} pose(s)`)
   }
-  
+
   return lines.join(', ')
 }

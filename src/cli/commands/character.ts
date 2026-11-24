@@ -2,7 +2,10 @@ import { randomUUID } from 'crypto'
 import { copyFile, mkdir } from 'fs/promises'
 import { extname } from 'path'
 import sharp from 'sharp'
-import type { Character } from '@shared/types/assetPipeline'
+import type { Character, CharacterStoryProfile } from '@shared/types/assetPipeline'
+import { parseCanonStatus } from '@shared/story/canon'
+import { parseStoryProfile, validateStoryProfile } from '@shared/story/profiles'
+import { errorMessages } from '@shared/worldContent/issues'
 import { getAssetPipeline, updateAssetPipeline } from '@core/storage/studioStorage'
 import { getDataDir } from '@core/storage/dataDir'
 import { output, outputError } from '../utils/output'
@@ -17,6 +20,21 @@ interface Options {
   styleNotes?: string
   tags?: string
   reference?: string
+  key?: string
+  storyProfile?: string
+  canon?: string
+}
+
+function parseProfileFromOptions(options: Options): CharacterStoryProfile | undefined {
+  if (!options.storyProfile && !options.canon) return undefined
+  const issues: import('@shared/worldContent/issues').ContentIssue[] = []
+  const parsed = options.storyProfile
+    ? parseStoryProfile(JSON.parse(options.storyProfile), 'storyProfile', issues)
+    : {}
+  if (issues.some((i) => i.level === 'error')) throw new Error(errorMessages(issues))
+  const profile: CharacterStoryProfile = { ...(parsed || {}) }
+  if (options.canon) profile.canonStatus = parseCanonStatus(options.canon)
+  return profile
 }
 
 async function verifyGameExists(gameId: string, dataDir?: string) {
@@ -111,6 +129,11 @@ export async function create(options: Options): Promise<void> {
       createdAt: now,
       updatedAt: now
     }
+    if (options.key) character.key = options.key
+    const profile = parseProfileFromOptions(options)
+    if (profile) character.storyProfile = profile
+    const profileIssues = validateStoryProfile(pipeline, options.game, character)
+    if (profileIssues.some((i) => i.level === 'error')) throw new Error(errorMessages(profileIssues))
     
     // Handle reference image if provided
     if (options.reference) {
@@ -163,6 +186,16 @@ export async function update(characterId: string, options: Options): Promise<voi
     if (options.tags !== undefined) {
       character.tags = options.tags.split(',').map(t => t.trim())
     }
+    if (options.key !== undefined) {
+      if (!options.key) delete character.key
+      else character.key = options.key
+    }
+    const profile = parseProfileFromOptions(options)
+    if (profile) {
+      character.storyProfile = { ...(character.storyProfile || {}), ...profile }
+    }
+    const profileIssues = validateStoryProfile(pipeline, options.game, character)
+    if (profileIssues.some((i) => i.level === 'error')) throw new Error(errorMessages(profileIssues))
     
     // Handle reference image if provided
     if (options.reference) {
@@ -207,6 +240,18 @@ export async function deleteCharacter(characterId: string, options: Options): Pr
     
     if (!character) {
       throw new Error(`Character not found: ${characterId}`)
+    }
+
+    const enemyUsers = (pipeline.enemies || []).filter((e) => e.characterId === characterId)
+    if (enemyUsers.length > 0) {
+      const preview = enemyUsers
+        .slice(0, 5)
+        .map((e) => `enemy ${e.name} (${e.id})`)
+        .join(', ')
+      const extra = enemyUsers.length > 5 ? ` and ${enemyUsers.length - 5} more` : ''
+      throw new Error(
+        `Cannot remove character '${character.name}': in use by ${enemyUsers.length} record(s): ${preview}${extra}`
+      )
     }
     
     pipeline.characters = pipeline.characters.filter(c => c.id !== characterId)

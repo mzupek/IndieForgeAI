@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useProjectStore } from '../state/indieForgeStore'
 
@@ -9,8 +9,7 @@ import { useProjectStore } from '../state/indieForgeStore'
 export function StudioHome() {
   const navigate = useNavigate()
   const location = useLocation()
-  const { activeProject, openProject } = useProjectStore()
-  const [selectedGameId, setSelectedGameId] = useState<string>('')
+  const { activeProject, openProject, selectedGameId, setSelectedGameId } = useProjectStore()
 
   // Load the first available project (or create one if none exists)
   useEffect(() => {
@@ -52,11 +51,12 @@ export function StudioHome() {
   }, [activeProject, openProject])
 
   useEffect(() => {
-    if (activeProject?.assetPipeline?.games.length && !selectedGameId) {
-      // Select first game by default
-      setSelectedGameId(activeProject.assetPipeline.games[0].id)
+    const games = activeProject?.assetPipeline?.games ?? []
+    if (!games.length) return
+    if (!selectedGameId || !games.some((g) => g.id === selectedGameId)) {
+      setSelectedGameId(games[0].id)
     }
-  }, [activeProject, selectedGameId])
+  }, [activeProject, selectedGameId, setSelectedGameId])
 
   if (!activeProject) {
     return (
@@ -71,9 +71,35 @@ export function StudioHome() {
 
   const handleGameChange = (gameId: string) => {
     setSelectedGameId(gameId)
-    // Navigate to characters for the selected game
-    if (location.pathname === '/' || location.pathname === '/studio') {
+    // Navigate to the current view but with the new game
+    const path = location.pathname
+    if (path === '/' || path === '/studio') {
       navigate(`/studio/characters/${gameId}`)
+    } else if (path.startsWith('/studio/characters/')) {
+      navigate(`/studio/characters/${gameId}`)
+    } else if (path.startsWith('/studio/poses/')) {
+      navigate(`/studio/poses/${gameId}`)
+    } else if (path.startsWith('/studio/clips/')) {
+      navigate(`/studio/clips/${gameId}`)
+    } else if (path.startsWith('/studio/library/') || path.startsWith('/studio/assets/')) {
+      const tab = new URLSearchParams(location.search).get('tab')
+      navigate(tab ? `/studio/library/${gameId}?tab=${encodeURIComponent(tab)}` : `/studio/library/${gameId}`)
+    } else if (path.startsWith('/studio/world/')) {
+      navigate(`/studio/world/${gameId}`)
+    } else if (path.startsWith('/studio/enemies/')) {
+      navigate(`/studio/enemies/${gameId}`)
+    } else if (path.startsWith('/studio/story/')) {
+      navigate(`/studio/story/${gameId}`)
+    } else if (path.startsWith('/studio/scenes/')) {
+      navigate(`/studio/scenes/${gameId}`)
+    } else if (path.startsWith('/studio/storyboards/')) {
+      navigate(`/studio/storyboards/${gameId}`)
+    } else if (path.startsWith('/studio/definitions/')) {
+      navigate(`/studio/definitions/${gameId}`)
+    } else if (path.startsWith('/studio/settings/')) {
+      navigate(`/studio/settings/${gameId}`)
+    } else if (path.startsWith('/studio/export/')) {
+      navigate(`/studio/export/${gameId}`)
     }
   }
 
@@ -100,7 +126,7 @@ export function StudioHome() {
               </label>
               <select
                 id="game-switcher"
-                value={selectedGameId}
+                value={selectedGameId || ''}
                 onChange={(e) => handleGameChange(e.target.value)}
                 style={{
                   padding: '0.375rem 0.75rem',

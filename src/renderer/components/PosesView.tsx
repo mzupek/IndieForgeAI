@@ -2,9 +2,10 @@ import { useEffect, useState } from 'react'
 import { useOutletContext, useSearchParams } from 'react-router-dom'
 import { useProjectStore } from '../state/indieForgeStore'
 import { useLocalFilePreview } from '../hooks/useLocalFilePreview'
-import type { Character, Pose, PoseSlot } from '@shared/types/assetPipeline'
+import type { Pose } from '@shared/types/assetPipeline'
 import type { PoseMetadata } from '@shared/poseValidation'
-import { POSE_SLOTS, mapFilenameToSlot } from '@shared/poseValidation'
+import { mapFilenameToSlot } from '@shared/poseValidation'
+import { effectivePoseSlotKeys } from '@shared/gameSettings/poseSlots'
 import { PoseSlotStrip } from './PoseSlotStrip'
 
 export function PosesView() {
@@ -12,7 +13,7 @@ export function PosesView() {
   const { projectId, gameId } = useOutletContext<{ projectId: string; gameId: string }>()
   const { activeProject, setActiveProject } = useProjectStore()
   const [selectedCharacterId, setSelectedCharacterId] = useState<string>('')
-  const [selectedSlot, setSelectedSlot] = useState<PoseSlot | null>(null)
+  const [selectedSlot, setSelectedSlot] = useState<string | null>(null)
   const [poseMetadata, setPoseMetadata] = useState<Record<string, PoseMetadata>>({})
   const [importing, setImporting] = useState(false)
   const [dragActive, setDragActive] = useState(false)
@@ -53,6 +54,7 @@ export function PosesView() {
   const characters = activeProject.assetPipeline?.characters.filter((c) => c.gameId === gameId) ?? []
   const character = characters.find((c) => c.id === selectedCharacterId)
   const poses = activeProject.assetPipeline?.poses.filter((p) => p.characterId === selectedCharacterId) ?? []
+  const slotKeys = effectivePoseSlotKeys(game, character)
 
   if (!game) {
     return <p style={{ color: 'var(--error)' }}>Game not found</p>
@@ -93,7 +95,7 @@ export function PosesView() {
       const { filePath } = await window.indieForge.files.chooseImage()
       if (filePath) {
         const filename = filePath.split('/').pop() || filePath.split('\\').pop() || ''
-        const slot = mapFilenameToSlot(filename)
+        const slot = mapFilenameToSlot(filename, slotKeys)
         
         if (slot) {
           await window.indieForge.pipeline.importPose(
@@ -128,7 +130,7 @@ export function PosesView() {
     setImporting(true)
     try {
       for (const file of files) {
-        const slot = mapFilenameToSlot(file.name)
+        const slot = mapFilenameToSlot(file.name, slotKeys)
         if (slot) {
           // Note: We need the file path, not the File object
           // In a real scenario, we'd save to temp and import
@@ -187,7 +189,7 @@ export function PosesView() {
         <div>
           <h2>Poses</h2>
           <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>
-            {game.name} • {game.engine} • Five-pose sets
+            {game.name} • {game.engine} • Pose slots
           </p>
         </div>
       </div>
@@ -232,7 +234,7 @@ export function PosesView() {
               <>
                 <div style={{ marginBottom: '2rem' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                    <h3 style={{ margin: 0 }}>{character.name} - Five-Pose Set</h3>
+                    <h3 style={{ margin: 0 }}>{character.name} — pose slots</h3>
                     {poses.some(p => p.status !== 'approved') && (
                       <button type="button" onClick={handleApproveAll} style={{ fontSize: '0.9rem' }}>
                         Approve All Poses
@@ -241,6 +243,7 @@ export function PosesView() {
                   </div>
                   <PoseSlotStrip
                     character={character}
+                    game={game}
                     poses={poses}
                     poseMetadata={poseMetadata}
                     size="large"
@@ -326,14 +329,14 @@ export function PosesView() {
                     Batch Import (Auto-map by Filename)
                   </button>
                   <p style={{ margin: '1rem 0 0 0', fontSize: '0.85rem', color: 'var(--muted)' }}>
-                    Filename examples: <code>hero_ready.png</code>, <code>boss-hurt.png</code>, <code>npc_win.png</code>
+                    Filename examples: <code>hero_ready.png</code>, <code>boss-hurt.png</code>. Longest slot key wins.
                   </p>
                 </div>
 
                 <div style={{ marginTop: '2rem', padding: '1rem', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: '4px' }}>
                   <h4 style={{ margin: '0 0 0.75rem 0' }}>Requirements</h4>
                   <ul style={{ margin: 0, paddingLeft: '1.5rem', fontSize: '0.9rem', color: 'var(--muted)' }}>
-                    <li>All five poses must be present</li>
+                    <li>Built-in slots (ready/success/hurt/win/defeat) must be present unless this character turns off core poses</li>
                     <li>Each pose must be 1024×1024 pixels</li>
                     <li>Transparent background required (alpha channel + transparent corners)</li>
                     <li>Consistent facing direction recommended</li>

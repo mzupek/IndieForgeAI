@@ -2,17 +2,26 @@ import { randomUUID } from 'crypto'
 import { copyFile, mkdir } from 'fs/promises'
 import { extname, basename } from 'path'
 import sharp from 'sharp'
-import type { Pose, PoseSlot } from '@shared/types/assetPipeline'
+import type { Pose } from '@shared/types/assetPipeline'
 import { mapFilenameToSlot } from '@shared/poseValidation'
+import { assertKnownPoseSlot, effectivePoseSlotKeys } from '@shared/gameSettings/poseSlots'
 import { getAssetPipeline, updateAssetPipeline } from '@core/storage/studioStorage'
 import { getDataDir } from '@core/storage/dataDir'
 import { output, outputError } from '../utils/output'
+import {
+  collectPoseBindingUsage,
+  formatBindingInUseError
+} from '../../shared/storyboard/eventValidation'
+import {
+  collectPoseTimedKeyUsage,
+  formatTimedKeyInUseError
+} from '../../shared/storyboard/timedKeys'
 import { join } from 'path'
 
 interface Options {
   dataDir?: string
   json?: boolean
-  slot?: PoseSlot
+  slot?: string
 }
 
 async function verifyCharacterExists(characterId: string, dataDir?: string) {
@@ -36,20 +45,22 @@ export async function importPoses(
     if (!character) {
       throw new Error(`Character not found: ${characterId}`)
     }
+    const game = pipeline.games.find((g) => g.id === character.gameId)
+    const slotKeys = effectivePoseSlotKeys(game, character)
     
     const imported: Pose[] = []
     const errors: string[] = []
     
     for (const filePath of files) {
       try {
-        let slot: PoseSlot | null = null
+        let slot: string | null = null
         
         if (options.slot) {
-          slot = options.slot
+          slot = assertKnownPoseSlot(options.slot, game, character)
         } else {
-          // Auto-map by filename
+          // Auto-map by filename (longest key first among available slots)
           const filename = basename(filePath)
-          slot = mapFilenameToSlot(filename)
+          slot = mapFilenameToSlot(filename, slotKeys)
           
           if (!slot) {
             errors.push(`${filePath}: Could not determine slot from filename`)
@@ -173,6 +184,14 @@ export async function remove(poseId: string, options: Options): Promise<void> {
     }
     
     const pose = pipeline.poses[poseIndex]
+    const bindingUsage = collectPoseBindingUsage(pipeline, poseId)
+    if (bindingUsage.labels.length > 0) {
+      throw new Error(formatBindingInUseError('pose', pose.slot, bindingUsage.labels))
+    }
+    const keyUsage = collectPoseTimedKeyUsage(pipeline, poseId)
+    if (keyUsage.labels.length > 0) {
+      throw new Error(formatTimedKeyInUseError('pose', pose.slot, keyUsage.labels))
+    }
     pipeline.poses.splice(poseIndex, 1)
     await updateAssetPipeline(pipeline, options.dataDir)
     

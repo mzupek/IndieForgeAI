@@ -1,0 +1,122 @@
+{
+  "characters": [
+    {
+      "key": "mentor",
+      "name": "Mentor",
+      "role": "npc",
+      "corePosesRequired": false,
+      "storyProfile": {
+        "summary": "A guide who stays at the yard and will not fight for the hero.",
+        "bio": "Knows the gate. Will not walk through it.",
+        "motivation": "See the hero leave ready, not reckless.",
+        "want": "Hand over what the hero thinks they need.",
+        "need": "Let the hero take the cost themselves.",
+        "arc": "From keeper to witness.",
+        "voiceNotes": "Short sentences. Never explains the hidden goal.",
+        "faction": "Yard",
+        "canonStatus": "draft"
+      }
+    }
+  ],
+  "revealTokens": [
+    {
+      "key": "fragment_gate",
+      "title": "The sealed gate",
+      "text": "The gate does not open for wanting. It opens after the cost.",
+      "order": 1,
+      "chapter": "world-1",
+      "canonStatus": "draft"
+    }
+  ],
+  "storyCircles": [
+    {
+      "key": "circle-campaign",
+      "name": "Campaign circle",
+      "scope": "game",
+      "surfaceGoal": "Reach the far side of the gate.",
+      "hiddenGoal": "Learn that progress is earned, never picked up.",
+      "canonStatus": "draft",
+      "steps": [
+        { "index": 1, "label": "You", "beat": "The yard is familiar." },
+        { "index": 2, "label": "Need", "beat": "The hero wants through the gate." },
+        { "index": 3, "label": "Go", "beat": "Intro stage begins.", "advancesStep": 3 },
+        { "index": 4, "label": "Search", "beat": "Ask, test, listen." },
+        { "index": 5, "label": "Find", "beat": "A reveal token is granted through talk, not a pickup." },
+        { "index": 6, "label": "Take", "beat": "The gate encounter is the campaign cost." },
+        { "index": 7, "label": "Return", "beat": "Back to the map, changed." },
+        { "index": 8, "label": "Change", "beat": "The hidden goal lands or it does not." }
+      ]
+    },
+    {
+      "key": "circle-intro",
+      "name": "Intro circle",
+      "scope": "stage",
+      "refId": "@intro",
+      "surfaceGoal": "Get moving.",
+      "hiddenGoal": "Accept that the mentor will not carry the cost.",
+      "canonStatus": "draft",
+      "steps": [
+        { "index": 1, "label": "You", "beat": "Yard. Mentor waits.", "dialogueId": "@dlg-mentor-board" },
+        { "index": 2, "label": "Need", "beat": "The hero wants a way through." },
+        { "index": 3, "label": "Go", "beat": "They talk. No item on the ground." },
+        { "index": 4, "label": "Search", "beat": "The yard hotspot is the test." },
+        { "index": 5, "label": "Find", "beat": "Mentor grants a reveal token.", "dialogueId": "@dlg-mentor-board" },
+        {
+          "index": 6,
+          "label": "Take",
+          "beat": "The intro complication encounter.",
+          "encounterId": "@enc-hover-test"
+        },
+        { "index": 7, "label": "Return", "beat": "The yard is the same ground." },
+        {
+          "index": 8,
+          "label": "Change",
+          "beat": "Intro is cleared. Campaign Go advances.",
+          "advancesCircleId": "@circle-campaign",
+          "advancesStep": 3
+        }
+      ]
+    }
+  ],
+  "dialogues": [
+    {
+      "key": "dlg-mentor-board",
+      "name": "Mentor board",
+      "startNodeId": "offer",
+      "canonStatus": "draft",
+      "nodes": [
+        {
+          "id": "offer",
+          "speaker": "narrator",
+          "text": "They offer what the hero thinks they need.",
+          "choices": [
+            {
+              "text": "Take it",
+              "next": "give",
+              "effects": [{ "grantRevealToken": { "tokenId": "@fragment_gate" } }]
+            },
+            { "text": "Not yet", "next": "wait" }
+          ]
+        },
+        { "id": "give", "speaker": "narrator", "text": "The fact is theirs. Nothing was picked up off the ground." },
+        { "id": "wait", "speaker": "narrator", "text": "The mentor stays. The gate does not." }
+      ]
+    }
+  ],
+  "npcs": [
+    {
+      "key": "mentor",
+      "displayName": "Mentor",
+      "characterId": "@mentor",
+      "role": "mentor",
+      "defaultDialogueId": "@dlg-mentor-board",
+      "canonStatus": "draft",
+      "placements": [
+        {
+          "regionId": "@region-intro-yard",
+          "anchorId": "a-mentor"
+        }
+      ]
+    }
+  ]
+}

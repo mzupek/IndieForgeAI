@@ -1,0 +1,96 @@
+{
+  "worlds": [
+    {
+      "key": "world-1",
+      "name": "World 1",
+      "order": 1,
+      "map": {
+        "backgroundAssetId": "World 1 map",
+        "nodes": [
+          { "id": "n-gate", "stageId": "@stage-gate", "pos": [0.18, 0.72] }
+        ],
+        "paths": [],
+        "startNodeId": "n-gate"
+      }
+    }
+  ],
+  "stages": [
+    {
+      "key": "stage-gate",
+      "worldId": "@world-1",
+      "name": "The Gate",
+      "order": 1,
+      "entryRegionId": "@region-gate-approach",
+      "entryAnchor": "a-start",
+      "clearedBy": ["@enc-gate-drone"]
+    }
+  ],
+  "regions": [
+    {
+      "key": "region-gate-approach",
+      "stageId": "@stage-gate",
+      "name": "Gate approach",
+      "backgroundAssetId": "Gate approach",
+      "anchors": [
+        { "id": "a-start", "pos": [0.12, 0.78] },
+        { "id": "a-gate", "pos": [0.80, 0.70] }
+      ],
+      "edges": [["a-start", "a-gate"]],
+      "spawn": "a-start",
+      "hotspots": [
+        {
+          "id": "hs-gate",
+          "anchor": "a-gate",
+          "prompt": "Hack the gate",
+          "encounterId": "@enc-gate-drone"
+        }
+      ],
+      "exits": [
+        { "id": "x-map", "anchor": "a-start", "toWorldMap": true }
+      ]
+    }
+  ],
+  "encounters": [
+    {
+      "key": "enc-gate-drone",
+      "stageId": "@stage-gate",
+      "name": "Gate Drone",
+      "typeId": "battle",
+      "moduleId": "memory_pad",
+      "sceneId": "Gate Drone Encounter",
+      "tuningProfileId": "Gate Drone Encounter",
+      "enemies": [{ "enemyId": "Gate Drone" }],
+      "stars": [
+        { "id": "s1", "label": "Win", "kind": "win" },
+        { "id": "s2", "label": "No misses", "kind": "noMisses" },
+        { "id": "s3", "label": "Under 60s", "kind": "timeUnder", "params": { "sec": 60 } }
+      ]
+    }
+  ],
+  "difficultyProfiles": [
+    {
+      "key": "story",
+      "name": "Story",
+      "heroHpMultiplier": 1.5,
+      "playbackSpeed": 0.85,
+      "attackWeightScale": 0.75,
+      "hintCharges": 3
+    },
+    {
+      "key": "normal",
+      "name": "Normal",
+      "heroHpMultiplier": 1,
+      "playbackSpeed": 1,
+      "attackWeightScale": 1,
+      "hintCharges": 1
+    },
+    {
+      "key": "hard",
+      "name": "Hard",
+      "heroHpMultiplier": 0.7,
+      "playbackSpeed": 1.15,
+      "attackWeightScale": 1.25,
+      "hintCharges": 0
+    }
+  ]
+}
