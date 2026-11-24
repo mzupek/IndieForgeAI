@@ -20,8 +20,9 @@ import { summarizeCondition } from '../story/conditions'
 import { collectFlagUsageWarnings } from '../story/flags'
 import { triggersOf, validateTrigger } from '../story/triggers'
 import { npcsInRegion, validateNpc } from '../story/npcs'
+import { storyCirclesOf, validateStoryCircle } from '../story/circles'
 
-export type FlowKind = 'world' | 'node' | 'stage' | 'region' | 'hotspot' | 'encounter' | 'exit' | 'npc'
+export type FlowKind = 'world' | 'node' | 'stage' | 'region' | 'hotspot' | 'encounter' | 'exit' | 'npc' | 'circle'
 
 export interface FlowLine {
   id: string
@@ -222,6 +223,23 @@ export function buildWorldFlow(pipeline: AssetPipelineProject, world: World): Wo
       if (!linked.has(enc.id)) {
         attach(line, [warningIssue(`encounters.${enc.id}`, `Encounter '${enc.name}' is not started by any hotspot`)])
       }
+    }
+
+    for (const circle of storyCirclesOf(pipeline, stage.gameId).filter(
+      (c) => c.scope === 'stage' && c.refId === stage.id
+    )) {
+      const circlePath = `storyCircles.${circle.key || circle.id}`
+      const circleIssues = validateStoryCircle(pipeline, circle, circlePath)
+      line.children.push({
+        id: `circle:${circle.id}`,
+        kind: 'circle',
+        label: `Circle: ${circle.name}`,
+        status: worst(circleIssues),
+        issues: circleIssues,
+        recordKind: 'stage',
+        recordId: stage.id,
+        children: []
+      })
     }
 
     const entry = stageRegions.find((r) => r.id === stage.entryRegionId)

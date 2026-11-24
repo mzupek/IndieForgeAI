@@ -10,6 +10,7 @@ import { plainErrorMessage } from '@shared/studio/formErrors'
 import { TRIGGER_KINDS } from '@shared/story/conditions'
 import { summarizeCondition, summarizeEffects } from '@shared/story/conditions'
 import { DialoguePanel, NpcPanel } from './NpcDialoguePanels'
+import { CirclesPanel, TokensPanel } from './StoryCanonPanels'
 import type {
   AssetPipelineProject,
   Condition,
@@ -21,7 +22,7 @@ import type {
   TriggerKind
 } from '@shared/types/assetPipeline'
 
-type TabId = 'flags' | 'triggers' | 'npcs' | 'dialogue'
+type TabId = 'flags' | 'triggers' | 'npcs' | 'dialogue' | 'circles' | 'tokens'
 type FormMode = 'idle' | 'new' | 'edit'
 
 function createdRecord<T extends { id: string; gameId: string }>(
@@ -70,7 +71,8 @@ export function StoryView() {
         <div>
           <h2>Story</h2>
           <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>
-            {game.name} • flags, triggers, NPCs, and dialogue. Progress is flags earned through play.
+            {game.name} • flags, triggers, NPCs, dialogue, circles, and reveal tokens. Progress is flags
+            earned through play.
           </p>
         </div>
       </div>
@@ -90,7 +92,7 @@ export function StoryView() {
         </div>
       )}
       <div style={{ display: 'flex', gap: '0.5rem', borderBottom: '1px solid var(--border)', marginBottom: '1rem' }}>
-        {(['flags', 'triggers', 'npcs', 'dialogue'] as TabId[]).map((id) => (
+        {(['flags', 'triggers', 'npcs', 'dialogue', 'circles', 'tokens'] as TabId[]).map((id) => (
           <button
             key={id}
             type="button"
@@ -104,7 +106,17 @@ export function StoryView() {
               cursor: 'pointer'
             }}
           >
-            {id === 'flags' ? 'Flags' : id === 'triggers' ? 'Triggers' : id === 'npcs' ? 'NPCs' : 'Dialogue'}
+            {id === 'flags'
+              ? 'Flags'
+              : id === 'triggers'
+                ? 'Triggers'
+                : id === 'npcs'
+                  ? 'NPCs'
+                  : id === 'dialogue'
+                    ? 'Dialogue'
+                    : id === 'circles'
+                      ? 'Circles'
+                      : 'Tokens'}
           </button>
         ))}
       </div>
@@ -125,6 +137,24 @@ export function StoryView() {
       )}
       {tab === 'dialogue' && (
         <DialoguePanel
+          projectId={projectId}
+          gameId={gameId}
+          pipeline={pipeline}
+          busy={busy}
+          refreshAfter={refreshAfter}
+        />
+      )}
+      {tab === 'circles' && (
+        <CirclesPanel
+          projectId={projectId}
+          gameId={gameId}
+          pipeline={pipeline}
+          busy={busy}
+          refreshAfter={refreshAfter}
+        />
+      )}
+      {tab === 'tokens' && (
+        <TokensPanel
           projectId={projectId}
           gameId={gameId}
           pipeline={pipeline}

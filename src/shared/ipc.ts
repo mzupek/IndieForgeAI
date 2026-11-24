@@ -217,5 +217,11 @@ export const IPC_CHANNELS = {
   NPC_REMOVE: 'npc:remove',
   DIALOGUE_CREATE: 'dialogue:create',
   DIALOGUE_UPDATE: 'dialogue:update',
-  DIALOGUE_REMOVE: 'dialogue:remove'
+  DIALOGUE_REMOVE: 'dialogue:remove',
+  STORY_CIRCLE_CREATE: 'storyCircle:create',
+  STORY_CIRCLE_UPDATE: 'storyCircle:update',
+  STORY_CIRCLE_REMOVE: 'storyCircle:remove',
+  REVEAL_TOKEN_CREATE: 'revealToken:create',
+  REVEAL_TOKEN_UPDATE: 'revealToken:update',
+  REVEAL_TOKEN_REMOVE: 'revealToken:remove'
 } as const

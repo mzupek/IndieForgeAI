@@ -483,6 +483,57 @@ Example bundle (docs only): `docs/samples/world1-intro-content.json` (apply on t
 
 ---
 
+### Story canon (same schema v2 — no bump)
+
+Indie Forge holds approved story canon. Notion holds drafts. Game-agnostic: reveal tokens are `RevealToken` records; a game sets `settings.revealTokenLabel` (e.g. "Memory fragment") in **data**. Progress is flags earned through play. Rewards come from interactions, never pickups. No currency/XP/loot.
+
+**`contentSchemaVersion` stays 1**. No migrate. Optional arrays `storyCircles` and `revealTokens` are filled in memory when missing. `content apply` can create **characters**.
+
+```bash
+forge game create --name "New Game" --engine unity --template adventure-lens --json
+forge story-template list --json
+forge story-template show adventure-lens --json
+
+forge character create --game <id> --name Mentor --role npc --key mentor \
+  --story-profile '{"summary":"Guide","want":"Keep them safe","need":"Let them choose"}' \
+  --canon draft --json
+forge character update <id> --game <id> --canon approved --json
+
+forge story-circle list --game <id> [--canon approved] [--json]
+forge story-circle create --game <id> --name "Intro circle" --key circle-intro \
+  --scope stage --ref @intro --surface-goal "Get moving" --hidden-goal "Accept the cost" \
+  --steps '[{"index":6,"label":"Take","beat":"Pay","encounterId":"@enc-hover-test"}]' --json
+forge story-circle update @circle-intro --game <id> --canon approved --json
+forge story-circle remove @circle-intro --game <id> --json
+
+forge reveal-token list --game <id> [--canon draft] [--json]
+forge reveal-token create --game <id> --title "The sealed gate" --key fragment_gate \
+  --text "The gate does not open for wanting." --order 1 --json
+forge reveal-token update @fragment_gate --game <id> --canon approved --json
+forge reveal-token remove @fragment_gate --game <id> --json
+
+forge npc update @mentor --game <id> --canon approved --json
+forge dialogue update @dlg-mentor-board --game <id> --canon approved --json
+forge npc list --game <id> --canon approved --json
+forge dialogue list --game <id> --canon draft --json
+
+forge content apply --game <id> --file docs/samples/world1-story-canon.json --dry-run --json
+forge content apply --game <id> --file docs/samples/world1-story-canon.json --json
+forge content export --game <id> --out /tmp/out --canon approved --json
+forge dialogue play @dlg-mentor-board --game <id> --choices 1 --json
+# result.grantedRevealTokens lists tokens granted; auto flag revealed_<key> is set.
+forge flow simulate --game <id> --world @world-1 --json
+# result.grantedRevealTokens lists tokens on firing trigger effects.
+```
+
+Stage-scoped Step 6 (Take) must link an encounter in that stage. `forge world flow` shows a **warning** while the circle is draft, and CLI/apply raise an **error** once `canonStatus` is `approved`.
+
+Create / update wrap `{ "record": { ... }, "dryRun": false }`. List wraps `{ "circles": [ ... ] }` or `{ "tokens": [ ... ] }`.
+
+Example bundle: `docs/samples/world1-story-canon.json`. Format: `docs/STORY_CANON.md`.
+
+---
+
 ### `forge character list --game <id>`
 
 List all characters in a game.

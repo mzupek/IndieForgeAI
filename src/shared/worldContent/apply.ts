@@ -6,6 +6,8 @@
 import type {
   AssetPipelineProject,
   AttackTable,
+  CanonStatus,
+  Character,
   DifficultyProfile,
   Effect,
   Encounter,
@@ -22,7 +24,10 @@ import type {
   RegionEdge,
   RegionExit,
   RegionHotspot,
+  RevealToken,
   Stage,
+  StoryCircle,
+  StoryCircleStep,
   Trigger,
   World,
   WorldMap,
@@ -83,6 +88,22 @@ import { flagsOf, validateGameFlag } from '../story/flags'
 import { parseTriggerKind, triggersOf, validateTrigger } from '../story/triggers'
 import { npcsOf, validateNpc } from '../story/npcs'
 import { bindDialogueTree, dialoguesOf, validateDialogue } from '../story/dialogue'
+import { parseCanonStatus } from '../story/canon'
+import {
+  bindStoryCircle,
+  emptyCircleSteps,
+  parseStoryCircleScope,
+  storyCirclesOf,
+  validateStoryCircle
+} from '../story/circles'
+import {
+  bindRevealToken,
+  ensureRevealTokenFlag,
+  parseMediaKind,
+  revealTokensOf,
+  validateRevealToken
+} from '../story/revealTokens'
+import { bindStoryProfile, parseStoryProfile, validateStoryProfile } from '../story/profiles'
 
 export interface ContentBundle {
   worlds?: Record<string, unknown>[]
@@ -96,12 +117,29 @@ export interface ContentBundle {
   triggers?: Record<string, unknown>[]
   npcs?: Record<string, unknown>[]
   dialogues?: Record<string, unknown>[]
+  characters?: Record<string, unknown>[]
+  storyCircles?: Record<string, unknown>[]
+  revealTokens?: Record<string, unknown>[]
 }
 
 export type ApplyAction = 'create' | 'update' | 'unchanged'
 
 export interface ApplyRecordResult {
-  type: 'world' | 'stage' | 'encounter' | 'region' | 'enemy' | 'attackTable' | 'difficultyProfile' | 'flag' | 'trigger' | 'npc' | 'dialogue'
+  type:
+    | 'world'
+    | 'stage'
+    | 'encounter'
+    | 'region'
+    | 'enemy'
+    | 'attackTable'
+    | 'difficultyProfile'
+    | 'flag'
+    | 'trigger'
+    | 'npc'
+    | 'dialogue'
+    | 'character'
+    | 'storyCircle'
+    | 'revealToken'
   action: ApplyAction
   id: string
   key?: string
@@ -145,6 +183,8 @@ function seedAliasMap(pipeline: AssetPipelineProject, gameId: string): Record<st
   for (const t of triggersOf(pipeline, gameId)) add('trigger', t.key, t.id)
   for (const n of npcsOf(pipeline, gameId)) add('npc', n.key, n.id)
   for (const d of dialoguesOf(pipeline, gameId)) add('dialogue', d.key, d.id)
+  for (const c of storyCirclesOf(pipeline, gameId)) add('storyCircle', c.key, c.id)
+  for (const t of revealTokensOf(pipeline, gameId)) add('revealToken', t.key, t.id)
   for (const c of (pipeline.characters || []).filter((x) => x.gameId === gameId)) {
     add('character', c.key, c.id)
   }
@@ -173,7 +213,7 @@ function lookupAlias(
 
 function resolveIncomingNamed(
   raw: unknown,
-  kind: 'enemy' | 'attackTable' | 'difficultyProfile' | 'flag' | 'trigger' | 'npc' | 'dialogue',
+  kind: 'enemy' | 'attackTable' | 'difficultyProfile' | 'flag' | 'trigger' | 'npc' | 'dialogue' | 'revealToken' | 'storyCircle' | 'character',
   aliasMap: Record<string, string>,
   path: string,
   issues: ContentIssue[],
@@ -239,7 +279,21 @@ interface Planned {
 }
 
 function planIncoming(
-  kind: 'world' | 'stage' | 'encounter' | 'region' | 'enemy' | 'attackTable' | 'difficultyProfile' | 'flag' | 'trigger' | 'npc' | 'dialogue',
+  kind:
+    | 'world'
+    | 'stage'
+    | 'encounter'
+    | 'region'
+    | 'enemy'
+    | 'attackTable'
+    | 'difficultyProfile'
+    | 'flag'
+    | 'trigger'
+    | 'npc'
+    | 'dialogue'
+    | 'character'
+    | 'storyCircle'
+    | 'revealToken',
   inputs: Record<string, unknown>[],
   existing: { id: string; key?: string; gameId: string }[],
   gameId: string,
@@ -440,7 +494,7 @@ function resolveIdList(
 }
 
 function resolveStoryId(
-  kind: 'flag' | 'stage' | 'encounter' | 'region' | 'scene' | 'dialogue',
+  kind: 'flag' | 'stage' | 'encounter' | 'region' | 'scene' | 'dialogue' | 'revealToken',
   raw: string,
   pipeline: AssetPipelineProject,
   gameId: string,
@@ -459,9 +513,31 @@ function resolveStoryId(
       return found ? { id: found.id } : { error: `Dialogue '${value}' was not found` }
     })
   }
+  if (kind === 'revealToken') {
+    return resolveIncomingNamed(raw, 'revealToken', aliasMap, path, issues, (value) => {
+      const found = findRecord(pipeline.revealTokens || [], value, gameId)
+      return found ? { id: found.id } : { error: `Reveal token '${value}' was not found` }
+    })
+  }
   const mapped =
     kind === 'scene' ? 'scene' : kind === 'region' ? 'region' : kind === 'stage' ? 'stage' : 'encounter'
   return resolveTypedRef(raw, mapped, aliasMap, path, issues, false)
+}
+
+function optionalCanon(
+  raw: unknown,
+  existing: CanonStatus | undefined,
+  path: string,
+  issues: ContentIssue[]
+): CanonStatus | undefined {
+  if (raw === undefined) return existing
+  if (raw === null || raw === '') return undefined
+  try {
+    return parseCanonStatus(raw)
+  } catch (err) {
+    issues.push(errorIssue(path, err instanceof Error ? err.message : String(err)))
+    return existing
+  }
 }
 
 /**
@@ -488,7 +564,18 @@ export function applyContentBundle(
   if (!pipeline.triggers) pipeline.triggers = []
   if (!pipeline.npcs) pipeline.npcs = []
   if (!pipeline.dialogues) pipeline.dialogues = []
+  if (!pipeline.characters) pipeline.characters = []
+  if (!pipeline.storyCircles) pipeline.storyCircles = []
+  if (!pipeline.revealTokens) pipeline.revealTokens = []
 
+  const characterPlan = planIncoming(
+    'character',
+    bundle.characters || [],
+    pipeline.characters,
+    gameId,
+    aliasMap,
+    issues
+  )
   const worldPlan = planIncoming('world', bundle.worlds || [], pipeline.worlds, gameId, aliasMap, issues)
   const flagPlan = planIncoming('flag', bundle.flags || [], pipeline.flags, gameId, aliasMap, issues)
   const stagePlan = planIncoming('stage', bundle.stages || [], pipeline.stages, gameId, aliasMap, issues)
@@ -520,6 +607,22 @@ export function applyContentBundle(
   )
   const npcPlan = planIncoming('npc', bundle.npcs || [], pipeline.npcs, gameId, aliasMap, issues)
   const dialoguePlan = planIncoming('dialogue', bundle.dialogues || [], pipeline.dialogues, gameId, aliasMap, issues)
+  const storyCirclePlan = planIncoming(
+    'storyCircle',
+    bundle.storyCircles || [],
+    pipeline.storyCircles,
+    gameId,
+    aliasMap,
+    issues
+  )
+  const revealTokenPlan = planIncoming(
+    'revealToken',
+    bundle.revealTokens || [],
+    pipeline.revealTokens,
+    gameId,
+    aliasMap,
+    issues
+  )
   const triggerPlan = planIncoming('trigger', bundle.triggers || [], pipeline.triggers, gameId, aliasMap, issues)
 
   // Assign region ids into the alias map before validating exits.
@@ -537,6 +640,65 @@ export function applyContentBundle(
     unchanged: [],
     issues: [],
     written: false
+  }
+
+  const nextCharacters: Character[] = []
+  for (const p of characterPlan) {
+    const path = `characters[${p.index}]`
+    const existing = pipeline.characters.find((c) => c.id === p.id)
+    const tagsRaw = p.input.tags
+    const tags = Array.isArray(tagsRaw)
+      ? tagsRaw.map((t) => String(t).trim()).filter(Boolean)
+      : existing?.tags || []
+    const profileIssues: ContentIssue[] = []
+    const parsedProfile =
+      p.input.storyProfile !== undefined
+        ? parseStoryProfile(p.input.storyProfile, `${path}.storyProfile`, profileIssues)
+        : existing?.storyProfile
+    issues.push(...profileIssues)
+    const known: Character = {
+      id: p.id,
+      gameId,
+      name: str(p.input.name) || existing?.name || '',
+      role: str(p.input.role) || existing?.role || '',
+      tags,
+      createdAt: existing?.createdAt || now,
+      updatedAt: now
+    }
+    const key = p.key ?? existing?.key
+    if (key) known.key = key
+    const styleNotes = optionalStr(p.input.styleNotes) ?? existing?.styleNotes
+    if (styleNotes) known.styleNotes = styleNotes
+    if (p.input.corePosesRequired !== undefined) known.corePosesRequired = Boolean(p.input.corePosesRequired)
+    else if (existing?.corePosesRequired !== undefined) known.corePosesRequired = existing.corePosesRequired
+    if (parsedProfile) {
+      const bound = bindStoryProfile(pipeline, gameId, parsedProfile)
+      if (bound?.relationships) {
+        bound.relationships = bound.relationships.map((rel) => ({
+          characterId:
+            lookupAlias(aliasMap, rel.characterId, 'character') ||
+            findRecord(pipeline.characters, rel.characterId, gameId)?.id ||
+            rel.characterId,
+          relation: rel.relation
+        }))
+      }
+      known.storyProfile = bound
+    }
+    else if (p.input.storyProfile === null) {
+      /* clear below */
+    } else if (existing?.storyProfile) known.storyProfile = existing.storyProfile
+    const rec = overlayRecord(existing, known)
+    if (p.input.storyProfile === null) delete rec.storyProfile
+    if (p.input.styleNotes === null || p.input.styleNotes === '') delete rec.styleNotes
+    if (p.input.key === '') delete rec.key
+    if (!rec.name.trim()) issues.push(errorIssue(`${path}.name`, 'Character name is required'))
+    if (!rec.role.trim()) issues.push(errorIssue(`${path}.role`, 'Character role is required'))
+    nextCharacters.push(rec)
+  }
+  for (const c of nextCharacters) {
+    const idx = pipeline.characters.findIndex((x) => x.id === c.id)
+    if (idx >= 0) pipeline.characters[idx] = c
+    else pipeline.characters.push(c)
   }
 
   const nextWorlds: World[] = []
@@ -615,6 +777,89 @@ export function applyContentBundle(
     const idx = pipeline.flags.findIndex((x) => x.id === f.id)
     if (idx >= 0) pipeline.flags[idx] = f
     else pipeline.flags.push(f)
+  }
+
+  const nextRevealTokens: RevealToken[] = []
+  for (const p of revealTokenPlan) {
+    const path = `revealTokens[${p.index}]`
+    const existing = pipeline.revealTokens.find((t) => t.id === p.id)
+    const condIssues: ContentIssue[] = []
+    const unlockedBy =
+      p.input.unlockedBy !== undefined
+        ? parseCondition(p.input.unlockedBy, `${path}.unlockedBy`, condIssues)
+        : existing?.unlockedBy
+    issues.push(...condIssues)
+    let mediaKind: RevealToken['mediaKind'] | undefined = existing?.mediaKind
+    try {
+      if (p.input.mediaKind !== undefined) mediaKind = parseMediaKind(p.input.mediaKind)
+    } catch (err) {
+      issues.push(errorIssue(`${path}.mediaKind`, err instanceof Error ? err.message : String(err)))
+    }
+    const orderRaw = p.input.order
+    const order =
+      orderRaw !== undefined && orderRaw !== null && orderRaw !== ''
+        ? Number(orderRaw)
+        : existing?.order ?? p.index
+    const known: RevealToken = {
+      id: p.id,
+      gameId,
+      title: str(p.input.title) || existing?.title || '',
+      text: p.input.text !== undefined ? str(p.input.text) : existing?.text || '',
+      order: Number.isInteger(order) ? order : 0,
+      flagId: existing?.flagId || '',
+      schemaVersion: RECORD_SCHEMA_VERSION,
+      createdAt: existing?.createdAt || now,
+      updatedAt: now
+    }
+    const key = p.key ?? existing?.key
+    if (key) known.key = key
+    const chapter = optionalStr(p.input.chapter) ?? existing?.chapter
+    if (chapter) known.chapter = chapter
+    const mediaAssetId = optionalStr(p.input.mediaAssetId) ?? existing?.mediaAssetId
+    if (mediaAssetId) known.mediaAssetId = mediaAssetId
+    if (mediaKind) known.mediaKind = mediaKind
+    if (unlockedBy) {
+      known.unlockedBy = mapCondition(unlockedBy, (k, id) =>
+        resolveStoryId(k, id, pipeline, gameId, aliasMap, `${path}.unlockedBy`, issues)
+      )
+    }
+    const canon = optionalCanon(p.input.canonStatus ?? p.input.canon, existing?.canonStatus, `${path}.canonStatus`, issues)
+    if (canon) known.canonStatus = canon
+    const flagRaw = optionalStr(p.input.flagId)
+    if (flagRaw) {
+      const resolved = resolveIncomingNamed(flagRaw, 'flag', aliasMap, `${path}.flagId`, issues, (value) =>
+        resolveFlagRef(pipeline, gameId, value)
+      )
+      if (resolved) known.flagId = resolved
+    } else {
+      const auto = ensureRevealTokenFlag(pipeline, gameId, {
+        id: known.id,
+        key: known.key,
+        title: known.title,
+        flagId: known.flagId
+      })
+      known.flagId = auto.id
+      if (auto.key) {
+        aliasMap[`@flag:${auto.key}`] = auto.id
+        if (!aliasMap[`@${auto.key}`]) aliasMap[`@${auto.key}`] = auto.id
+      }
+    }
+    const rec = overlayRecord(existing, bindRevealToken(pipeline, gameId, known))
+    if (p.input.chapter === null || p.input.chapter === '') delete rec.chapter
+    if (p.input.mediaAssetId === null || p.input.mediaAssetId === '') {
+      delete rec.mediaAssetId
+      delete rec.mediaKind
+    }
+    if (p.input.unlockedBy === null) delete rec.unlockedBy
+    if ((p.input.canonStatus ?? p.input.canon) === null || (p.input.canonStatus ?? p.input.canon) === '') {
+      delete rec.canonStatus
+    }
+    nextRevealTokens.push(rec)
+  }
+  for (const t of nextRevealTokens) {
+    const idx = pipeline.revealTokens.findIndex((x) => x.id === t.id)
+    if (idx >= 0) pipeline.revealTokens[idx] = t
+    else pipeline.revealTokens.push(t)
   }
 
   const nextStages: Stage[] = []
@@ -1134,7 +1379,18 @@ export function applyContentBundle(
     if (defaultDialogueId) known.defaultDialogueId = defaultDialogueId
     const notes = optionalStr(p.input.notes) ?? existing?.notes
     if (notes) known.notes = notes
-    nextNpcs.push(overlayRecord(existing, known))
+    const npcCanon = optionalCanon(
+      p.input.canonStatus ?? p.input.canon,
+      existing?.canonStatus,
+      `${path}.canonStatus`,
+      issues
+    )
+    if (npcCanon) known.canonStatus = npcCanon
+    const npcRec = overlayRecord(existing, known)
+    if ((p.input.canonStatus ?? p.input.canon) === null || (p.input.canonStatus ?? p.input.canon) === '') {
+      delete npcRec.canonStatus
+    }
+    nextNpcs.push(npcRec)
   }
   for (const n of nextNpcs) {
     const idx = pipeline.npcs.findIndex((x) => x.id === n.id)
@@ -1248,12 +1504,124 @@ export function applyContentBundle(
     if (entryVariants && entryVariants.length) known.entryVariants = entryVariants
     const notes = optionalStr(p.input.notes) ?? existing?.notes
     if (notes) known.notes = notes
-    nextDialogues.push(overlayRecord(existing, bindDialogueTree(pipeline, gameId, known)))
+    const dlgCanon = optionalCanon(
+      p.input.canonStatus ?? p.input.canon,
+      existing?.canonStatus,
+      `${path}.canonStatus`,
+      issues
+    )
+    if (dlgCanon) known.canonStatus = dlgCanon
+    const dlgRec = overlayRecord(existing, bindDialogueTree(pipeline, gameId, known))
+    if ((p.input.canonStatus ?? p.input.canon) === null || (p.input.canonStatus ?? p.input.canon) === '') {
+      delete dlgRec.canonStatus
+    }
+    nextDialogues.push(dlgRec)
   }
   for (const d of nextDialogues) {
     const idx = pipeline.dialogues.findIndex((x) => x.id === d.id)
     if (idx >= 0) pipeline.dialogues[idx] = d
     else pipeline.dialogues.push(d)
+  }
+
+  const nextStoryCircles: StoryCircle[] = []
+  for (const p of storyCirclePlan) {
+    const path = `storyCircles[${p.index}]`
+    const existing = pipeline.storyCircles.find((c) => c.id === p.id)
+    let scope: StoryCircle['scope'] = existing?.scope || 'game'
+    try {
+      if (p.input.scope !== undefined) scope = parseStoryCircleScope(p.input.scope, existing?.scope)
+    } catch (err) {
+      issues.push(errorIssue(`${path}.scope`, err instanceof Error ? err.message : String(err)))
+    }
+    const refRaw = optionalStr(p.input.refId) ?? existing?.refId
+    let refId = refRaw
+    if (refRaw) {
+      const kind = scope === 'world' ? 'world' : scope === 'stage' ? 'stage' : undefined
+      if (kind) {
+        const resolved = resolveTypedRef(refRaw, kind, aliasMap, `${path}.refId`, issues, false)
+        if (resolved) refId = resolved
+      }
+    }
+    const stepsRaw = p.input.steps !== undefined ? p.input.steps : existing?.steps
+    let steps: StoryCircleStep[] = emptyCircleSteps()
+    if (Array.isArray(stepsRaw) && stepsRaw.length) {
+      steps = emptyCircleSteps().map((blank) => {
+        const match = (stepsRaw as Record<string, unknown>[]).find(
+          (s) => Number((s || {}).index) === blank.index
+        )
+        if (!match) return blank
+        const row = match
+        const next: StoryCircleStep = { ...blank }
+        if (row.beat !== undefined) next.beat = str(row.beat)
+        const sceneId = optionalStr(row.sceneId)
+        if (sceneId) next.sceneId = resolveTypedRef(sceneId, 'scene', aliasMap, `${path}.steps.sceneId`, issues, false) || sceneId
+        const dialogueId = optionalStr(row.dialogueId)
+        if (dialogueId) {
+          next.dialogueId =
+            resolveStoryId('dialogue', dialogueId, pipeline, gameId, aliasMap, `${path}.steps.dialogueId`, issues) ||
+            dialogueId
+        }
+        const encounterId = optionalStr(row.encounterId)
+        if (encounterId) {
+          next.encounterId =
+            resolveStoryId('encounter', encounterId, pipeline, gameId, aliasMap, `${path}.steps.encounterId`, issues) ||
+            encounterId
+        }
+        const flagId = optionalStr(row.flagId)
+        if (flagId) {
+          next.flagId = resolveStoryId('flag', flagId, pipeline, gameId, aliasMap, `${path}.steps.flagId`, issues) || flagId
+        }
+        const advances = optionalStr(row.advancesCircleId)
+        if (advances) {
+          const aliased = lookupAlias(aliasMap, advances, 'storyCircle')
+          next.advancesCircleId = aliased || findRecord(pipeline.storyCircles, advances, gameId)?.id || advances
+        }
+        if (row.advancesStep !== undefined && row.advancesStep !== null && row.advancesStep !== '') {
+          const n = Number(row.advancesStep)
+          if (Number.isInteger(n) && n >= 1 && n <= 8) next.advancesStep = n as StoryCircleStep['advancesStep']
+        }
+        return next
+      })
+    }
+    const known: StoryCircle = {
+      id: p.id,
+      gameId,
+      name: str(p.input.name) || existing?.name || '',
+      scope,
+      steps,
+      schemaVersion: RECORD_SCHEMA_VERSION,
+      createdAt: existing?.createdAt || now,
+      updatedAt: now
+    }
+    const key = p.key ?? existing?.key
+    if (key) known.key = key
+    if (refId) known.refId = refId
+    const surfaceGoal = optionalStr(p.input.surfaceGoal) ?? existing?.surfaceGoal
+    if (surfaceGoal) known.surfaceGoal = surfaceGoal
+    const hiddenGoal = optionalStr(p.input.hiddenGoal) ?? existing?.hiddenGoal
+    if (hiddenGoal) known.hiddenGoal = hiddenGoal
+    const notes = optionalStr(p.input.notes) ?? existing?.notes
+    if (notes) known.notes = notes
+    const circleCanon = optionalCanon(
+      p.input.canonStatus ?? p.input.canon,
+      existing?.canonStatus,
+      `${path}.canonStatus`,
+      issues
+    )
+    if (circleCanon) known.canonStatus = circleCanon
+    const rec = overlayRecord(existing, bindStoryCircle(pipeline, gameId, known))
+    if (p.input.surfaceGoal === null || p.input.surfaceGoal === '') delete rec.surfaceGoal
+    if (p.input.hiddenGoal === null || p.input.hiddenGoal === '') delete rec.hiddenGoal
+    if (p.input.notes === null || p.input.notes === '') delete rec.notes
+    if ((p.input.canonStatus ?? p.input.canon) === null || (p.input.canonStatus ?? p.input.canon) === '') {
+      delete rec.canonStatus
+    }
+    nextStoryCircles.push(rec)
+  }
+  for (const c of nextStoryCircles) {
+    const idx = pipeline.storyCircles.findIndex((x) => x.id === c.id)
+    if (idx >= 0) pipeline.storyCircles[idx] = c
+    else pipeline.storyCircles.push(c)
   }
 
   const nextTriggers: Trigger[] = []
@@ -1380,6 +1748,18 @@ export function applyContentBundle(
     const rec = pipeline.triggers.find((t) => t.id === p.id)!
     issues.push(...validateTrigger(pipeline, rec, `triggers[${p.index}]`))
   }
+  for (const p of characterPlan) {
+    const rec = pipeline.characters.find((c) => c.id === p.id)!
+    issues.push(...validateStoryProfile(pipeline, gameId, rec, `characters[${p.index}].storyProfile`))
+  }
+  for (const p of revealTokenPlan) {
+    const rec = pipeline.revealTokens.find((t) => t.id === p.id)!
+    issues.push(...validateRevealToken(pipeline, rec, `revealTokens[${p.index}]`))
+  }
+  for (const p of storyCirclePlan) {
+    const rec = pipeline.storyCircles.find((c) => c.id === p.id)!
+    issues.push(...validateStoryCircle(pipeline, rec, `storyCircles[${p.index}]`))
+  }
 
   result.issues = issues
   result.aliasMap = { ...aliasMap }
@@ -1445,6 +1825,17 @@ export function applyContentBundle(
   )
   pack('dialogue', dialoguePlan, pipeline.dialogues)
   pack('trigger', triggerPlan, pipeline.triggers)
+  pack('character', characterPlan, pipeline.characters)
+  pack(
+    'storyCircle',
+    storyCirclePlan,
+    pipeline.storyCircles
+  )
+  pack(
+    'revealToken',
+    revealTokenPlan,
+    pipeline.revealTokens.map((t) => ({ ...t, name: t.title }))
+  )
 
   return result
 }
@@ -1468,7 +1859,10 @@ export function classifyApplyActions(
     flag: before.flags || [],
     trigger: before.triggers || [],
     npc: before.npcs || [],
-    dialogue: before.dialogues || []
+    dialogue: before.dialogues || [],
+    character: before.characters || [],
+    storyCircle: before.storyCircles || [],
+    revealToken: before.revealTokens || []
   }
   const afterLookup = {
     world: after.worlds || [],
@@ -1481,7 +1875,10 @@ export function classifyApplyActions(
     flag: after.flags || [],
     trigger: after.triggers || [],
     npc: after.npcs || [],
-    dialogue: after.dialogues || []
+    dialogue: after.dialogues || [],
+    character: after.characters || [],
+    storyCircle: after.storyCircles || [],
+    revealToken: after.revealTokens || []
   }
   const all = [...result.creates, ...result.updates, ...result.unchanged]
   result.creates = []

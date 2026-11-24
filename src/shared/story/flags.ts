@@ -75,7 +75,7 @@ export function collectFlagUsageWarnings(
   for (const t of pipeline.triggers || []) {
     if (t.gameId !== gameId) continue
     collectConditionFlagIds(t.condition, reads)
-    collectEffectFlagWrites(t.effects, writes)
+    collectEffectFlagWrites(t.effects, writes, pipeline)
   }
   for (const s of pipeline.stages || []) {
     if (s.gameId !== gameId) continue
@@ -83,23 +83,34 @@ export function collectFlagUsageWarnings(
   }
   for (const e of pipeline.encounters || []) {
     if (e.gameId !== gameId) continue
-    collectEffectFlagWrites(e.onWin, writes)
-    collectEffectFlagWrites(e.onLose, writes)
+    collectEffectFlagWrites(e.onWin, writes, pipeline)
+    collectEffectFlagWrites(e.onLose, writes, pipeline)
   }
   for (const d of pipeline.dialogues || []) {
     if (d.gameId !== gameId) continue
     for (const variant of d.entryVariants || []) collectConditionFlagIds(variant.condition, reads)
     for (const node of d.nodes || []) {
-      collectEffectFlagWrites(node.effects, writes)
+      collectEffectFlagWrites(node.effects, writes, pipeline)
       for (const choice of node.choices || []) {
         collectConditionFlagIds(choice.condition, reads)
-        collectEffectFlagWrites(choice.effects, writes)
+        collectEffectFlagWrites(choice.effects, writes, pipeline)
       }
     }
   }
   for (const n of pipeline.npcs || []) {
     if (n.gameId !== gameId) continue
     for (const p of n.placements || []) collectConditionFlagIds(p.condition, reads)
+  }
+  for (const token of pipeline.revealTokens || []) {
+    if (token.gameId !== gameId) continue
+    collectConditionFlagIds(token.unlockedBy, reads)
+    if (token.flagId) writes.add(token.flagId)
+  }
+  for (const circle of pipeline.storyCircles || []) {
+    if (circle.gameId !== gameId) continue
+    for (const step of circle.steps || []) {
+      if (step.flagId) reads.add(step.flagId)
+    }
   }
   const issues: ContentIssue[] = []
   for (const flag of flagsOf(pipeline, gameId)) {

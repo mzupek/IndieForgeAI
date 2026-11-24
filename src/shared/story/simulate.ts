@@ -2,8 +2,9 @@
  * Read-only flow simulate: given flag values, which stages unlock and which triggers fire.
  */
 
-import type { AssetPipelineProject, GameFlag, Stage, Trigger, World } from '../types/assetPipeline'
+import type { AssetPipelineProject, GameFlag, RevealToken, Stage, Trigger, World } from '../types/assetPipeline'
 import { evaluateCondition, flagsOf, summarizeCondition, summarizeEffects } from './conditions'
+import { collectGrantedRevealTokens } from './revealTokens'
 import { findHotspotSource, triggersOf } from './triggers'
 import { stagesOf } from '../worldContent/validate'
 
@@ -26,6 +27,7 @@ export interface SimulateResult {
     virtual?: boolean
     effects: string
   }[]
+  grantedRevealTokens: { id: string; key?: string; title: string }[]
 }
 
 function parseScalar(raw: string): boolean | number {
@@ -170,6 +172,14 @@ export function simulateWorldFlow(
     }
   }
 
+  const granted: RevealToken[] = []
+  for (const trigger of firingTriggers) {
+    if (trigger.virtual) continue
+    const rec = (pipeline.triggers || []).find((t) => t.id === trigger.id)
+    for (const token of collectGrantedRevealTokens(pipeline, world.gameId, rec?.effects)) {
+      if (!granted.some((g) => g.id === token.id)) granted.push(token)
+    }
+  }
   return {
     worldId: world.id,
     worldName: world.name,
@@ -181,7 +191,8 @@ export function simulateWorldFlow(
     })),
     unlockedStages,
     lockedStages,
-    firingTriggers
+    firingTriggers,
+    grantedRevealTokens: granted.map((t) => ({ id: t.id, key: t.key, title: t.title }))
   }
 }
 

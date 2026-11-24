@@ -236,6 +236,16 @@ import { createTrigger, removeTrigger, updateTrigger } from '../../core/storage/
 import { createNpc, removeNpc, updateNpc } from '../../core/storage/npcService'
 import { createDialogue, removeDialogue, updateDialogue } from '../../core/storage/dialogueService'
 import {
+  createStoryCircle,
+  removeStoryCircle,
+  updateStoryCircle
+} from '../../core/storage/storyCircleService'
+import {
+  createRevealToken,
+  removeRevealToken,
+  updateRevealToken
+} from '../../core/storage/revealTokenService'
+import {
   applyDesignerAssetPrompt,
   applyDesignerStyleGuide,
   clearDesignerChat,
@@ -1919,6 +1929,36 @@ export function registerIpcHandlers(): void {
   )
   ipcMain.handle(IPC_CHANNELS.DIALOGUE_REMOVE, async (_e, projectId: string, gameId: string, id: string) => {
     await removeDialogue(gameId, id)
+    return await loadProject(projectId)
+  })
+  ipcMain.handle(IPC_CHANNELS.STORY_CIRCLE_CREATE, async (_e, projectId: string, gameId: string, input: any) => {
+    await createStoryCircle(gameId, input)
+    return await loadProject(projectId)
+  })
+  ipcMain.handle(
+    IPC_CHANNELS.STORY_CIRCLE_UPDATE,
+    async (_e, projectId: string, gameId: string, id: string, patch: any) => {
+      await updateStoryCircle(gameId, id, patch)
+      return await loadProject(projectId)
+    }
+  )
+  ipcMain.handle(IPC_CHANNELS.STORY_CIRCLE_REMOVE, async (_e, projectId: string, gameId: string, id: string) => {
+    await removeStoryCircle(gameId, id)
+    return await loadProject(projectId)
+  })
+  ipcMain.handle(IPC_CHANNELS.REVEAL_TOKEN_CREATE, async (_e, projectId: string, gameId: string, input: any) => {
+    await createRevealToken(gameId, input)
+    return await loadProject(projectId)
+  })
+  ipcMain.handle(
+    IPC_CHANNELS.REVEAL_TOKEN_UPDATE,
+    async (_e, projectId: string, gameId: string, id: string, patch: any) => {
+      await updateRevealToken(gameId, id, patch)
+      return await loadProject(projectId)
+    }
+  )
+  ipcMain.handle(IPC_CHANNELS.REVEAL_TOKEN_REMOVE, async (_e, projectId: string, gameId: string, id: string) => {
+    await removeRevealToken(gameId, id)
     return await loadProject(projectId)
   })
 }

@@ -107,6 +107,8 @@ export function normalizeStudioInMemory(studio: StudioFile): StudioFile {
   p.triggers = ensureArray(p.triggers)
   p.npcs = ensureArray(p.npcs)
   p.dialogues = ensureArray(p.dialogues)
+  p.storyCircles = ensureArray(p.storyCircles)
+  p.revealTokens = ensureArray(p.revealTokens)
 
   for (const shot of p.storyboardShots) {
     if (shot.layers) {

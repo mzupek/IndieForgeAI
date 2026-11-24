@@ -84,6 +84,8 @@ function createEmptyStudioData(): StudioData {
       triggers: [],
       npcs: [],
       dialogues: [],
+      storyCircles: [],
+      revealTokens: [],
       createdAt: now,
       updatedAt: now
     },

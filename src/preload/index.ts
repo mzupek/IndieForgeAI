@@ -469,6 +469,22 @@ const api: IndieForgeAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.DIALOGUE_UPDATE, projectId, gameId, id, patch),
     remove: (projectId, gameId, id) =>
       ipcRenderer.invoke(IPC_CHANNELS.DIALOGUE_REMOVE, projectId, gameId, id)
+  },
+  storyCircles: {
+    create: (projectId, gameId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.STORY_CIRCLE_CREATE, projectId, gameId, input),
+    update: (projectId, gameId, id, patch) =>
+      ipcRenderer.invoke(IPC_CHANNELS.STORY_CIRCLE_UPDATE, projectId, gameId, id, patch),
+    remove: (projectId, gameId, id) =>
+      ipcRenderer.invoke(IPC_CHANNELS.STORY_CIRCLE_REMOVE, projectId, gameId, id)
+  },
+  revealTokens: {
+    create: (projectId, gameId, input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.REVEAL_TOKEN_CREATE, projectId, gameId, input),
+    update: (projectId, gameId, id, patch) =>
+      ipcRenderer.invoke(IPC_CHANNELS.REVEAL_TOKEN_UPDATE, projectId, gameId, id, patch),
+    remove: (projectId, gameId, id) =>
+      ipcRenderer.invoke(IPC_CHANNELS.REVEAL_TOKEN_REMOVE, projectId, gameId, id)
   }
 }
 

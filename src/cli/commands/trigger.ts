@@ -226,6 +226,12 @@ export function registerFlowSimulateCommand(program: Command): void {
           for (const t of result.firingTriggers) {
             console.log(`    ${t.name}  ${t.kind}${t.virtual ? ' (hotspot.encounterId)' : ''}  ${t.effects}`)
           }
+          if (result.grantedRevealTokens.length) {
+            console.log('  Granted reveal tokens:')
+            for (const t of result.grantedRevealTokens) {
+              console.log(`    ${t.title}${t.key ? ` @${t.key}` : ''}`)
+            }
+          }
         })
       } catch (err) {
         outputError(err, opts)

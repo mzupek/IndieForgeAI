@@ -23,6 +23,7 @@ import {
   validateDialogue,
   type DialoguePlayResult
 } from '@shared/story/dialogue'
+import { parseCanonStatus } from '@shared/story/canon'
 
 export interface WriteOptions {
   dataDirOverride?: string
@@ -36,6 +37,7 @@ export interface DialogueInput {
   nodes?: DialogueNode[]
   entryVariants?: DialogueEntryVariant[] | null
   notes?: string | null
+  canonStatus?: string | null
 }
 
 function throwIssues(issues: ContentIssue[]): void {
@@ -102,6 +104,7 @@ export async function createDialogue(
     if (input.key) known.key = input.key
     if (input.entryVariants) known.entryVariants = input.entryVariants
     if (input.notes) known.notes = String(input.notes)
+    if (input.canonStatus) known.canonStatus = parseCanonStatus(input.canonStatus)
     return saveDialogue(pipeline, gameId, known)
   })
   return { record }
@@ -131,6 +134,10 @@ export async function updateDialogue(
     }
     if (patch.key === '') delete next.key
     if (patch.notes === '' || patch.notes === null) delete next.notes
+    if (patch.canonStatus !== undefined) {
+      if (!patch.canonStatus) delete next.canonStatus
+      else next.canonStatus = parseCanonStatus(patch.canonStatus)
+    }
     return saveDialogue(pipeline, gameId, next)
   })
   return { record }

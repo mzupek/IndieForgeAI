@@ -27,6 +27,9 @@ import { registerFlagCommands } from './commands/flag'
 import { registerFlowSimulateCommand, registerTriggerCommands } from './commands/trigger'
 import { registerNpcCommands } from './commands/npc'
 import { registerDialogueCommands } from './commands/dialogue'
+import { registerStoryCircleCommands } from './commands/storyCircle'
+import { registerRevealTokenCommands } from './commands/revealToken'
+import { registerStoryTemplateCommands } from './commands/storyTemplate'
 import * as asset from './commands/asset'
 import * as assetState from './commands/asset-state'
 
@@ -48,6 +51,18 @@ gamesCmd
   .description('List all games across all projects')
   .action(async (options) => {
     await games.list({ ...program.opts(), ...options })
+  })
+
+gamesCmd
+  .command('create')
+  .description('Create a game; --template copies a story template skeleton')
+  .requiredOption('--name <name>', 'Game name')
+  .option('--engine <engine>', 'unity | godot (default unity)')
+  .option('--key <key>', 'Optional slug')
+  .option('--export-root <path>', 'Export root')
+  .option('--template <key>', 'Story template key (e.g. adventure-lens)')
+  .action(async (options) => {
+    await games.create({ ...program.opts(), ...options })
   })
 
 // Character commands
@@ -79,6 +94,9 @@ characterCmd
   .option('--style-notes <notes>', 'Style notes')
   .option('--tags <tags>', 'Comma-separated tags')
   .option('--reference <path>', 'Reference image path')
+  .option('--key <key>', 'Optional slug unique per game')
+  .option('--story-profile <json>', 'JSON story profile')
+  .option('--canon <status>', 'draft | approved (profile canonStatus)')
   .action(async (options) => {
     await character.create({ ...program.opts(), ...options })
   })
@@ -93,6 +111,9 @@ characterCmd
   .option('--style-notes <notes>', 'Style notes')
   .option('--tags <tags>', 'Comma-separated tags')
   .option('--reference <path>', 'Reference image path')
+  .option('--key <key>', 'Optional slug unique per game')
+  .option('--story-profile <json>', 'JSON story profile')
+  .option('--canon <status>', 'draft | approved (profile canonStatus)')
   .action(async (characterId, options) => {
     await character.update(characterId, { ...program.opts(), ...options })
   })
@@ -427,5 +448,8 @@ registerTriggerCommands(program)
 registerFlowSimulateCommand(program)
 registerNpcCommands(program)
 registerDialogueCommands(program)
+registerStoryCircleCommands(program)
+registerRevealTokenCommands(program)
+registerStoryTemplateCommands(program)
 
 program.parse()

@@ -153,6 +153,19 @@ function CharacterEditDialog({
   const [role, setRole] = useState(character?.role ?? '')
   const [styleNotes, setStyleNotes] = useState(character?.styleNotes ?? '')
   const [tags, setTags] = useState(character?.tags.join(', ') ?? '')
+  const profile = character?.storyProfile
+  const [summary, setSummary] = useState(profile?.summary ?? '')
+  const [bio, setBio] = useState(profile?.bio ?? '')
+  const [motivation, setMotivation] = useState(profile?.motivation ?? '')
+  const [want, setWant] = useState(profile?.want ?? '')
+  const [need, setNeed] = useState(profile?.need ?? '')
+  const [arc, setArc] = useState(profile?.arc ?? '')
+  const [voiceNotes, setVoiceNotes] = useState(profile?.voiceNotes ?? '')
+  const [faction, setFaction] = useState(profile?.faction ?? '')
+  const [relationships, setRelationships] = useState(
+    (profile?.relationships || []).map((r) => `${r.characterId}|${r.relation}`).join('\n')
+  )
+  const [canonStatus, setCanonStatus] = useState(profile?.canonStatus === 'approved' ? 'approved' : 'draft')
   const [slotKey, setSlotKey] = useState('')
   const [slotLabel, setSlotLabel] = useState('')
   const [saving, setSaving] = useState(false)
@@ -169,13 +182,34 @@ function CharacterEditDialog({
 
     try {
       const tagArray = tags.split(',').map((t) => t.trim()).filter(Boolean)
+      const storyProfile = {
+        summary: summary.trim() || undefined,
+        bio: bio.trim() || undefined,
+        motivation: motivation.trim() || undefined,
+        want: want.trim() || undefined,
+        need: need.trim() || undefined,
+        arc: arc.trim() || undefined,
+        voiceNotes: voiceNotes.trim() || undefined,
+        faction: faction.trim() || undefined,
+        relationships: relationships
+          .split('\n')
+          .map((line) => line.trim())
+          .filter(Boolean)
+          .map((line) => {
+            const [characterId, ...rest] = line.split('|')
+            return { characterId: (characterId || '').trim(), relation: rest.join('|').trim() }
+          })
+          .filter((r) => r.characterId && r.relation),
+        canonStatus: canonStatus === 'approved' ? 'approved' : 'draft'
+      }
       
       if (character) {
         await window.indieForge.pipeline.updateCharacter(projectId, character.id, {
           name: name.trim(),
           role: role.trim(),
           styleNotes: styleNotes.trim() || undefined,
-          tags: tagArray
+          tags: tagArray,
+          storyProfile
         })
       } else {
         await window.indieForge.pipeline.createCharacter(projectId, {
@@ -183,7 +217,8 @@ function CharacterEditDialog({
           name: name.trim(),
           role: role.trim(),
           styleNotes: styleNotes.trim() || undefined,
-          tags: tagArray
+          tags: tagArray,
+          storyProfile
         })
       }
       
@@ -327,6 +362,57 @@ function CharacterEditDialog({
               placeholder="Comma-separated: hero, fire, fast"
               disabled={saving}
             />
+          </label>
+
+          <h4 style={{ margin: '1rem 0 0.35rem 0' }}>Story profile</h4>
+          <label>
+            Summary
+            <textarea value={summary} onChange={(e) => setSummary(e.target.value)} disabled={saving} rows={2} />
+          </label>
+          <label>
+            Bio
+            <textarea value={bio} onChange={(e) => setBio(e.target.value)} disabled={saving} rows={2} />
+          </label>
+          <label>
+            Motivation
+            <input value={motivation} onChange={(e) => setMotivation(e.target.value)} disabled={saving} />
+          </label>
+          <label>
+            Want (surface)
+            <input value={want} onChange={(e) => setWant(e.target.value)} disabled={saving} />
+          </label>
+          <label>
+            Need (hidden)
+            <input value={need} onChange={(e) => setNeed(e.target.value)} disabled={saving} />
+          </label>
+          <label>
+            Arc
+            <textarea value={arc} onChange={(e) => setArc(e.target.value)} disabled={saving} rows={2} />
+          </label>
+          <label>
+            Voice / speech
+            <textarea value={voiceNotes} onChange={(e) => setVoiceNotes(e.target.value)} disabled={saving} rows={2} />
+          </label>
+          <label>
+            Allegiance / faction
+            <input value={faction} onChange={(e) => setFaction(e.target.value)} disabled={saving} />
+          </label>
+          <label>
+            Relationships (characterId|relation per line)
+            <textarea
+              value={relationships}
+              onChange={(e) => setRelationships(e.target.value)}
+              disabled={saving}
+              rows={3}
+              placeholder="uuid-or-key|mentor"
+            />
+          </label>
+          <label>
+            Canon
+            <select value={canonStatus} disabled={saving} onChange={(e) => setCanonStatus(e.target.value)}>
+              <option value="draft">draft</option>
+              <option value="approved">approved</option>
+            </select>
           </label>
 
           {liveCharacter && (

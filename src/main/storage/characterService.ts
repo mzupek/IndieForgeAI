@@ -22,6 +22,7 @@ export async function createCharacter(
     role: string
     styleNotes?: string
     tags?: string[]
+    storyProfile?: Character['storyProfile']
   }
 ): Promise<Character> {
   const project = await loadProject(projectId)
@@ -49,6 +50,7 @@ export async function createCharacter(
     createdAt: now,
     updatedAt: now
   }
+  if (input.storyProfile) character.storyProfile = input.storyProfile
 
   project.assetPipeline.characters.push(character)
   await saveProject(project)

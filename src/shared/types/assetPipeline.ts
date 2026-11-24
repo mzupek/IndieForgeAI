@@ -198,6 +198,11 @@ export interface GameSettings {
   assetCategories: GameAssetCategoryDef[]
   encounterTypes: string[]
   modules: GameEncounterModule[]
+  /**
+   * Per-game display name for RevealToken records (e.g. "Memory fragment").
+   * Missing means "Reveal token". Data, not app-code game names.
+   */
+  revealTokenLabel?: string
 }
 
 /**
@@ -247,8 +252,32 @@ export interface Character {
    * Missing means true.
    */
   corePosesRequired?: boolean
+  /** Optional story canon profile. Missing means none authored yet. */
+  storyProfile?: CharacterStoryProfile
   createdAt: string
   updatedAt: string
+}
+
+/** draft is implied when missing. approved is studio-home canon. */
+export type CanonStatus = 'draft' | 'approved'
+
+export interface CharacterRelationship {
+  characterId: string
+  relation: string
+}
+
+/** Optional story fields on Character. Want vs need is the two-layer personal goal. */
+export interface CharacterStoryProfile {
+  summary?: string
+  bio?: string
+  motivation?: string
+  want?: string
+  need?: string
+  arc?: string
+  voiceNotes?: string
+  relationships?: CharacterRelationship[]
+  faction?: string
+  canonStatus?: CanonStatus
 }
 
 /**
@@ -888,6 +917,7 @@ export type Effect =
   | { playScene: { sceneId: string } }
   | { moveToRegion: { regionId: string; anchorId?: string } }
   | { returnToWorldMap: true }
+  | { grantRevealToken: { tokenId: string } }
 
 export type TriggerKind =
   | 'onHotspot'
@@ -930,6 +960,7 @@ export interface Npc {
   placements: NpcPlacement[]
   defaultDialogueId?: string
   notes?: string
+  canonStatus?: CanonStatus
   schemaVersion: number
   createdAt: string
   updatedAt: string
@@ -966,6 +997,63 @@ export interface Dialogue {
   nodes: DialogueNode[]
   entryVariants?: DialogueEntryVariant[]
   notes?: string
+  canonStatus?: CanonStatus
+  schemaVersion: number
+  createdAt: string
+  updatedAt: string
+}
+
+export type StoryCircleScope = 'game' | 'world' | 'stage'
+
+export type HarmonStepLabel = 'You' | 'Need' | 'Go' | 'Search' | 'Find' | 'Take' | 'Return' | 'Change'
+
+export interface StoryCircleStep {
+  index: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8
+  label: HarmonStepLabel
+  beat?: string
+  sceneId?: string
+  dialogueId?: string
+  encounterId?: string
+  flagId?: string
+  /** Stage circles may point at the game/world circle they advance. */
+  advancesCircleId?: string
+  advancesStep?: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8
+}
+
+export interface StoryCircle {
+  id: string
+  gameId: string
+  key?: string
+  name: string
+  scope: StoryCircleScope
+  /** Game-scope may omit; world/stage must point at that record. */
+  refId?: string
+  surfaceGoal?: string
+  hiddenGoal?: string
+  steps: StoryCircleStep[]
+  notes?: string
+  canonStatus?: CanonStatus
+  schemaVersion: number
+  createdAt: string
+  updatedAt: string
+}
+
+export type RevealTokenMediaKind = 'image' | 'clip'
+
+export interface RevealToken {
+  id: string
+  gameId: string
+  key?: string
+  title: string
+  text: string
+  mediaAssetId?: string
+  mediaKind?: RevealTokenMediaKind
+  unlockedBy?: Condition
+  order: number
+  chapter?: string
+  /** Auto-created bool flag (key revealed_<token.key>) that conditions can test. */
+  flagId: string
+  canonStatus?: CanonStatus
   schemaVersion: number
   createdAt: string
   updatedAt: string
@@ -1236,6 +1324,10 @@ export interface AssetPipelineProject {
   npcs?: Npc[]
   /** Step 4: per-game dialogue trees. Optional on disk; filled in memory when missing. */
   dialogues?: Dialogue[]
+  /** Story canon: Dan Harmon 8-step circles. Optional on disk; filled in memory when missing. */
+  storyCircles?: StoryCircle[]
+  /** Story canon: reveal tokens (per-game label, e.g. memory fragments). Optional on disk. */
+  revealTokens?: RevealToken[]
   createdAt: string
   updatedAt: string
 }

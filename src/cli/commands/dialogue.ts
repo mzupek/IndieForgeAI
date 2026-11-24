@@ -88,10 +88,16 @@ export function registerDialogueCommands(program: Command): void {
     .command('list')
     .description('List dialogues in a game')
     .requiredOption('--game <id>', 'Game ID')
+    .option('--canon <status>', 'Filter draft | approved')
     .action(async (options, c) => {
       const opts = { ...program.opts(), ...collectOpts(c, options) }
       try {
-        const dialogues = await listDialogues(opts.game!, dir(opts))
+        const dialogues = (await listDialogues(opts.game!, dir(opts))).filter((d) => {
+          const wanted = String(options.canon || '').trim()
+          if (!wanted) return true
+          const status = d.canonStatus === 'approved' ? 'approved' : 'draft'
+          return status === wanted
+        })
         printOrJson({ dialogues }, opts, () => {
           console.log('\nDialogues:')
           if (dialogues.length === 0) console.log('  (none)')
@@ -129,6 +135,7 @@ export function registerDialogueCommands(program: Command): void {
     .option('--nodes <json>', 'JSON array of nodes')
     .option('--entry-variants <json>', 'JSON array of { condition, startNodeId }')
     .option('--notes <text>', 'Notes')
+    .option('--canon <status>', 'draft | approved')
     .option('--dry-run', 'Validate without writing')
     .action(async (options, c) => {
       const opts = { ...program.opts(), ...collectOpts(c, options) }
@@ -139,7 +146,8 @@ export function registerDialogueCommands(program: Command): void {
           startNodeId: options.start,
           nodes: parseJsonFlag(options.nodes, '--nodes') as DialogueInput['nodes'],
           entryVariants: parseJsonFlag(options.entryVariants, '--entry-variants') as DialogueInput['entryVariants'],
-          notes: options.notes
+          notes: options.notes,
+          canonStatus: options.canon
         }
         const { record } = await createDialogue(opts.game!, input, {
           dataDirOverride: dir(opts),
@@ -164,6 +172,7 @@ export function registerDialogueCommands(program: Command): void {
     .option('--nodes <json>', 'JSON array of nodes')
     .option('--entry-variants <json>', 'JSON array of { condition, startNodeId }')
     .option('--notes <text>', 'Notes')
+    .option('--canon <status>', 'draft | approved')
     .option('--dry-run', 'Validate without writing')
     .action(async (id, options, c) => {
       const opts = { ...program.opts(), ...collectOpts(c, options) }
@@ -177,6 +186,7 @@ export function registerDialogueCommands(program: Command): void {
           patch.entryVariants = parseJsonFlag(options.entryVariants, '--entry-variants') as DialogueInput['entryVariants']
         }
         if (options.notes !== undefined) patch.notes = String(options.notes)
+        if (options.canon !== undefined) patch.canonStatus = String(options.canon)
         const { record } = await updateDialogue(opts.game!, String(id), patch, {
           dataDirOverride: dir(opts),
           dryRun: Boolean(opts.dryRun)
@@ -414,6 +424,12 @@ export function registerDialogueCommands(program: Command): void {
             if (step.choiceText) console.log(`    -> ${step.choiceText}`)
           }
           console.log(`  ended=${result.ended}  ${result.endReason}`)
+          if (result.grantedRevealTokens.length) {
+            console.log('  Granted reveal tokens:')
+            for (const t of result.grantedRevealTokens) {
+              console.log(`    ${t.title}${t.key ? ` @${t.key}` : ''}`)
+            }
+          }
         })
       } catch (err) {
         outputError(err, opts)

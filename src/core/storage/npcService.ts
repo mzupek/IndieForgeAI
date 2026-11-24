@@ -12,6 +12,7 @@ import { errorMessages, type ContentIssue } from '@shared/worldContent/issues'
 import { bindCondition, findRecord } from '@shared/story/conditions'
 import { assertCanRemoveNpc, npcsOf, validateNpc } from '@shared/story/npcs'
 import { resolveCharacterRef } from '@shared/enemies/validate'
+import { parseCanonStatus } from '@shared/story/canon'
 
 export interface WriteOptions {
   dataDirOverride?: string
@@ -26,6 +27,7 @@ export interface NpcInput {
   placements?: NpcPlacement[] | null
   defaultDialogueId?: string | null
   notes?: string | null
+  canonStatus?: string | null
 }
 
 function throwIssues(issues: ContentIssue[]): void {
@@ -98,6 +100,7 @@ export async function createNpc(gameId: string, input: NpcInput, options?: Write
       known.defaultDialogueId = dlg?.id || input.defaultDialogueId
     }
     if (input.notes) known.notes = String(input.notes)
+    if (input.canonStatus) known.canonStatus = parseCanonStatus(input.canonStatus)
     throwIssues(validateNpc(pipeline, known))
     pipeline.npcs.push(known)
     return known
@@ -140,6 +143,10 @@ export async function updateNpc(
     }
     if (patch.key === '') delete next.key
     if (patch.notes === '' || patch.notes === null) delete next.notes
+    if (patch.canonStatus !== undefined) {
+      if (!patch.canonStatus) delete next.canonStatus
+      else next.canonStatus = parseCanonStatus(patch.canonStatus)
+    }
     throwIssues(validateNpc(pipeline, next))
     const idx = (pipeline.npcs || []).findIndex((n) => n.id === existing.id)
     if (idx >= 0) pipeline.npcs![idx] = next

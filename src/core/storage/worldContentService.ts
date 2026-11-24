@@ -53,12 +53,14 @@ import {
 import { resolveSceneId, resolveTuningProfileId } from '@shared/worldContent/validate'
 import { resolveEncounterEnemyLinks } from '@shared/worldContent/encounterLinks'
 import { resolveDifficultyRef } from '@shared/difficulty/validate'
+import { matchesCanonFilter } from '@shared/story/canon'
 
 export const CONTENT_SCHEMA_VERSION = 1
 
 export interface WriteOptions {
   dataDirOverride?: string
   dryRun?: boolean
+  canon?: string
 }
 
 function throwIssues(issues: ContentIssue[]): void {
@@ -1088,7 +1090,10 @@ function parseBundle(raw: unknown): ContentBundle {
     'flags',
     'triggers',
     'npcs',
-    'dialogues'
+    'dialogues',
+    'characters',
+    'storyCircles',
+    'revealTokens'
   ] as const) {
     if (obj[name] === undefined) continue
     if (!Array.isArray(obj[name])) {
@@ -1141,6 +1146,7 @@ export interface ContentExportFile {
   settings: {
     encounterTypes: string[]
     modules: NonNullable<AssetPipelineProject['games'][number]['settings']>['modules']
+    revealTokenLabel?: string
   }
   worlds: World[]
   stages: Stage[]
@@ -1153,6 +1159,9 @@ export interface ContentExportFile {
   triggers: import('@shared/types/assetPipeline').Trigger[]
   npcs: import('@shared/types/assetPipeline').Npc[]
   dialogues: import('@shared/types/assetPipeline').Dialogue[]
+  characters: import('@shared/types/assetPipeline').Character[]
+  storyCircles: import('@shared/types/assetPipeline').StoryCircle[]
+  revealTokens: import('@shared/types/assetPipeline').RevealToken[]
 }
 
 export async function exportContent(
@@ -1163,13 +1172,15 @@ export async function exportContent(
   const studio = await readStudio(options?.dataDirOverride)
   const pipeline = studio.assetPipeline
   const game = requireGame(pipeline, gameId)
+  const canon = options?.canon
   const content: ContentExportFile = {
     contentSchemaVersion: CONTENT_SCHEMA_VERSION,
     gameId,
     exportedAt: nowIso(),
     settings: {
       encounterTypes: [...(game.settings?.encounterTypes || [])],
-      modules: [...(game.settings?.modules || [])]
+      modules: [...(game.settings?.modules || [])],
+      revealTokenLabel: game.settings?.revealTokenLabel
     },
     worlds: worldsOf(pipeline, gameId),
     stages: stagesOf(pipeline, gameId),
@@ -1180,8 +1191,13 @@ export async function exportContent(
     difficultyProfiles: (pipeline.difficultyProfiles || []).filter((p) => p.gameId === gameId),
     flags: (pipeline.flags || []).filter((f) => f.gameId === gameId),
     triggers: (pipeline.triggers || []).filter((t) => t.gameId === gameId),
-    npcs: (pipeline.npcs || []).filter((n) => n.gameId === gameId),
-    dialogues: (pipeline.dialogues || []).filter((d) => d.gameId === gameId)
+    npcs: (pipeline.npcs || []).filter((n) => n.gameId === gameId && matchesCanonFilter(n, canon)),
+    dialogues: (pipeline.dialogues || []).filter((d) => d.gameId === gameId && matchesCanonFilter(d, canon)),
+    characters: (pipeline.characters || []).filter(
+      (c) => c.gameId === gameId && (!canon || matchesCanonFilter(c.storyProfile, canon))
+    ),
+    storyCircles: (pipeline.storyCircles || []).filter((c) => c.gameId === gameId && matchesCanonFilter(c, canon)),
+    revealTokens: (pipeline.revealTokens || []).filter((t) => t.gameId === gameId && matchesCanonFilter(t, canon))
   }
   const target = join(outDir, 'content.json')
   if (options?.dryRun) {

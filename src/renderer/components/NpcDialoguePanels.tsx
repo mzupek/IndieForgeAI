@@ -66,6 +66,7 @@ export function NpcPanel({
   const [placements, setPlacements] = useState<NpcPlacement[]>([])
   const [defaultDialogueId, setDefaultDialogueId] = useState('')
   const [notes, setNotes] = useState('')
+  const [canonStatus, setCanonStatus] = useState<'draft' | 'approved'>('draft')
   const selected = formMode === 'edit' ? npcs.find((n) => n.id === selectedId) || null : null
 
   function load(npc: Npc) {
@@ -78,6 +79,7 @@ export function NpcPanel({
     setPlacements((npc.placements || []).map((p) => ({ ...p })))
     setDefaultDialogueId(npc.defaultDialogueId || '')
     setNotes(npc.notes || '')
+    setCanonStatus(npc.canonStatus === 'approved' ? 'approved' : 'draft')
   }
 
   function hide() {
@@ -90,6 +92,7 @@ export function NpcPanel({
     setPlacements([])
     setDefaultDialogueId('')
     setNotes('')
+    setCanonStatus('draft')
   }
 
   return (
@@ -110,7 +113,10 @@ export function NpcPanel({
               onClick={() => (n.id === selectedId && formMode === 'edit' ? hide() : load(n))}
             >
               <span>
-                {n.displayName} <span style={{ color: 'var(--muted)' }}>{n.role}</span>
+                {n.displayName}{' '}
+                <span style={{ color: 'var(--muted)' }}>
+                  {n.role} {n.canonStatus || 'draft'}
+                </span>
               </span>
               <button
                 type="button"
@@ -157,7 +163,8 @@ export function NpcPanel({
               role: role.trim(),
               placements,
               defaultDialogueId: defaultDialogueId || null,
-              notes: notes.trim() || undefined
+              notes: notes.trim() || undefined,
+              canonStatus
             }
             void refreshAfter(async () => {
               if (selected) return window.indieForge.npcs.update(projectId, gameId, selected.id, body)
@@ -202,6 +209,13 @@ export function NpcPanel({
                   {d.name}
                 </option>
               ))}
+            </select>
+          </label>
+          <label>
+            Canon
+            <select value={canonStatus} disabled={busy} onChange={(e) => setCanonStatus(e.target.value as 'draft' | 'approved')}>
+              <option value="draft">draft</option>
+              <option value="approved">approved</option>
             </select>
           </label>
           <div>
@@ -372,7 +386,8 @@ export function DialoguePanel({
               }}
               onClick={() => load(d)}
             >
-              {d.name}
+              {d.name}{' '}
+              <span style={{ color: 'var(--muted)' }}>{d.canonStatus || 'draft'}</span>
             </li>
           ))}
           {dialogues.length === 0 && <li style={{ color: 'var(--muted)' }}>None yet</li>}
@@ -425,6 +440,17 @@ export function DialoguePanel({
           <label>
             Key
             <input value={key} onChange={(e) => setKey(e.target.value)} onBlur={() => persist()} disabled={busy} />
+          </label>
+          <label>
+            Canon
+            <select
+              value={selected.canonStatus === 'approved' ? 'approved' : 'draft'}
+              disabled={busy}
+              onChange={(e) => persist(nodes, { canonStatus: e.target.value as 'draft' | 'approved' })}
+            >
+              <option value="draft">draft</option>
+              <option value="approved">approved</option>
+            </select>
           </label>
           <label>
             Start node

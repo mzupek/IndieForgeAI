@@ -55,6 +55,7 @@ function inputFromOptions(options: Record<string, unknown>): NpcInput {
   }
   if (options.dialogue !== undefined) input.defaultDialogueId = String(options.dialogue)
   if (options.notes !== undefined) input.notes = String(options.notes)
+  if (options.canon !== undefined) input.canonStatus = String(options.canon)
   return input
 }
 
@@ -73,6 +74,7 @@ function addWriteFlags(cmd: Command, required: boolean): Command {
     .option('--placements <json>', 'JSON array of { regionId, anchorId, condition?, interactTriggerId? }')
     .option('--dialogue <id>', 'Default dialogue uuid or @key (empty to clear on update)')
     .option('--notes <text>', 'Notes')
+    .option('--canon <status>', 'draft | approved')
     .option('--dry-run', 'Validate without writing')
 }
 
@@ -83,10 +85,16 @@ export function registerNpcCommands(program: Command): void {
     .command('list')
     .description('List NPCs in a game')
     .requiredOption('--game <id>', 'Game ID')
+    .option('--canon <status>', 'Filter draft | approved')
     .action(async (options, c) => {
       const opts = { ...program.opts(), ...collectOpts(c, options) }
       try {
-        const npcs = await listNpcs(opts.game!, dir(opts))
+        const npcs = (await listNpcs(opts.game!, dir(opts))).filter((n) => {
+          const wanted = String(options.canon || '').trim()
+          if (!wanted) return true
+          const status = n.canonStatus === 'approved' ? 'approved' : 'draft'
+          return status === wanted
+        })
         printOrJson({ npcs }, opts, () => {
           console.log('\nNPCs:')
           if (npcs.length === 0) console.log('  (none)')

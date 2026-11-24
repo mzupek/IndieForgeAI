@@ -514,12 +514,14 @@ export function registerWorldContentCommands(program: Command): void {
     .requiredOption('--game <id>', 'Game ID')
     .requiredOption('--out <dir>', 'Output directory (writes content.json)')
     .option('--dry-run', 'Print JSON without writing the file')
+    .option('--canon <status>', 'Filter story entities: draft | approved')
     .action(async (options, cmd) => {
       const opts = { ...program.opts(), ...collectOpts(cmd, options) }
       try {
         const exported = await exportContent(opts.game!, String(options.out), {
           dataDirOverride: dir(opts),
-          dryRun: Boolean(opts.dryRun)
+          dryRun: Boolean(opts.dryRun),
+          canon: options.canon
         })
         printOrJson(exported, opts, () => {
           if (opts.dryRun) {

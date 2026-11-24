@@ -10,7 +10,8 @@ import type {
   DialogueNode,
   Effect,
   Npc,
-  Pose
+  Pose,
+  RevealToken
 } from '../types/assetPipeline'
 import { assertRecordKey, RECORD_KEY_PATTERN } from '../worldContent/keys'
 import { errorIssue, formatInUseError, warningIssue, type ContentIssue, type NamedUser } from '../worldContent/issues'
@@ -26,6 +27,7 @@ import {
 } from './conditions'
 import { effectivePoseSlots } from '../gameSettings/poseSlots'
 import { parseFlagAssignments } from './simulate'
+import { applyGrantRevealToken } from './revealTokens'
 
 const NODE_ID_PATTERN = RECORD_KEY_PATTERN
 const HERO = 'hero'
@@ -303,6 +305,7 @@ export interface DialoguePlayResult {
   endReason: string
   flags: { id: string; key?: string; name: string; value: boolean | number }[]
   appliedEffects: string[]
+  grantedRevealTokens: { id: string; key?: string; title: string }[]
 }
 
 function speakerName(pipeline: AssetPipelineProject, gameId: string, speaker: string): string {
@@ -323,7 +326,13 @@ export function visibleChoices(node: DialogueNode, ctx: EvalContext): DialogueCh
   return (node.choices || []).filter((c) => evaluateCondition(c.condition, ctx))
 }
 
-function applyEffectFlags(effects: Effect[] | undefined, flags: Map<string, boolean | number>): void {
+function applyEffectFlags(
+  pipeline: AssetPipelineProject,
+  gameId: string,
+  effects: Effect[] | undefined,
+  flags: Map<string, boolean | number>,
+  granted: RevealToken[]
+): void {
   for (const effect of effects || []) {
     if ('setFlag' in effect) flags.set(effect.setFlag.flagId, effect.setFlag.value)
     else if ('incFlag' in effect) {
@@ -334,6 +343,9 @@ function applyEffectFlags(effects: Effect[] | undefined, flags: Map<string, bool
       const cur = flags.get(effect.clearFlag.flagId)
       flags.set(effect.clearFlag.flagId, typeof cur === 'number' ? 0 : false)
     }
+  }
+  for (const token of applyGrantRevealToken(pipeline, gameId, effects, flags)) {
+    if (!granted.some((g) => g.id === token.id)) granted.push(token)
   }
 }
 
@@ -349,6 +361,7 @@ export function playDialogue(
   const choiceQueue = [...(options?.choices || [])]
   const steps: DialoguePlayStep[] = []
   const appliedEffects: string[] = []
+  const granted: RevealToken[] = []
   const seen = new Set<string>()
   const startNodeId = resolveDialogueStart(dialogue, ctx)
   let current = startNodeId
@@ -367,7 +380,7 @@ export function playDialogue(
       endReason = `missing node '${current}'`
       break
     }
-    applyEffectFlags(node.effects, values)
+    applyEffectFlags(pipeline, dialogue.gameId, node.effects, values, granted)
     if (node.effects?.length) appliedEffects.push(`${node.id}: node`)
     const step: DialoguePlayStep = {
       nodeId: node.id,
@@ -393,7 +406,7 @@ export function playDialogue(
         break
       }
       const chosen = choices[index - 1]!
-      applyEffectFlags(chosen.effects, values)
+      applyEffectFlags(pipeline, dialogue.gameId, chosen.effects, values, granted)
       if (chosen.effects?.length) appliedEffects.push(`${node.id}: choice ${index}`)
       step.choiceText = chosen.text
       step.effects = [...(node.effects || []), ...(chosen.effects || [])]
@@ -418,6 +431,7 @@ export function playDialogue(
     ended,
     endReason,
     flags: defs.map((f) => ({ id: f.id, key: f.key, name: f.name, value: values.get(f.id) ?? f.default })),
-    appliedEffects
+    appliedEffects,
+    grantedRevealTokens: granted.map((t) => ({ id: t.id, key: t.key, title: t.title }))
   }
 }

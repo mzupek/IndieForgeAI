@@ -47,7 +47,8 @@ const EFFECT_KEYS = [
   'startDialogue',
   'playScene',
   'moveToRegion',
-  'returnToWorldMap'
+  'returnToWorldMap',
+  'grantRevealToken'
 ] as const
 
 export interface EvalContext {
@@ -265,6 +266,15 @@ export function parseEffect(raw: unknown, path: string, issues: ContentIssue[]):
     }
     return { playScene: { sceneId } }
   }
+  if (kind === 'grantRevealToken') {
+    const inner = asRecord(obj.grantRevealToken)
+    const tokenId = String(inner?.tokenId ?? '').trim()
+    if (!tokenId) {
+      issues.push(errorIssue(`${path}.grantRevealToken`, 'grantRevealToken must be { tokenId }'))
+      return undefined
+    }
+    return { grantRevealToken: { tokenId } }
+  }
   const inner = asRecord(obj.moveToRegion)
   const regionId = String(inner?.regionId ?? '').trim()
   if (!regionId) {
@@ -443,6 +453,18 @@ function validateEffect(
     }
     return issues
   }
+  if ('grantRevealToken' in effect) {
+    const tokens = (pipeline.revealTokens || []).filter((t) => t.gameId === gameId)
+    const raw = effect.grantRevealToken.tokenId
+    const found =
+      tokens.find((t) => t.id === raw) ||
+      tokens.find((t) => t.key === raw.replace(/^@/, '')) ||
+      tokens.find((t) => t.title === raw)
+    if (!found) {
+      issues.push(errorIssue(`${path}.grantRevealToken.tokenId`, `Reveal token '${raw}' was not found`))
+    }
+    return issues
+  }
   return issues
 }
 
@@ -504,6 +526,11 @@ export function summarizeEffect(pipeline: AssetPipelineProject, gameId: string, 
     const region = (pipeline.regions || []).find((r) => r.id === effect.moveToRegion.regionId)
     const anchor = effect.moveToRegion.anchorId ? ` @ ${effect.moveToRegion.anchorId}` : ''
     return `move to ${region?.name || effect.moveToRegion.regionId}${anchor}`
+  }
+  if ('grantRevealToken' in effect) {
+    const token = (pipeline.revealTokens || []).find((t) => t.id === effect.grantRevealToken.tokenId)
+    const label = pipeline.games.find((g) => g.id === gameId)?.settings?.revealTokenLabel || 'Reveal token'
+    return `grant ${label.toLowerCase()} ${token?.title || effect.grantRevealToken.tokenId}`
   }
   return 'return to world map'
 }
@@ -593,11 +620,22 @@ export function collectConditionFlagIds(condition: Condition | undefined, into: 
   for (const leaf of leaves) into.add(leaf.flagId)
 }
 
-export function collectEffectFlagWrites(effects: Effect[] | undefined, into: Set<string>): void {
+export function collectEffectFlagWrites(
+  effects: Effect[] | undefined,
+  into: Set<string>,
+  pipeline?: AssetPipelineProject
+): void {
   for (const effect of effects || []) {
     if ('setFlag' in effect) into.add(effect.setFlag.flagId)
     else if ('incFlag' in effect) into.add(effect.incFlag.flagId)
     else if ('clearFlag' in effect) into.add(effect.clearFlag.flagId)
+    else if ('grantRevealToken' in effect && pipeline) {
+      const raw = effect.grantRevealToken.tokenId
+      const token = (pipeline.revealTokens || []).find(
+        (t) => t.id === raw || t.key === raw.replace(/^@/, '') || t.title === raw
+      )
+      if (token?.flagId) into.add(token.flagId)
+    }
   }
 }
 
@@ -616,7 +654,7 @@ export function collectConditionUsers(
   }
   const writes = (effects: Effect[] | undefined) => {
     const ids = new Set<string>()
-    collectEffectFlagWrites(effects, ids)
+    collectEffectFlagWrites(effects, ids, pipeline)
     return ids.has(flagId)
   }
   for (const t of pipeline.triggers || []) {
@@ -642,6 +680,14 @@ export function collectConditionUsers(
       for (const choice of node.choices || []) {
         if (reads(choice.condition) || writes(choice.effects)) add(d.id, d.name, 'dialogue')
       }
+    }
+  }
+  for (const token of pipeline.revealTokens || []) {
+    if (token.flagId === flagId || reads(token.unlockedBy)) add(token.id, token.title, 'revealToken')
+  }
+  for (const circle of pipeline.storyCircles || []) {
+    for (const step of circle.steps || []) {
+      if (step.flagId === flagId) add(circle.id, circle.name, 'storyCircle')
     }
   }
   return users
@@ -676,7 +722,10 @@ export function mapCondition(
 
 export function mapEffects(
   effects: Effect[] | undefined,
-  mapId: (kind: 'flag' | 'stage' | 'encounter' | 'region' | 'scene' | 'dialogue', id: string) => string | undefined
+  mapId: (
+    kind: 'flag' | 'stage' | 'encounter' | 'region' | 'scene' | 'dialogue' | 'revealToken',
+    id: string
+  ) => string | undefined
 ): Effect[] {
   const out: Effect[] = []
   for (const effect of effects || []) {
@@ -711,6 +760,12 @@ export function mapEffects(
           regionId: mapId('region', effect.moveToRegion.regionId) || effect.moveToRegion.regionId
         }
       })
+    } else if ('grantRevealToken' in effect) {
+      out.push({
+        grantRevealToken: {
+          tokenId: mapId('revealToken', effect.grantRevealToken.tokenId) || effect.grantRevealToken.tokenId
+        }
+      })
     } else {
       out.push(effect)
     }
@@ -721,7 +776,7 @@ export function mapEffects(
 function resolveBoundId(
   pipeline: AssetPipelineProject,
   gameId: string,
-  kind: 'flag' | 'stage' | 'encounter' | 'region' | 'scene' | 'dialogue',
+  kind: 'flag' | 'stage' | 'encounter' | 'region' | 'scene' | 'dialogue' | 'revealToken',
   id: string
 ): string | undefined {
   if (kind === 'flag') return resolveFlagRef(pipeline, gameId, id).id
@@ -729,6 +784,7 @@ function resolveBoundId(
   if (kind === 'encounter') return findRecord(pipeline.encounters || [], id, gameId)?.id
   if (kind === 'region') return findRecord(pipeline.regions || [], id, gameId)?.id
   if (kind === 'scene') return findRecord(pipeline.scenes || [], id, gameId)?.id
+  if (kind === 'revealToken') return findRecord(pipeline.revealTokens || [], id, gameId)?.id
   return id
 }
 

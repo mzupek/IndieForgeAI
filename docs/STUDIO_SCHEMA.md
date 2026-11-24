@@ -154,7 +154,17 @@ Optional top-level `npcs` and `dialogues` arrays, filled in memory when missing.
 - Deleting an NPC or dialogue that is in use is refused (message names the users).
 - `content apply` / `content export` include `npcs` and `dialogues`. `@key` aliases work. **`contentSchemaVersion` stays 1**. Export **manifest v2 is unchanged**.
 
-## Out of 1a / 1b / 1c / 1d / 2a / 2b / 2c / 2d / Step 3 / Step 4
+## Story canon (same schema v2 — no bump)
+
+Optional top-level `storyCircles` and `revealTokens` arrays, plus optional `Character.storyProfile`, optional `canonStatus` on profiles / circles / tokens / NPCs / dialogues, and optional `GameSettings.revealTokenLabel`. Filled in memory when missing. No migrate. No currency / XP / loot.
+
+- **CharacterStoryProfile:** summary, bio, motivation, want, need, arc, voiceNotes, relationships[] `{ characterId, relation }`, faction, canonStatus.
+- **StoryCircle:** scope `game` | `world` | `stage` + refId, surfaceGoal / hiddenGoal, 8 Harmon steps (You…Change) with optional scene/dialogue/encounter/flag links and nested `advancesCircleId` / `advancesStep`. Stage Step 6 (Take) must link an encounter in that stage (warning while draft, error when approved).
+- **RevealToken:** key, title, text, optional media, unlockedBy, order, chapter, auto bool flag `revealed_<key>`. Effect `grantRevealToken`. Per-game display label is data (`revealTokenLabel`).
+- Built-in template `adventure-lens` is JSON-shaped data copied by `forge game create --template`.
+- `content apply` / `content export` include `characters`, `storyCircles`, `revealTokens`. **`contentSchemaVersion` stays 1**.
+
+## Out of 1a / 1b / 1c / 1d / 2a / 2b / 2c / 2d / Step 3 / Step 4 / Story canon
 
 - A4 portable export package
 - `seedDefaultGames` and the Neon Recall Game Definition markdown special case (flagged only)

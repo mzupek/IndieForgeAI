@@ -17,6 +17,7 @@ type EffectKind =
   | 'playScene'
   | 'moveToRegion'
   | 'returnToWorldMap'
+  | 'grantRevealToken'
 
 function condKind(c: Condition | undefined): CondKind {
   if (!c) return 'none'
@@ -47,6 +48,7 @@ function effectKind(e: Effect): EffectKind {
   if ('startDialogue' in e) return 'startDialogue'
   if ('playScene' in e) return 'playScene'
   if ('moveToRegion' in e) return 'moveToRegion'
+  if ('grantRevealToken' in e) return 'grantRevealToken'
   return 'returnToWorldMap'
 }
 
@@ -59,6 +61,7 @@ function emptyEffect(kind: EffectKind): Effect {
   if (kind === 'startDialogue') return { startDialogue: { dialogueId: '' } }
   if (kind === 'playScene') return { playScene: { sceneId: '' } }
   if (kind === 'moveToRegion') return { moveToRegion: { regionId: '' } }
+  if (kind === 'grantRevealToken') return { grantRevealToken: { tokenId: '' } }
   return { returnToWorldMap: true }
 }
 
@@ -288,6 +291,7 @@ export function EffectList({
   const encounters = (pipeline.encounters || []).filter((e) => e.gameId === gameId)
   const regions = (pipeline.regions || []).filter((r) => r.gameId === gameId)
   const scenes = (pipeline.scenes || []).filter((s) => s.gameId === gameId)
+  const tokens = (pipeline.revealTokens || []).filter((t) => t.gameId === gameId)
   const summary = summarizeEffects(pipeline, gameId, value)
 
   return (
@@ -316,6 +320,7 @@ export function EffectList({
                 <option value="playScene">playScene</option>
                 <option value="moveToRegion">moveToRegion</option>
                 <option value="returnToWorldMap">returnToWorldMap</option>
+                <option value="grantRevealToken">grantRevealToken</option>
               </select>
               <button
                 type="button"
@@ -453,6 +458,25 @@ export function EffectList({
                 {scenes.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.name}
+                  </option>
+                ))}
+              </select>
+            )}
+            {'grantRevealToken' in effect && (
+              <select
+                value={effect.grantRevealToken.tokenId}
+                disabled={disabled}
+                onChange={(e) => {
+                  const copy = value.slice()
+                  copy[i] = { grantRevealToken: { tokenId: e.target.value } }
+                  onChange(copy)
+                }}
+              >
+                <option value="">Select token</option>
+                {tokens.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.title}
+                    {t.key ? ` @${t.key}` : ''}
                   </option>
                 ))}
               </select>
